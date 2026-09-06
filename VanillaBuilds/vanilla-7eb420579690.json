@@ -1,0 +1,19 @@
+{
+  "SchemaVersion": 1,
+  "Label": "Vanilla client observed 2026-09-06; gameplay fields unverified",
+  "Sha256": "7eb420579690bd2f5c81b42fa69888cb3d144486d3c275a19073f5216698b3ef",
+  "Machine": 332,
+  "ImageSize": 15839232,
+  "Evidence": "Executable fingerprint, 32-bit architecture, module metadata and read-only executable-header access were observed locally on 2026-09-06. HP/SP, target, combat, position, readiness and all other gameplay fields have NOT been verified. This profile identifies the executable only and does not enable automation.",
+  "MemoryMap": {
+    "SchemaVersion": 1,
+    "ProcessName": "Vanilla MMO.exe",
+    "Evidence": "No gameplay addresses are published without controlled semantic verification.",
+    "Fields": {}
+  },
+  "VerifiedFields": [],
+  "ActionStates": [],
+  "NoTargetValues": [],
+  "MaximumVital": 1000000000,
+  "MaximumCoordinate": 65535
+}

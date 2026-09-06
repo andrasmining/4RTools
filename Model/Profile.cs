@@ -17,35 +17,53 @@ namespace _4RTools.Model
         {
             try
             {
-                string json = File.ReadAllText(AppConfig.ProfileFolder + profileName + ".json");
-                dynamic rawObject = JsonConvert.DeserializeObject(json);
-
-                if ((rawObject != null))
+                string path = AppConfig.ProfileFolder + profileName + ".json";
+                if (new FileInfo(path).Length > 1024 * 1024) throw new InvalidDataException("Profile exceeds 1 MiB.");
+                JObject rawObject;
+                using (var reader = new JsonTextReader(new StringReader(File.ReadAllText(path))) { MaxDepth = 32 })
                 {
-                    // Missing sections always get fresh defaults, including after a profile switch.
-                    VanillaDiagnosticsSettings diagnostics = VanillaDiagnosticsSettings.FromToken(((JObject)rawObject)["VanillaDiagnostics"]);
-                    profile.Name = profileName;
-                    profile.UserPreferences = JsonConvert.DeserializeObject<UserPreferences>(Profile.GetByAction(rawObject, profile.UserPreferences));
-                    profile.AHK = JsonConvert.DeserializeObject<AHK>(Profile.GetByAction(rawObject, profile.AHK));
-                    profile.Autopot = JsonConvert.DeserializeObject<Autopot>(Profile.GetByAction(rawObject, profile.Autopot));
-                    profile.AutopotYgg = JsonConvert.DeserializeObject<Autopot>(Profile.GetByAction(rawObject, profile.AutopotYgg));
-                    profile.StatusRecovery = JsonConvert.DeserializeObject<StatusRecovery>(Profile.GetByAction(rawObject, profile.StatusRecovery));
-                    profile.AutoRefreshSpammer1 = JsonConvert.DeserializeObject<AutoRefreshSpammer>(Profile.GetByAction(rawObject, profile.AutoRefreshSpammer1));
-                    profile.AutoRefreshSpammer2 = JsonConvert.DeserializeObject<AutoRefreshSpammer>(Profile.GetByAction(rawObject, profile.AutoRefreshSpammer2));
-                    profile.AutoRefreshSpammer3 = JsonConvert.DeserializeObject<AutoRefreshSpammer>(Profile.GetByAction(rawObject, profile.AutoRefreshSpammer3));
-                    profile.Autobuff = JsonConvert.DeserializeObject<AutoBuff>(Profile.GetByAction(rawObject, profile.Autobuff));
-                    profile.SongMacro = JsonConvert.DeserializeObject<Macro>(Profile.GetByAction(rawObject, profile.SongMacro));
-                    profile.AtkDefMode = JsonConvert.DeserializeObject<ATKDEFMode>(Profile.GetByAction(rawObject, profile.AtkDefMode));
-                    profile.MacroSwitch = JsonConvert.DeserializeObject<Macro>(Profile.GetByAction(rawObject, profile.MacroSwitch));
-                    profile.DebuffsRecovery = JsonConvert.DeserializeObject<DebuffsRecovery>(Profile.GetByAction(rawObject, profile.DebuffsRecovery));
-                    profile.VanillaDiagnostics = diagnostics;
+                    rawObject = JObject.Load(reader, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
+                    if (reader.Read()) throw new InvalidDataException("Unexpected content after the profile.");
                 }
+
+                // Build an isolated replacement. A missing section cannot inherit another
+                // character's settings, and a late parse failure cannot partially switch profiles.
+                var loaded = new Profile(profileName);
+                loaded.UserPreferences = ReadSection(rawObject, loaded.UserPreferences, nameof(Profile.UserPreferences));
+                loaded.AHK = ReadSection(rawObject, loaded.AHK, nameof(Profile.AHK));
+                loaded.Autopot = ReadSection(rawObject, loaded.Autopot, nameof(Profile.Autopot));
+                loaded.AutopotYgg = ReadSection(rawObject, loaded.AutopotYgg, nameof(Profile.AutopotYgg));
+                loaded.StatusRecovery = ReadSection(rawObject, loaded.StatusRecovery, nameof(Profile.StatusRecovery));
+                loaded.AutoRefreshSpammer1 = ReadSection(rawObject, loaded.AutoRefreshSpammer1, nameof(Profile.AutoRefreshSpammer1));
+                loaded.AutoRefreshSpammer2 = ReadSection(rawObject, loaded.AutoRefreshSpammer2, nameof(Profile.AutoRefreshSpammer2));
+                loaded.AutoRefreshSpammer3 = ReadSection(rawObject, loaded.AutoRefreshSpammer3, nameof(Profile.AutoRefreshSpammer3));
+                loaded.Autobuff = ReadSection(rawObject, loaded.Autobuff, nameof(Profile.Autobuff));
+                loaded.SongMacro = ReadSection(rawObject, loaded.SongMacro, nameof(Profile.SongMacro));
+                loaded.AtkDefMode = ReadSection(rawObject, loaded.AtkDefMode, nameof(Profile.AtkDefMode));
+                loaded.MacroSwitch = ReadSection(rawObject, loaded.MacroSwitch, nameof(Profile.MacroSwitch));
+                loaded.DebuffsRecovery = ReadSection(rawObject, loaded.DebuffsRecovery, nameof(Profile.DebuffsRecovery));
+                loaded.VanillaDiagnostics = VanillaDiagnosticsSettings.FromToken(rawObject["VanillaDiagnostics"]);
+                System.Windows.Forms.Keys toggleKey;
+                if (!Enum.TryParse(loaded.UserPreferences.toggleStateKey, out toggleKey) || !Enum.IsDefined(typeof(System.Windows.Forms.Keys), toggleKey) || toggleKey == System.Windows.Forms.Keys.None)
+                    throw new InvalidDataException("The profile's ON/OFF hotkey is invalid.");
+                profile = loaded;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[Profile] Error Message: {ex.Message}");
-                throw new Exception("Houve um problema ao carregar o perfil. Delete a pasta Profiles e tente novamente.");
+                throw new InvalidDataException("Could not load profile '" + profileName + "'. The previous profile and all saved files were preserved. " + ex.Message, ex);
             }
+        }
+
+        private static T ReadSection<T>(JObject rawObject, T defaults, string propertyName) where T : class, Action
+        {
+            // Initial stock profiles contain object properties; later stock saves use action
+            // names and JSON strings. Preserve both forms, preferring the explicit action key.
+            JToken token = rawObject[defaults.GetActionName()] ?? rawObject[propertyName];
+            if (token == null) return defaults;
+            string json = token.Type == JTokenType.String ? token.Value<string>() : token.ToString(Formatting.None);
+            T result = JsonConvert.DeserializeObject<T>(json, new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.None, MaxDepth = 32 });
+            if (result == null) throw new InvalidDataException(propertyName + " cannot be null.");
+            return result;
         }
 
         public static void Create(string profileName)

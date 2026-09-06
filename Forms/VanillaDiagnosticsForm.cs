@@ -26,6 +26,10 @@ namespace _4RTools.Forms
         private readonly TextBox events = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
         private IStateSource source;
         private VanillaClientState latest;
+        private VanillaExecutableIdentity executable;
+        private VanillaStateAdapter adapter;
+        private string executablePath;
+        private string buildProfile;
 
         public VanillaDiagnosticsForm(Subject subject = null)
         {
@@ -47,6 +51,12 @@ namespace _4RTools.Forms
             AddButton(controls, "Connect read-only", Connect);
             AddButton(controls, "Offline demo", StartDemo);
             AddButton(controls, "Disconnect", () => Stop("Disconnected; observations cleared."));
+            AddButton(controls, "Pause / resume", () =>
+            {
+                if (source == null || source.IsStopped) return;
+                if (timer.Enabled) { timer.Stop(); connection.Text = "PAUSED — displayed observations are stale; no automation is attached."; Log("Polling paused."); }
+                else { BeginPolling(); Log("Polling resumed."); }
+            });
             controls.Controls.Add(new Label { Text = "Poll (ms)", AutoSize = true, Padding = new Padding(0, 6, 0, 0) });
             controls.Controls.Add(interval);
             interval.ValueChanged += (s, e) => timer.Interval = (int)interval.Value;
@@ -55,11 +65,11 @@ namespace _4RTools.Forms
             layout.Controls.Add(identity, 0, 2);
             var tabs = new TabControl { Dock = DockStyle.Fill };
             var stateTab = new TabPage("Observed state");
-            foreach (string name in new[] { "Field", "Value", "Address", "Last observed (UTC)", "Last changed (UTC)", "Evidence / error" })
+            foreach (string name in new[] { "Field", "Value", "Validation", "Address", "Last observed (UTC)", "Last changed (UTC)", "Evidence / error" })
                 values.Columns.Add(name, name);
             stateTab.Controls.Add(values);
             tabs.TabPages.Add(stateTab);
-            var mapTab = new TabPage("Address configuration");
+            var mapTab = new TabPage("Advanced diagnostics");
             var mapLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 };
             mapLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             mapLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -80,6 +90,12 @@ namespace _4RTools.Forms
             logButtons.Controls.Add(note);
             AddButton(logButtons, "Mark controlled action", () => { Log("Action note: " + note.Text); note.Clear(); });
             AddButton(logButtons, "Export current snapshot…", ExportSnapshot);
+            AddButton(logButtons, "Export log…", () =>
+            {
+                using (var dialog = new SaveFileDialog { Filter = "Text log (*.txt)|*.txt", FileName = "vanilla-diagnostics.txt" })
+                    if (dialog.ShowDialog(this) == DialogResult.OK) File.WriteAllText(dialog.FileName, events.Text);
+            });
+            AddButton(logButtons, "Clear log", () => events.Clear());
             logLayout.Controls.Add(logButtons, 0, 0);
             logLayout.Controls.Add(events, 0, 1);
             layout.Controls.Add(logLayout, 0, 4);
@@ -123,7 +139,19 @@ namespace _4RTools.Forms
             Stop("Connecting read-only.");
             var choice = processes.SelectedItem as ProcessChoice;
             if (choice == null) throw new InvalidOperationException("No Vanilla MMO process selected. Start the game and refresh the list.");
-            source = new MemoryStateSource(choice.Id, VanillaMemoryMap.Parse(mapEditor.Text));
+            var configured = VanillaMemoryMap.Parse(mapEditor.Text);
+            var memory = new ReadOnlyProcessMemory(choice.Id);
+            try
+            {
+                executablePath = memory.ExecutablePath;
+                executable = VanillaExecutableIdentity.Read(executablePath);
+                var profile = VanillaBuildProfile.Find(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds"), executable, Log);
+                buildProfile = profile?.Label ?? "Unknown build";
+                if (configured.Fields.Count == 0 && profile != null) configured = profile.MemoryMap;
+                adapter = new VanillaStateAdapter(profile, executable);
+                source = new MemoryStateSource(memory, configured);
+            }
+            catch { memory.Dispose(); throw; }
             BeginPolling();
         }
 
@@ -140,14 +168,21 @@ namespace _4RTools.Forms
             try
             {
                 latest = source.Poll(DateTimeOffset.UtcNow);
-                connection.Text = (latest.IsDemo ? "OFFLINE DEMO — simulated values. " : "LIVE READ-ONLY — unverified observations. ") + source.Status;
+                latest.ExecutablePath = executablePath;
+                latest.Fingerprint = executable?.Sha256;
+                latest.BuildProfile = buildProfile;
+                adapter?.Observe(latest, TimeSpan.Zero);
+                connection.Text = (latest.IsDemo ? "OFFLINE DEMO — simulated values. " : "LIVE READ-ONLY — see each field's validation. ") + source.Status;
                 identity.Text = string.Format(CultureInfo.InvariantCulture, "{0} | PID: {1} | module: {2} | target pointer bytes: {3} | profile: {4}",
                     latest.ProcessName, latest.ProcessId, latest.ModuleBaseAddress.HasValue ? "0x" + latest.ModuleBaseAddress.Value.ToString("X8") : "—", latest.TargetPointerSize, ProfileSingleton.GetCurrent().Name);
+                if (executable != null) identity.Text += " | SHA256: " + executable.Sha256 + " | " + executablePath;
+                if (buildProfile != null) identity.Text += " | Build: " + buildProfile;
                 values.Rows.Clear();
                 foreach (var field in latest.Fields)
                 {
                     StateValue observed = field.Value;
                     values.Rows.Add(field.Key, observed.IsAvailable ? FormatValue(observed.UntypedValue) : "Unavailable",
+                        observed.Validation,
                         observed.Address.HasValue ? "0x" + observed.Address.Value.ToString("X", CultureInfo.InvariantCulture) : "—",
                         Time(observed.LastObservedAtUtc), Time(observed.LastChangedAtUtc), observed.Error ?? observed.Evidence);
                 }
@@ -178,6 +213,10 @@ namespace _4RTools.Forms
             source?.Dispose();
             source = null;
             latest = null;
+            executable = null;
+            adapter = null;
+            executablePath = null;
+            buildProfile = null;
             values.Rows.Clear();
             identity.Text = "No current observation.";
             connection.Text = status;
@@ -216,7 +255,7 @@ namespace _4RTools.Forms
             using (var dialog = new SaveFileDialog { Filter = "JSON (*.json)|*.json", FileName = "vanilla-observation.json" })
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
-                File.WriteAllText(dialog.FileName, JsonConvert.SerializeObject(new { Snapshot = latest, Notes = events.Text }, Formatting.Indented));
+                File.WriteAllText(dialog.FileName, JsonConvert.SerializeObject(new { Executable = executable, ExecutablePath = executablePath, Paused = !timer.Enabled, Snapshot = latest, Notes = events.Text }, Formatting.Indented));
             }
         }
 

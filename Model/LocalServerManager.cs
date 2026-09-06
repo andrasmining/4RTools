@@ -11,10 +11,12 @@ namespace _4RTools.Model
     internal class LocalServerManager
     {
 
-        private static readonly string localServerName = "supported_servers.json";
+        private static readonly string localServerName = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "supported_servers.json");
 
         public static void AddServer(string hpAddress, string nameAddress, string processName)
         {
+            if (Client.IsVanillaProcessName(processName))
+                throw new ArgumentException("Use the Vanilla Companion to connect Vanilla MMO through its read-only state layer.");
             if (!isValid(hpAddress))
             {
                 throw new ArgumentException("HP Address is Invalid. Please type a valid Hex value.");
@@ -78,7 +80,7 @@ namespace _4RTools.Model
 
             try
             {
-                return JsonConvert.DeserializeObject<List<ClientDTO>>(localServers);
+                return JsonConvert.DeserializeObject<List<ClientDTO>>(localServers)?.Where(client => client != null).ToList() ?? new List<ClientDTO>();
             }catch
             {
                 return new List<ClientDTO>();

@@ -4,6 +4,7 @@ using System.Linq;
 using Newtonsoft.Json;
 using _4RTools.Model;
 using _4RTools.Model.Vanilla;
+using _4RTools.Model.Vanilla.Automation;
 using _4RTools.Utils;
 
 namespace _4RTools
@@ -22,6 +23,11 @@ namespace _4RTools
                 return;
             }
             // This developer entry point creates no stock workers or updater.
+            if (args.Length > 0 && args[0] == "--vanilla-session-check")
+            {
+                CheckSession(args);
+                return;
+            }
             if (args.Length > 0 && args[0] == "--vanilla-snapshot")
             {
                 CaptureSnapshot(args);
@@ -29,6 +35,11 @@ namespace _4RTools
             }
             System.Windows.Forms.Application.EnableVisualStyles();
             System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
+            if (args.Length > 0 && args[0] == "--portable-smoke-test")
+            {
+                PortableSmokeTest(args);
+                return;
+            }
             if (args.Length > 0 && args[0] == "--vanilla-diagnostics")
             {
                 try
@@ -45,13 +56,101 @@ namespace _4RTools
                 }
                 return;
             }
-            // Application app = new Application();
-            // app.IsMdiContainer = true;
+            try
+            {
+                if (args.Contains("--stock-ui"))
+                {
+                    LoadStockClients();
+                    System.Windows.Forms.Application.Run(new Forms.Container());
+                    return;
+                }
+                using (var session = new VanillaAutomationSession(AppDomain.CurrentDomain.BaseDirectory))
+                {
+                    var app = new Forms.VanillaAutomationForm(session, () =>
+                    {
+                        session.SetEnabled(false);
+                        ProfileSingleton.Create("Default");
+                        new Forms.VanillaDiagnosticsForm().Show();
+                    });
+                    System.Windows.Forms.Application.Run(app);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Windows.Forms.MessageBox.Show(ex.Message, "4RTools Vanilla stopped");
+                Environment.ExitCode = 1;
+            }
+        }
 
-            //Forms.ClientUpdaterForm app = new Forms.ClientUpdaterForm();
-            //Forms.Container app = new Forms.Container();
-            Forms.AutoPatcher app = new Forms.AutoPatcher();
-            System.Windows.Forms.Application.Run(app);
+        internal static void OpenStockTools()
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = System.Windows.Forms.Application.ExecutablePath,
+                Arguments = "--stock-ui",
+                WorkingDirectory = Environment.CurrentDirectory,
+                UseShellExecute = true
+            });
+        }
+
+        private static void LoadStockClients()
+        {
+            var clients = LocalServerManager.GetLocalClients();
+            clients.AddRange(JsonConvert.DeserializeObject<System.Collections.Generic.List<ClientDTO>>(Resources._4RTools.ETCResource.supported_servers));
+            foreach (var client in clients)
+            {
+                // Vanilla always goes through the read-only, fingerprinted companion path.
+                if (Client.IsVanillaProcessName(client.name)) continue;
+                ClientListSingleton.AddClient(new Client(client));
+            }
+        }
+
+        private static void PortableSmokeTest(string[] args)
+        {
+            string output = null;
+            try
+            {
+                int outputIndex = Array.IndexOf(args, "--output");
+                if (outputIndex < 0 || outputIndex + 1 >= args.Length) throw new ArgumentException("Smoke test requires --output <new-json-path>.");
+                output = args[outputIndex + 1];
+                if (File.Exists(output)) throw new IOException("Smoke report already exists.");
+                using (var session = new VanillaAutomationSession(AppDomain.CurrentDomain.BaseDirectory))
+                using (var form = new Forms.VanillaAutomationForm(session))
+                {
+                    form.ShowInTaskbar = false;
+                    form.Opacity = 0;
+                    form.Show();
+                    System.Windows.Forms.Application.DoEvents();
+                    form.VerifyDisplayedSettings();
+                    session.Tick();
+                    session.Settings.Validate();
+                    if (session.IsEnabled || session.Snapshot != null || IntPtr.Size != 4)
+                        throw new InvalidOperationException("Unexpected startup automation, game attachment, or process architecture.");
+                    var stock = JsonConvert.DeserializeObject<System.Collections.Generic.List<ClientDTO>>(Resources._4RTools.ETCResource.supported_servers);
+                    if (stock == null || stock.Count == 0) throw new InvalidOperationException("Bundled stock resources missing.");
+                    int imageIndex = Array.IndexOf(args, "--screenshot");
+                    if (imageIndex >= 0 && imageIndex + 1 < args.Length)
+                        using (var bitmap = new System.Drawing.Bitmap(form.Width, form.Height))
+                        { form.DrawToBitmap(bitmap, form.ClientRectangle); bitmap.Save(args[imageIndex + 1]); }
+                    form.Close();
+                    File.WriteAllText(output, JsonConvert.SerializeObject(new
+                    {
+                        Success = true, Version = "0.1.0", PointerBytes = IntPtr.Size,
+                        ExecutableDirectory = AppDomain.CurrentDomain.BaseDirectory,
+                        WorkingDirectory = Environment.CurrentDirectory,
+                        ProfileRoundTrip = session.GetProfileNames().Count > 0,
+                        StockClientDefinitions = stock.Count,
+                        GameplayAttached = false, InputSent = false,
+                        Checked = "Embedded JSON dependency, resources, portable settings, UI construction/show/close and automation OFF"
+                    }, Formatting.Indented));
+                }
+            }
+            catch (Exception ex)
+            {
+                Environment.ExitCode = 1;
+                if (output != null && !File.Exists(output))
+                    File.WriteAllText(output, JsonConvert.SerializeObject(new { Success = false, Error = ex.ToString() }, Formatting.Indented));
+            }
         }
 
         private static void CaptureSnapshot(string[] args)
@@ -100,6 +199,33 @@ namespace _4RTools
                     catch (Exception writeError) { Console.Error.WriteLine(writeError); }
                 }
             }
+        }
+
+        private static void CheckSession(string[] args)
+        {
+            try
+            {
+                int pid, outputIndex = Array.IndexOf(args, "--output");
+                if (args.Length < 2 || !int.TryParse(args[1], out pid) || outputIndex < 0 || outputIndex + 1 >= args.Length)
+                    throw new ArgumentException("Use --vanilla-session-check <pid> --output <new-json-path>.");
+                string output = args[outputIndex + 1];
+                if (File.Exists(output)) throw new IOException("Output already exists.");
+                using (var session = new VanillaAutomationSession(AppDomain.CurrentDomain.BaseDirectory))
+                {
+                    // No input is possible, regardless of saved user preferences.
+                    session.ApplySettings(new VanillaAutomationSettings { DryRun = true });
+                    session.Connect(pid);
+                    if (session.Snapshot == null) throw new InvalidOperationException(session.Status);
+                    session.SetEnabled(true);
+                    File.WriteAllText(output, JsonConvert.SerializeObject(new
+                    {
+                        session.ExecutablePath, session.Fingerprint, session.BuildProfile,
+                        session.Status, session.IsEnabled, session.Snapshot,
+                        InputSent = false, DryRun = true
+                    }, Formatting.Indented));
+                }
+            }
+            catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
         }
 
         private static void Discover(string[] args)

@@ -3,7 +3,8 @@ param(
     [ValidateSet('Release', 'Debug')]
     [string[]] $Configuration = @('Release', 'Debug'),
     [string] $CacheRoot = (Join-Path $env:LOCALAPPDATA '4RTools-Engineering'),
-    [string] $MSBuildPath
+    [string] $MSBuildPath,
+    [switch] $VanillaRelease
 )
 
 Set-StrictMode -Version Latest
@@ -71,6 +72,7 @@ try {
             '/consoleloggerparameters:Summary;Verbosity=minimal',
             "/fileloggerparameters:LogFile=$buildLog;Verbosity=normal;Encoding=UTF-8"
         )
+        if ($VanillaRelease) { $buildArguments += '/p:VanillaRelease=true' }
         & $MSBuildPath @buildArguments
         if ($LASTEXITCODE -ne 0) { throw "$buildConfiguration build failed. See $buildLog." }
 
@@ -83,8 +85,16 @@ try {
         }
         Copy-Item -LiteralPath (Join-Path $repositoryRoot 'LICENSE') -Destination $testOutput -Force
         $testLog = Join-Path $logDirectory ("tests-$buildConfiguration.log")
-        & $testExecutable 2>&1 | Tee-Object -FilePath $testLog
-        if ($LASTEXITCODE -ne 0) { throw "$buildConfiguration tests failed. See $testLog." }
+        $testErrorPreference = $ErrorActionPreference
+        try {
+            # Windows PowerShell wraps native stderr in nonterminating error records.
+            # Negative tests may deliberately log an error; the runner's exit code is authoritative.
+            $ErrorActionPreference = 'Continue'
+            & $testExecutable 2>&1 | Tee-Object -FilePath $testLog
+            $testExitCode = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $testErrorPreference }
+        if ($testExitCode -ne 0) { throw "$buildConfiguration tests failed. See $testLog." }
     }
 }
 finally {

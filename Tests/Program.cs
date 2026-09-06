@@ -42,8 +42,22 @@ namespace Vanilla.Diagnostics.Tests
             Run("Polling configuration enforces bounded intervals", PollingBounds);
             Run("Demo source works without process memory", Demo);
             Run("Executable fingerprint is stable and rejects malformed images", DiscoveryTests.Run);
+            Run("Legacy memory access cannot attach to Vanilla", () =>
+            {
+                try { new _4RTools.Model.Client("Vanilla MMO.exe - 1"); }
+                catch (InvalidOperationException ex)
+                {
+                    if (ex.Message.Contains("legacy memory writer cannot attach")) return;
+                    throw;
+                }
+                throw new Exception("Vanilla reached the legacy attachment path.");
+            });
+            failed += AutomationTests.Run();
+            failed += BuildProfileTests.Run();
+            failed += ProfileStoreTests.Run();
+            failed += LegacyProfileTests.Run();
 
-            Console.WriteLine("{0} passed; {1} failed. All tests used offline data.", passed, failed);
+            Console.WriteLine("Core diagnostics: {0} passed. Total failures across all suites: {1}. All tests used offline data.", passed, failed);
             return failed == 0 ? 0 : 1;
         }
 

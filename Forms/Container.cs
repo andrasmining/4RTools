@@ -70,9 +70,14 @@ namespace _4RTools.Forms
 
         private void processCB_SelectedIndexChanged(object sender, EventArgs e)
         {
-            Client client = new Client(this.processCB.SelectedItem.ToString());
-            ClientSingleton.Instance(client);
-            subject.Notify(new Utils.Message(Utils.MessageCode.PROCESS_CHANGED, null));
+            if (this.processCB.SelectedItem == null) return;
+            try
+            {
+                Client client = new Client(this.processCB.SelectedItem.ToString());
+                ClientSingleton.Instance(client);
+                subject.Notify(new Utils.Message(Utils.MessageCode.PROCESS_CHANGED, null));
+            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Client selection stopped"); }
         }
 
         private void Container_Load(object sender, EventArgs e)

@@ -399,3 +399,6 @@ FodyWeavers.xsd
 
 # Local 4RTools profiles (including diagnostics settings)
 Profile/
+Profiles/
+Logs/
+dist/

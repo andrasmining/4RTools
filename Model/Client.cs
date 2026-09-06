@@ -110,8 +110,10 @@ namespace _4RTools.Model
 
         public Client(string processName)
         {
-            PMR = new Utils.ProcessMemoryReader();
             string rawProcessName = processName.Split(new string[] { ".exe - " }, StringSplitOptions.None)[0];
+            if (IsVanillaProcessName(rawProcessName))
+                throw new InvalidOperationException("Use the Vanilla Companion for Vanilla MMO; the legacy memory writer cannot attach to this client.");
+            PMR = new Utils.ProcessMemoryReader();
             int choosenPID = int.Parse(processName.Split(new string[] { ".exe - " }, StringSplitOptions.None)[1]);
 
             foreach (Process process in Process.GetProcessesByName(rawProcessName))
@@ -143,6 +145,12 @@ namespace _4RTools.Model
                        
                 }
             }
+        }
+
+        internal static bool IsVanillaProcessName(string name)
+        {
+            if (name != null && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name.Substring(0, name.Length - 4);
+            return string.Equals(name, "Vanilla MMO", StringComparison.OrdinalIgnoreCase);
         }
 
         private string ReadMemoryAsString(int address)

@@ -87,7 +87,8 @@ namespace _4RTools.Model.Vanilla
         public void Validate()
         {
             if (SchemaVersion != 1) throw new ArgumentException("Unsupported memory map SchemaVersion; expected 1.");
-            if (Fields == null || Fields.Count > 13) throw new ArgumentException("Fields must contain at most 13 entries.");
+            if (Fields == null || Fields.Count > Enum.GetValues(typeof(VanillaField)).Length)
+                throw new ArgumentException("Fields contains too many entries.");
             if (Fields.Count > 0 && string.IsNullOrWhiteSpace(ProcessName)) throw new ArgumentException("ProcessName is required for configured memory fields.");
             if (ProcessName != null && (ProcessName.Length > 260 || ProcessName.IndexOfAny(new[] { '/', '\\', ':' }) >= 0))
                 throw new ArgumentException("ProcessName must be an executable name without a path.");
@@ -120,7 +121,8 @@ namespace _4RTools.Model.Vanilla
                 case VanillaField.CharacterName: case VanillaField.Map: return encoding == VanillaValueEncoding.Utf8;
                 case VanillaField.X: case VanillaField.Y: return encoding == VanillaValueEncoding.Int32;
                 case VanillaField.CurrentTargetId: return encoding == VanillaValueEncoding.UInt32 || encoding == VanillaValueEncoding.UInt64;
-                case VanillaField.AutobattleEnabled: return encoding == VanillaValueEncoding.Boolean8;
+                case VanillaField.AutobattleEnabled: case VanillaField.ClientReady: case VanillaField.Loading:
+                    return encoding == VanillaValueEncoding.Boolean8;
                 case VanillaField.StatusEffects: return encoding == VanillaValueEncoding.UInt32Array;
                 default: return encoding == VanillaValueEncoding.UInt32;
             }
