@@ -218,6 +218,11 @@
     <Compile Include="Forms\AddServerForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="Forms\VanillaDiagnosticsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Model\Vanilla\*.cs" />
+    <Compile Include="Utils\ReadOnlyProcessMemory.cs" />
     <Compile Include="Forms\AddServerForm.Designer.cs">
       <DependentUpon>AddServerForm.cs</DependentUpon>
     </Compile>

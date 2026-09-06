@@ -38,6 +38,7 @@ namespace _4RTools.Forms
             SetATKDEFWindow();
             SetMacroSwitchWindow();
             SetServerWindow();
+            SetVanillaWindow();
 
             TrackerSingleton.Instance().SendEvent("desktop_login", "page_view", "desktop_container_load");
         }
@@ -199,6 +200,26 @@ namespace _4RTools.Forms
         }
 
         #region Frames
+
+        private VanillaDiagnosticsForm vanillaDiagnostics;
+
+        private void SetVanillaWindow()
+        {
+            var page = new TabPage("Vanilla Automation");
+            var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(12) };
+            panel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(500, 0), Text = "Local Vanilla extension: read-only diagnostics and offline demo. Smart Teleport and SP Recovery await verified runtime signals." });
+            var open = new Button { Text = "Open diagnostics", AutoSize = true };
+            open.Click += (sender, args) =>
+            {
+                if (vanillaDiagnostics == null || vanillaDiagnostics.IsDisposed)
+                    vanillaDiagnostics = new VanillaDiagnosticsForm(subject);
+                vanillaDiagnostics.Show(this);
+                vanillaDiagnostics.BringToFront();
+            };
+            panel.Controls.Add(open);
+            page.Controls.Add(panel);
+            atkDefMode.TabPages.Add(page);
+        }
 
         public void SetToggleApplicationStateWindow()
         {

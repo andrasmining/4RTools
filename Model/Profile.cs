@@ -4,6 +4,8 @@ using _4RTools.Utils;
 using _4RTools.Forms;
 using System.IO;
 using System;
+using Newtonsoft.Json.Linq;
+using _4RTools.Model.Vanilla;
 
 namespace _4RTools.Model
 {
@@ -20,6 +22,8 @@ namespace _4RTools.Model
 
                 if ((rawObject != null))
                 {
+                    // Missing sections always get fresh defaults, including after a profile switch.
+                    VanillaDiagnosticsSettings diagnostics = VanillaDiagnosticsSettings.FromToken(((JObject)rawObject)["VanillaDiagnostics"]);
                     profile.Name = profileName;
                     profile.UserPreferences = JsonConvert.DeserializeObject<UserPreferences>(Profile.GetByAction(rawObject, profile.UserPreferences));
                     profile.AHK = JsonConvert.DeserializeObject<AHK>(Profile.GetByAction(rawObject, profile.AHK));
@@ -34,6 +38,7 @@ namespace _4RTools.Model
                     profile.AtkDefMode = JsonConvert.DeserializeObject<ATKDEFMode>(Profile.GetByAction(rawObject, profile.AtkDefMode));
                     profile.MacroSwitch = JsonConvert.DeserializeObject<Macro>(Profile.GetByAction(rawObject, profile.MacroSwitch));
                     profile.DebuffsRecovery = JsonConvert.DeserializeObject<DebuffsRecovery>(Profile.GetByAction(rawObject, profile.DebuffsRecovery));
+                    profile.VanillaDiagnostics = diagnostics;
                 }
             }
             catch (Exception ex)
@@ -106,11 +111,22 @@ namespace _4RTools.Model
         {
             return profile;
         }
+
+        public static void SetVanillaDiagnostics(VanillaDiagnosticsSettings settings)
+        {
+            settings.Validate();
+            string path = AppConfig.ProfileFolder + profile.Name + ".json";
+            JObject json = JObject.Parse(File.ReadAllText(path));
+            json["VanillaDiagnostics"] = JObject.FromObject(settings);
+            File.WriteAllText(path, json.ToString(Formatting.Indented));
+            profile.VanillaDiagnostics = settings;
+        }
     }
 
     public class Profile
     {
         public string Name { get; set; }
+        public VanillaDiagnosticsSettings VanillaDiagnostics { get; set; } = new VanillaDiagnosticsSettings();
         public UserPreferences UserPreferences { get; set; }
         public AHK AHK { get; set; }
         public Autopot Autopot { get; set; }

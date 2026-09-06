@@ -396,3 +396,6 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Local 4RTools profiles (including diagnostics settings)
+Profile/
