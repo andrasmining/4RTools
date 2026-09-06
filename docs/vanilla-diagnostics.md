@@ -1,5 +1,20 @@
 # Vanilla diagnostics engineering record
 
+## Current companion validation
+
+The companion now includes the production rule engine, UI, portable profiles,
+exact build-profile matching and guarded ordinary window input. Release and
+Debug pass 88 offline test groups. See [release notes](../RELEASE-NOTES.md) for
+the final portable package, checksums and current limitations.
+
+The packaged EXE passed a relocated startup test and a separate production
+read-only session check against a restarted Vanilla process with the same
+fingerprint. The visible packaged application was also launched successfully.
+An external shell attempt to click its elevated Connect button through ordinary
+window messages failed with Win32 error 5 (access denied); that UI-control path
+was stopped. This was a message to the companion, not gameplay input or evidence
+of a Gepard rejection. No stronger access or security change was attempted.
+
 ## Continued runtime discovery
 
 On 2026-09-06 the current client executable was fingerprinted as SHA-256
@@ -24,16 +39,16 @@ as external comparison evidence. No capture/security workaround was attempted.
 Both configurations passed 25 offline test groups after this discovery change,
 including stable PE fingerprinting and malformed-image rejection.
 
-This extension provides optional read-only state observations, a separate diagnostics window, and a deterministic demo that works without Vanilla. No Vanilla gameplay field has been verified yet. Smart Teleport, stuck detection, SP recovery, and an action/rule runner are not implemented in this initial deliverable; their live action gates depend on verified state and permission for modified functionality.
+The diagnostics window provides optional read-only state observations and a deterministic demo that works without Vanilla. The companion's Smart Teleport, stuck detection, SP recovery and additional rules are implemented and tested with synthetic observations. No Vanilla gameplay field has been verified yet, so live actions remain unavailable.
 
-Starting 4RTools normally retains its existing updater, server selection, profiles, and features. The diagnostics entry points skip normal startup so observing a process does not enable existing macros. A successfully built or launched modified executable is not proof that Vanilla permits that executable.
+Normal startup opens the companion. Original 4RTools features remain available separately; the upstream executable updater is excluded from the fork. Diagnostics and snapshot entry points create no stock macro workers. A successfully built or launched modified executable is not proof of accepted gameplay inputs.
 
 ## Build and test
 
 From the repository root in PowerShell:
 
 ```powershell
-& .\scripts\build.ps1
+& .\scripts\build.ps1 -VanillaRelease
 ```
 
 The script finds Visual Studio MSBuild with `vswhere`, restores `packages.config`, rebuilds the entire solution in Release and Debug, and runs the corresponding `Tests/bin/<configuration>/Vanilla.Diagnostics.Tests.exe` console test runner. Use `-Configuration Release` for a single configuration or `-MSBuildPath <path>` to select an existing MSBuild installation. A failed build or test stops the script.
@@ -136,7 +151,7 @@ Any memory read failure stops that source, disposes its process handle, and inva
 ## Run diagnostics without Vanilla
 
 ```powershell
-& .\bin\Release\4RTools.exe --vanilla-diagnostics --demo
+& .\bin\Release\4RTools-Vanilla.exe --vanilla-diagnostics --demo
 ```
 
 Demo observations are explicitly labeled synthetic. They allow UI, optional values, and timestamp behavior to be exercised without opening a game process or sending input. Passing unit tests or watching demo target changes does not verify the meaning of a Vanilla field.
@@ -144,19 +159,19 @@ Demo observations are explicitly labeled synthetic. They allow UI, optional valu
 To open the diagnostics window for manual observation:
 
 ```powershell
-& .\bin\Release\4RTools.exe --vanilla-diagnostics
+& .\bin\Release\4RTools-Vanilla.exe --vanilla-diagnostics
 ```
 
 Use **Refresh processes** to list running `Vanilla MMO.exe` clients, then **Connect read-only**. Keep the map's `Fields` empty for metadata-only observation. Load a map only when there is a concrete candidate address with documented provenance. An empty map deliberately leaves gameplay values unavailable. **Mark controlled action** adds a timestamped note; **Export current snapshot** saves the latest observation and retained notes, not a memory dump or full observation history. **Disconnect** clears the displayed values and closes the source.
 
-The **Address configuration** tab contains the map JSON and **Load map**. **Save settings to profile** persists the map and poll interval in the existing profile's optional `VanillaDiagnostics` section. The interval defaults to 500 ms and is bounded to 250–10000 ms. Standalone diagnostics uses the Default profile; the window opened from the main application uses the active profile and stops observation when that profile changes. Profiles remain under `Profile` relative to the launch working directory, which should be the repository root. Settings do not contain an automation enable switch.
+The **Advanced diagnostics** tab contains the map JSON and **Load map**. **Save settings to profile** persists the map and poll interval in the existing profile's optional `VanillaDiagnostics` section. The interval defaults to 500 ms and is bounded to 250–10000 ms. Standalone diagnostics uses the Default stock profile. The diagnostics window stops observation when its associated stock profile changes. Stock/diagnostic profiles live under `Profile` beside the executable; companion preferences use `Profiles/Vanilla` beside the executable. The launch working directory remains the repository root for this local environment. Diagnostic settings do not contain an automation enable switch.
 
 The command-line snapshot entry point is also separate from normal startup:
 
 ```powershell
 $observationName = '4RTools-Engineering\vanilla-snapshot-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.json'
 $observationFile = Join-Path $env:LOCALAPPDATA $observationName
-& .\bin\Release\4RTools.exe --vanilla-snapshot 22308 --output $observationFile
+& .\bin\Release\4RTools-Vanilla.exe --vanilla-snapshot 22308 --output $observationFile
 ```
 
 Replace the example PID with the current process ID. `--map <path>` optionally supplies a candidate map. The output directory must exist; the build script creates the default engineering directory used above. Snapshot output must be a new filename. A snapshot without a map cannot establish that gameplay memory is readable. Process metadata and actual memory reads are distinct observations.
@@ -210,13 +225,13 @@ For each candidate, record the executable version/hash, address expression, enco
 
 If one signal cannot be observed, evaluate another known, permitted read-only signal against the same controlled states. If ordinary reads or actions are blocked, retain the exact error and stop that investigation. No protection bypass, game-file alteration, memory write, code injection, or server-protocol action is part of this work.
 
-## Gates for future automation
+## Gates for live automation
 
-Before a live rule can be enabled, its required observations must be positively verified on Vanilla and remain available/fresh. A stopped source, loading, a new session, unknown activity, or an unsupported field must suppress actions. The new diagnostics code contains no gameplay input emitter, so no setting in this deliverable activates automation.
+Before a live rule can be enabled, its required observations must be positively verified on Vanilla and remain available/fresh. A stopped source, loading, a new session, unknown activity, or an unsupported required field suppresses actions. Diagnostics never emit gameplay input. The companion scheduler remains gated while the current build has no verified gameplay mappings.
 
-| Future feature | Required evidence and behavior before implementation/enabling |
+| Implemented feature | Required evidence and behavior before live enabling |
 | --- | --- |
-| Smart Teleport | Verified farming/Autobattle activity and idle/no-target/combat meaning; configurable 10-second idle default, 3-second cooldown default, configured normal hotkey, transition suppression and timer reset |
+| Smart Teleport | Explicit farming selection and verified idle/no-target/combat/casting meaning; configurable 10-second idle defaults, 15-second cooldown default, 3-second grace, configured normal hotkey, transition suppression and timer reset |
 | Fixed interval teleport | Separately selectable explicit mode, configured interval/hotkey and the applicable live-action permission/safety gate |
 | Stuck detection | Verified X/Y plus expected farming and no combat; separate timer and single-action cooldown |
 | SP recovery | Positively verified SP/max SP; configurable threshold and generic key/wait sequence; respect verified important-action state when available |

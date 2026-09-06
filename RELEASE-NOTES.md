@@ -204,8 +204,8 @@ ZIP checksum; `SHA256SUMS.txt` inside the package covers its original payload.
 
 Release version: 0.1.0. SHA256:
 
-- `4RTools-Vanilla-v0.1.0-portable.zip`: `0f6a15b1b308fcdc1dcdefddf66d4c32e98898d6aa08de64eef31c3087745ae7`
-- `4RTools-Vanilla.exe`: `b60c2c7937d6747b96ec367388c865cba09faa8b5b027a6f9cb18abf2945e803`
+- `4RTools-Vanilla-v0.1.0-portable.zip`: `65ac1c13b7e0d3aa037621295d16819349b5db168ce00c55259f3eb7d884f5b9`
+- `4RTools-Vanilla.exe`: `e1e90dd5d39c63d10148da7e89815f3b440c0ede7259639e98e16496a8850e68`
 
 These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
 <!-- END GENERATED RELEASE CHECKSUMS -->
