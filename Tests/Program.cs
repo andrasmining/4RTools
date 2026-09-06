@@ -42,18 +42,19 @@ namespace Vanilla.Diagnostics.Tests
             Run("Polling configuration enforces bounded intervals", PollingBounds);
             Run("Demo source works without process memory", Demo);
             Run("Executable fingerprint is stable and rejects malformed images", DiscoveryTests.Run);
-            Run("Legacy memory access cannot attach to Vanilla", () =>
+            Run("Vanilla attachment requires its shared read-only session", () =>
             {
                 try { new _4RTools.Model.Client("Vanilla MMO.exe - 1"); }
                 catch (InvalidOperationException ex)
                 {
-                    if (ex.Message.Contains("legacy memory writer cannot attach")) return;
+                    if (ex.Message.Contains("shared read-only connection")) return;
                     throw;
                 }
                 throw new Exception("Vanilla reached the legacy attachment path.");
             });
             failed += AutomationTests.Run();
             failed += BuildProfileTests.Run();
+            failed += StockBridgeTests.Run();
             failed += ProfileStoreTests.Run();
             failed += LegacyProfileTests.Run();
 

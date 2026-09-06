@@ -32,12 +32,12 @@ namespace _4RTools.Model
         {
             _4RThread autobuffItemThread = new _4RThread(_ =>
             {
+                if (this.buffMapping.Count == 0) { Thread.Sleep(300); return 0; }
 
                 bool foundQuag = false;
                 Dictionary<EffectStatusIDs, Key> bmClone = new Dictionary<EffectStatusIDs, Key>(this.buffMapping);
-                for (int i = 0; i < Constants.MAX_BUFF_LIST_INDEX_SIZE; i++)
+                foreach (uint currentStatus in c.ReadStatusSnapshot())
                 {
-                    uint currentStatus = c.CurrentBuffStatusCode(i);
                     EffectStatusIDs status = (EffectStatusIDs)currentStatus;
                     
                     if (status == EffectStatusIDs.IGNORE) { continue; };
@@ -67,7 +67,7 @@ namespace _4RTools.Model
                     }
                     else if (c.ReadCurrentHp() >= Constants.MINIMUM_HP_TO_RECOVER)
                     {
-                        this.useAutobuff(item.Value);
+                        this.useAutobuff(c, item.Value);
                         Thread.Sleep(10);
                     }
                 }
@@ -75,7 +75,7 @@ namespace _4RTools.Model
                 Thread.Sleep(300);
                 return 0;
 
-            });
+            }, c.HandleWorkerFailure);
 
             return autobuffItemThread;
         }
@@ -112,10 +112,10 @@ namespace _4RTools.Model
             return ACTION_NAME_AUTOBUFF;
         }
 
-        private void useAutobuff(Key key)
+        private void useAutobuff(Client client, Key key)
         {
             if((key != Key.None) && !Keyboard.IsKeyDown(Key.LeftAlt) && !Keyboard.IsKeyDown(Key.RightAlt))
-                Interop.PostMessage(ClientSingleton.GetClient().process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, (Keys)Enum.Parse(typeof(Keys), key.ToString()), 0);
+                Interop.PostMessage(client, client.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, (Keys)Enum.Parse(typeof(Keys), key.ToString()), 0, true);
         }
     }
 }

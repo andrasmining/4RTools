@@ -74,7 +74,7 @@ namespace _4RTools.Forms
             mapLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             mapLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             mapLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            mapLayout.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(1000, 0), Text = "No Vanilla addresses are supplied. Configured values are observations, not verified game signals. Changes apply on the next connection. No scanning or input is performed." }, 0, 0);
+            mapLayout.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(1000, 0), Text = "An empty map uses the matching build's available mappings. Field validation is shown separately from observed values. Changes apply on the next connection. No scanning or input is performed." }, 0, 0);
             mapLayout.Controls.Add(mapEditor, 0, 1);
             var mapButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
             AddButton(mapButtons, "Load map…", LoadMap);

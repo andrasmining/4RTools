@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
 using System.Threading;
@@ -55,13 +55,15 @@ namespace _4RTools.Model
                     _4RThread.Stop(this.thread);
                 }
 
-                this.thread = new _4RThread(_ => AHKThreadExecution(roClient));
+                this.thread = new _4RThread(_ => AHKThreadExecution(roClient), roClient.HandleWorkerFailure);
                 _4RThread.Start(this.thread);
             }
         }
 
         private int AHKThreadExecution(Client roClient)
         {
+            if (roClient.IsVanilla && (ahkMode != COMPATIBILITY || mouseFlick || noShift))
+                throw new InvalidOperationException("Vanilla AHK requires Compatibility without Mouse Flick or No Shift; global input is disabled.");
             if (ahkMode.Equals(COMPATIBILITY))
             {
                 foreach (KeyConfig config in AhkEntries.Values)
@@ -71,9 +73,9 @@ namespace _4RTools.Model
                     {
                         if (config.ClickActive && Keyboard.IsKeyDown(config.key))
                         {
-                            if (noShift) keybd_event(Constants.VK_SHIFT, 0x45, Constants.KEYEVENTF_EXTENDEDKEY, 0);
+                            if (noShift && !roClient.IsVanilla) keybd_event(Constants.VK_SHIFT, 0x45, Constants.KEYEVENTF_EXTENDEDKEY, 0);
                             _AHKCompatibility(roClient, config, thisk);
-                            if (noShift) keybd_event(Constants.VK_SHIFT, 0x45, Constants.KEYEVENTF_EXTENDEDKEY | Constants.KEYEVENTF_KEYUP, 0);
+                            if (noShift && !roClient.IsVanilla) keybd_event(Constants.VK_SHIFT, 0x45, Constants.KEYEVENTF_EXTENDEDKEY | Constants.KEYEVENTF_KEYUP, 0);
 
                         }
                         else
@@ -101,17 +103,18 @@ namespace _4RTools.Model
 
             //Send Event Directly to Window via PostMessage
             send_click = (evt) => {
-                Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_LBUTTONDOWN, 0, 0);
+                Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_LBUTTONDOWN, 0, 0);
                 Thread.Sleep(1);
-                Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_LBUTTONUP, 0, 0);
+                Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_LBUTTONUP, 0, 0);
                 return 0;
             };
 
             if (this.mouseFlick)
             {
+                if (roClient.IsVanilla) throw new InvalidOperationException("Mouse Flick is unavailable for Vanilla because it moves the global cursor.");
                 while (Keyboard.IsKeyDown(config.key))
                 {
-                    Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
+                    Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
                     System.Windows.Forms.Cursor.Position = new Point(System.Windows.Forms.Cursor.Position.X - Constants.MOUSE_DIAGONAL_MOVIMENTATION_PIXELS_AHK, System.Windows.Forms.Cursor.Position.Y - Constants.MOUSE_DIAGONAL_MOVIMENTATION_PIXELS_AHK);
                     send_click(0);
                     System.Windows.Forms.Cursor.Position = new Point(System.Windows.Forms.Cursor.Position.X + Constants.MOUSE_DIAGONAL_MOVIMENTATION_PIXELS_AHK, System.Windows.Forms.Cursor.Position.Y + Constants.MOUSE_DIAGONAL_MOVIMENTATION_PIXELS_AHK);
@@ -122,7 +125,7 @@ namespace _4RTools.Model
             {
                 while (Keyboard.IsKeyDown(config.key))
                 {
-                    Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
+                    Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
                     send_click(0);
                     Thread.Sleep(this.AhkDelay);
                 }
@@ -131,10 +134,11 @@ namespace _4RTools.Model
 
         private void _AHKSpeedBoost(Client roClient, KeyConfig config, Keys thisk)
         {
+            if (roClient.IsVanilla) throw new InvalidOperationException("Speed Boost is unavailable for Vanilla because it sends global mouse input.");
             while (Keyboard.IsKeyDown(config.key))
             {
                 Point cursorPos = System.Windows.Forms.Cursor.Position;
-                Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
+                Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
                 mouse_event(Constants.MOUSEEVENTF_LEFTDOWN, (uint)cursorPos.X, (uint)cursorPos.Y, 0, 0);
                 Thread.Sleep(1);
                 mouse_event(Constants.MOUSEEVENTF_LEFTUP, (uint)cursorPos.X, (uint)cursorPos.Y, 0, 0);
@@ -146,7 +150,7 @@ namespace _4RTools.Model
         {
             while (Keyboard.IsKeyDown(config.key))
             {
-                Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
+                Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
                 Thread.Sleep(this.AhkDelay);
             }
         }

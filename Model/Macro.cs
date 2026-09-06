@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Windows.Input;
 using Newtonsoft.Json;
@@ -111,18 +111,18 @@ namespace _4RTools.Model
                             {
                                 //Press instrument key if exists.
                                 Keys instrumentKey = (Keys)Enum.Parse(typeof(Keys), chainConfig.instrumentKey.ToString());
-                                Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, instrumentKey, 0);
+                                Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, instrumentKey, 0);
                                 Thread.Sleep(30); //TODO FIX IT LATER -> Remove fixed sleep (read from ui)
                             }
 
                             Keys thisk = (Keys)Enum.Parse(typeof(Keys), macroKey.key.ToString());
                             Thread.Sleep(macroKey.delay);
-                            Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
+                            Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
 
                             if (macroKey.hasClick) {
-                                Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_LBUTTONDOWN, 0, 0);
+                                Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_LBUTTONDOWN, 0, 0);
                                 Thread.Sleep(1);
-                                Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_LBUTTONUP, 0, 0);
+                                Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_LBUTTONUP, 0, 0);
                             }
                             
 
@@ -130,7 +130,7 @@ namespace _4RTools.Model
                             {
                                 //Press instrument key if exists.
                                 Keys daggerKey = (Keys)Enum.Parse(typeof(Keys), chainConfig.daggerKey.ToString());
-                                Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, daggerKey, 0);
+                                Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, daggerKey, 0);
                                 Thread.Sleep(30); //TODO FIX IT LATER -> Remove fixed sleep (read from ui)
                             }
 
@@ -148,7 +148,7 @@ namespace _4RTools.Model
             Client roClient = ClientSingleton.GetClient();
             if (roClient != null)
             {
-                this.thread = new _4RThread((_) => MacroExecutionThread(roClient));
+                this.thread = new _4RThread((_) => MacroExecutionThread(roClient), roClient.HandleWorkerFailure);
                 _4RThread.Start(this.thread);
             }
         }

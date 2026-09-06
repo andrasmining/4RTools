@@ -3,7 +3,10 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using _4RTools.Model;
+using _4RTools.Model.Vanilla;
+using _4RTools.Model.Vanilla.Automation;
 using _4RTools.Utils;
 
 namespace _4RTools.Forms
@@ -13,12 +16,28 @@ namespace _4RTools.Forms
 
         private Subject subject = new Subject();
         private string currentProfile;
-        public Container()
+        private readonly bool smokeTest;
+        private readonly VanillaAutomationSession vanillaSession;
+        private readonly Timer vanillaTimer = new Timer { Interval = 250 };
+        private ToggleApplicationStateForm toggleForm;
+        private VanillaAutomationForm vanillaExtras;
+        private readonly Label vanillaStatus = new Label { AutoSize = true, MaximumSize = new Size(520, 0) };
+        private bool refreshingClients, profilesReady, closed;
+        private string reportedFailure;
+        internal bool AutomationEnabled { get { return toggleForm?.IsOn == true || vanillaSession.IsEnabled; } }
+        internal bool GameplayAttached { get { return ClientSingleton.GetClient() != null; } }
+        internal VanillaClientState VanillaSnapshot { get { return vanillaSession.Snapshot; } }
+        public Container(bool smokeTest = false)
         {
+            this.smokeTest = smokeTest;
+            vanillaSession = new VanillaAutomationSession(AppDomain.CurrentDomain.BaseDirectory);
+            vanillaSession.EnableGuard = () => toggleForm?.IsOn == true
+                ? "Switch the original automation OFF before starting extra rules." : null;
+            vanillaSession.ConfigurationChanging += () => ForceOff("Extra rule settings changed");
             this.subject.Attach(this);
 
             InitializeComponent();
-            this.Text = AppConfig.Name + " - " + AppConfig.Version; // Window title
+            this.Text = "4RTools - Vanilla extension v0.2.0";
 
             //Container Configuration
             this.IsMdiContainer = true;
@@ -40,7 +59,8 @@ namespace _4RTools.Forms
             SetServerWindow();
             SetVanillaWindow();
 
-            TrackerSingleton.Instance().SendEvent("desktop_login", "page_view", "desktop_container_load");
+            vanillaTimer.Tick += (s, e) => PollVanilla();
+            if (!smokeTest) vanillaTimer.Start();
         }
 
         public void addform(TabPage tp, Form f)
@@ -70,12 +90,20 @@ namespace _4RTools.Forms
 
         private void processCB_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (this.processCB.SelectedItem == null) return;
+            if (refreshingClients || this.processCB.SelectedItem == null) return;
             try
             {
-                Client client = new Client(this.processCB.SelectedItem.ToString());
+                ForceOff("Client changed");
+                ClientSingleton.GetClient()?.Dispose();
+                ClientSingleton.Instance(null);
+                vanillaSession.Disconnect();
+                Client client = new Client(this.processCB.SelectedItem.ToString(), vanillaSession);
                 ClientSingleton.Instance(client);
+                reportedFailure = null;
                 subject.Notify(new Utils.Message(Utils.MessageCode.PROCESS_CHANGED, null));
+                if (client.IsVanilla) atkDefMode.SelectedTab = atkDefMode.TabPages[atkDefMode.TabPages.Count - 1];
+                if (client.IsVanilla && vanillaExtras != null && !vanillaExtras.IsDisposed) vanillaExtras.SelectClient(client.process.Id);
+                PollVanilla();
             }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Client selection stopped"); }
         }
@@ -86,6 +114,8 @@ namespace _4RTools.Forms
             this.refreshProcessList();
             this.refreshProfileList();
             this.profileCB.SelectedItem = "Default";
+            profilesReady = true;
+            if (!smokeTest && processCB.Items.Count == 1) processCB.SelectedIndex = 0;
         }
 
         public void refreshProfileList()
@@ -102,16 +132,33 @@ namespace _4RTools.Forms
 
         private void refreshProcessList()
         {
-            this.Invoke((MethodInvoker)delegate ()
+            string previous = processCB.SelectedItem as string;
+            refreshingClients = true;
+            try
             {
                 this.processCB.Items.Clear();
-            });
-            foreach (Process p in Process.GetProcesses())
-            {
-                if (p.MainWindowTitle != "" && ClientListSingleton.ExistsByProcessName(p.ProcessName))
+                foreach (Process p in Process.GetProcesses())
                 {
-                    this.processCB.Items.Add(string.Format("{0}.exe - {1}", p.ProcessName, p.Id));
+                    using (p)
+                    {
+                        try
+                        {
+                            if (p.MainWindowTitle != "" && (Client.IsVanillaProcessName(p.ProcessName) || ClientListSingleton.ExistsByProcessName(p.ProcessName)))
+                                this.processCB.Items.Add(string.Format("{0}.exe - {1}", p.ProcessName, p.Id));
+                        }
+                        catch (InvalidOperationException) { }
+                        catch (System.ComponentModel.Win32Exception) { }
+                    }
                 }
+                if (previous != null && processCB.Items.Contains(previous)) processCB.SelectedItem = previous;
+            }
+            finally { refreshingClients = false; }
+            if (previous != null && processCB.SelectedItem == null)
+            {
+                ForceOff("Selected client exited");
+                ClientSingleton.GetClient()?.Dispose();
+                ClientSingleton.Instance(null);
+                vanillaSession.Disconnect();
             }
         }
 
@@ -128,9 +175,17 @@ namespace _4RTools.Forms
 
         private void ShutdownApplication()
         {
-            KeyboardHook.Disable();
-            subject.Notify(new Utils.Message(MessageCode.TURN_OFF, null));
-            Environment.Exit(0);
+            if (closed) return;
+            closed = true;
+            vanillaTimer.Stop();
+            ForceOff("Application closed");
+            vanillaExtras?.Close();
+            vanillaDiagnostics?.Close();
+            ClientSingleton.GetClient()?.Dispose();
+            ClientSingleton.Instance(null);
+            vanillaSession.Dispose();
+            if (!smokeTest) KeyboardHook.Disable();
+            vanillaTimer.Dispose();
         }
 
         private void lblLinkGithub_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
@@ -150,10 +205,11 @@ namespace _4RTools.Forms
 
         private void profileCB_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (this.profileCB.Text != currentProfile)
+            if (!string.IsNullOrWhiteSpace(this.profileCB.Text) && this.profileCB.Text != currentProfile)
             {
                 try
                 {
+                    ForceOff("Profile changed");
                     ProfileSingleton.Load(this.profileCB.Text); //LOAD PROFILE
                     subject.Notify(new Utils.Message(MessageCode.PROFILE_CHANGED, null));
                     currentProfile = this.profileCB.Text.ToString();
@@ -173,10 +229,11 @@ namespace _4RTools.Forms
                 case MessageCode.PROCESS_CHANGED:
                 case MessageCode.PROFILE_CHANGED:
                     Client client = ClientSingleton.GetClient();
-                    if (client != null)
-                        this.characterName.Text = client.ReadCharacterName();
+                    UpdateCharacterName(client);
                     break;
                 case MessageCode.TURN_OFF:
+                    ClientSingleton.GetClient()?.SetAutomationEnabled(false);
+                    vanillaSession.SetEnabled(false);
                     this.profileCB.Enabled = true;
                     this.processCB.Enabled = true;
 
@@ -184,7 +241,7 @@ namespace _4RTools.Forms
                 case MessageCode.TURN_ON:
                     this.profileCB.Enabled = false;
                     this.processCB.Enabled = false;
-                    this.characterName.Text = ClientSingleton.GetClient().ReadCharacterName();
+                    UpdateCharacterName(ClientSingleton.GetClient());
                     break;
                 case MessageCode.SERVER_LIST_CHANGED:
                     this.refreshProcessList();
@@ -195,6 +252,7 @@ namespace _4RTools.Forms
                     break;
                 case MessageCode.SHUTDOWN_APPLICATION:
                     this.ShutdownApplication();
+                    Close();
                     break;
             }
         }
@@ -210,29 +268,113 @@ namespace _4RTools.Forms
 
         private void SetVanillaWindow()
         {
-            var page = new TabPage("Vanilla Automation");
+            var page = new TabPage("Vanilla");
             var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(12) };
-            panel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(500, 0), Text = "Local Vanilla extension: read-only diagnostics and offline demo. Smart Teleport and SP Recovery await verified runtime signals." });
-            var open = new Button { Text = "Open diagnostics", AutoSize = true };
-            open.Click += (sender, args) =>
+            panel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(500, 0), Text = "Select Vanilla in Ragnarok Client above. Existing feature tabs use its read-only mappings. Additional rules and diagnostics are available here." });
+            panel.Controls.Add(vanillaStatus);
+            var extras = new Button { Text = "Smart Teleport and extra rules", AutoSize = true };
+            extras.Click += (s, e) =>
             {
-                if (vanillaDiagnostics == null || vanillaDiagnostics.IsDisposed)
-                    vanillaDiagnostics = new VanillaDiagnosticsForm(subject);
-                vanillaDiagnostics.Show(this);
-                vanillaDiagnostics.BringToFront();
+                var client = ClientSingleton.GetClient();
+                if (client?.IsVanilla != true) { MessageBox.Show(this, "Select Vanilla in Ragnarok Client first."); return; }
+                ForceOff("Extra rule settings opened");
+                if (vanillaExtras == null || vanillaExtras.IsDisposed)
+                {
+                    vanillaExtras = new VanillaAutomationForm(vanillaSession, OpenVanillaDiagnostics, hosted: true, ownsSession: false);
+                    vanillaExtras.EmergencyStopRequested = () => ForceOff("Emergency stop");
+                    vanillaExtras.EmergencyKeyAllowed = key => key != (int)(Keys)Enum.Parse(typeof(Keys), ProfileSingleton.GetCurrent().UserPreferences.toggleStateKey);
+                }
+                vanillaExtras.SelectClient(client.process.Id);
+                vanillaExtras.Show(this);
+                vanillaExtras.BringToFront();
             };
+            panel.Controls.Add(extras);
+            var open = new Button { Text = "Open diagnostics", AutoSize = true };
+            open.Click += (sender, args) => OpenVanillaDiagnostics();
             panel.Controls.Add(open);
             page.Controls.Add(panel);
             atkDefMode.TabPages.Add(page);
         }
 
+        private void OpenVanillaDiagnostics()
+        {
+            ForceOff("Diagnostics opened");
+            if (vanillaDiagnostics == null || vanillaDiagnostics.IsDisposed) vanillaDiagnostics = new VanillaDiagnosticsForm(subject);
+            vanillaDiagnostics.Show(this);
+            vanillaDiagnostics.BringToFront();
+        }
+
+        private void ForceOff(string reason)
+        {
+            vanillaSession.SetEnabled(false);
+            ClientSingleton.GetClient()?.SetAutomationEnabled(false);
+            if (profilesReady) toggleForm.ForceOff(reason);
+        }
+
+        private void PollVanilla()
+        {
+            vanillaSession.Tick();
+            var client = ClientSingleton.GetClient();
+            if (client?.IsVanilla != true)
+            {
+                if (vanillaStatus.Text != "Select a Vanilla client above.") vanillaStatus.Text = "Select a Vanilla client above.";
+                return;
+            }
+            string failure = client.LastFailure;
+            if (failure != null && reportedFailure != failure)
+            {
+                reportedFailure = failure;
+                ForceOff(failure);
+            }
+            if (vanillaSession.Snapshot == null && toggleForm.IsOn) ForceOff("Vanilla observation stopped");
+            if (toggleForm.IsOn)
+            {
+                string unavailable = client.GetEnableError(ProfileSingleton.GetCurrent());
+                if (unavailable != null) ForceOff(unavailable);
+            }
+            UpdateCharacterName(client);
+            var snapshot = vanillaSession.Snapshot;
+            string status = snapshot == null ? vanillaSession.Status : "Connected read-only to PID " + snapshot.ProcessId
+                + Environment.NewLine + "HP: " + snapshot.CurrentHP + " / " + snapshot.MaxHP
+                + "    SP: " + snapshot.CurrentSP + " / " + snapshot.MaxSP
+                + Environment.NewLine + "Field validation: " + snapshot.CurrentHP.Validation
+                + Environment.NewLine + client.VanillaCapabilities;
+            if (failure != null) status += Environment.NewLine + failure;
+            if (vanillaStatus.Text != status) vanillaStatus.Text = status;
+        }
+
+        private void UpdateCharacterName(Client client)
+        {
+            string value;
+            if (client == null || !client.TryReadCharacterName(out value)) value = "Unavailable";
+            if (characterName.Text != value) characterName.Text = value;
+        }
+
+        internal void SelectClientForValidation(int processId)
+        {
+            foreach (var item in processCB.Items)
+                if (item.ToString().EndsWith(".exe - " + processId, StringComparison.Ordinal))
+                { processCB.SelectedItem = item; atkDefMode.SelectedTab = atkDefMode.TabPages[atkDefMode.TabPages.Count - 1]; return; }
+            throw new InvalidOperationException("Requested client is not in the Ragnarok Client list.");
+        }
+
         public void SetToggleApplicationStateWindow()
         {
-            ToggleApplicationStateForm frm = new ToggleApplicationStateForm(subject);
+            ToggleApplicationStateForm frm = new ToggleApplicationStateForm(subject, smokeTest, StockEnableError);
+            toggleForm = frm;
             frm.FormBorderStyle = FormBorderStyle.None;
             frm.MdiParent = this;
             this.OnOffPanel.Controls.Add(frm);
             frm.Show();
+        }
+
+        private string StockEnableError()
+        {
+            if (vanillaSession.IsEnabled) return "Stop extra rules before starting original automation.";
+            if (vanillaExtras != null && !vanillaExtras.IsDisposed
+                && vanillaSession.Settings.EmergencyKey == (int)(Keys)Enum.Parse(typeof(Keys), ProfileSingleton.GetCurrent().UserPreferences.toggleStateKey))
+                return "Choose different keys for the original ON/OFF toggle and the extra-rules emergency stop.";
+            return null;
         }
 
         public void SetAutopotWindow()

@@ -18,7 +18,8 @@ namespace _4RTools.Model.Vanilla.Automation
         private ReadOnlyProcessMemory memory;
         private VanillaWindowInput input;
         private VanillaStateAdapter adapter;
-        private RuleObservation observation;
+        private volatile RuleObservation observation;
+        private volatile VanillaClientState publishedSnapshot;
         private VanillaAutomationSettings settings;
         private long executableLength;
         private DateTime executableWriteTime;
@@ -41,11 +42,32 @@ namespace _4RTools.Model.Vanilla.Automation
                 Log("Previous default profile could not be loaded and was preserved: " + ex.Message);
             }
             engine = new AutomationEngine(settings, this, Log);
-            Log("4RTools Vanilla 0.1.0 started; automation OFF.");
+            Log("4RTools Vanilla 0.2.0 started; automation OFF.");
         }
 
         public VanillaAutomationSettings Settings { get { return settings.Clone(); } }
-        public VanillaClientState Snapshot { get; private set; }
+        public VanillaClientState Snapshot { get { return publishedSnapshot; } }
+        public Func<string> EnableGuard { get; set; }
+        public event System.Action ConfigurationChanging;
+        public bool IsObservationFresh
+        {
+            get
+            {
+                var currentSource = source;
+                var currentObservation = observation;
+                var currentSnapshot = publishedSnapshot;
+                return !disposed && loggingError == null && currentSource != null && !currentSource.IsStopped
+                    && currentSnapshot != null && currentObservation != null && currentSnapshot.SessionId == currentObservation.SessionId
+                    && currentObservation.ObservedAt <= clock.Elapsed
+                    && clock.Elapsed - currentObservation.ObservedAt <= TimeSpan.FromMilliseconds(settings.MaxStateAgeMs);
+            }
+        }
+        public VanillaWindowInput CreateStockInput(Func<bool> permitted)
+        {
+            var currentMemory = memory;
+            if (currentMemory == null || !IsObservationFresh) throw new InvalidOperationException("Connect Vanilla before starting stock input.");
+            return new VanillaWindowInput(currentMemory, permitted);
+        }
         public string Status { get { return connectionStatus + " | " + engine.Status + (loggingError == null ? "" : " | " + loggingError); } }
         public string Fingerprint { get; private set; }
         public string BuildProfile { get; private set; }
@@ -112,13 +134,14 @@ namespace _4RTools.Model.Vanilla.Automation
                 if (!file.Exists || file.Length != executableLength || file.LastWriteTimeUtc != executableWriteTime)
                     throw new InvalidOperationException("The client executable changed; reconnect to identify its build.");
                 TimeSpan sampleStarted = clock.Elapsed;
-                Snapshot = source.Poll(DateTimeOffset.UtcNow);
-                Snapshot.ExecutablePath = ExecutablePath;
-                Snapshot.Fingerprint = Fingerprint;
-                Snapshot.BuildProfile = BuildProfile;
+                var snapshot = source.Poll(DateTimeOffset.UtcNow);
+                snapshot.ExecutablePath = ExecutablePath;
+                snapshot.Fingerprint = Fingerprint;
+                snapshot.BuildProfile = BuildProfile;
                 if (source.IsStopped)
-                    throw new InvalidOperationException(Snapshot.Error ?? source.Status);
-                observation = adapter.Observe(Snapshot, sampleStarted);
+                    throw new InvalidOperationException(snapshot.Error ?? source.Status);
+                observation = adapter.Observe(snapshot, sampleStarted);
+                publishedSnapshot = snapshot;
                 engine.Tick(clock.Elapsed, observation);
                 if (loggingError != null) engine.Stop("Automation stopped: activity log unavailable");
             }
@@ -133,6 +156,8 @@ namespace _4RTools.Model.Vanilla.Automation
 
         public void SetEnabled(bool enabled)
         {
+            string blocked = enabled ? EnableGuard?.Invoke() : null;
+            if (blocked != null) throw new InvalidOperationException(blocked);
             if (enabled && loggingError != null) throw new IOException(loggingError);
             engine.SetEnabled(enabled);
             if (enabled)
@@ -151,6 +176,7 @@ namespace _4RTools.Model.Vanilla.Automation
 
         public void ApplySettings(VanillaAutomationSettings value)
         {
+            ConfigurationChanging?.Invoke();
             engine.Stop("Settings changed; automation OFF");
             var validated = value.Clone();
             engine.Configure(validated);
@@ -216,7 +242,7 @@ namespace _4RTools.Model.Vanilla.Automation
                 source = null;
                 memory?.Dispose();
                 memory = null;
-                Snapshot = null;
+                publishedSnapshot = null;
                 observation = null;
                 adapter = null;
             }

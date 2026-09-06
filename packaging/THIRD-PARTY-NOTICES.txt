@@ -1,5 +1,5 @@
 THIRD-PARTY SOFTWARE NOTICES
-4RTools Vanilla Companion
+4RTools Vanilla
 
 The upstream application license is supplied separately in LICENSE.
 Managed dependencies are embedded by Costura. The following license terms

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$')]
-    [string] $Version = '0.1.0',
+    [string] $Version = '0.2.0',
     [string] $CacheRoot = (Join-Path $env:LOCALAPPDATA '4RTools-Engineering'),
     [string] $MSBuildPath,
     [switch] $Replace
@@ -116,6 +116,25 @@ function New-PortableArchive([string] $Root, [string] $ArchivePath, [DateTime] $
     finally { $archive.Dispose() }
 }
 
+function Assert-PortableSmokeResult([object] $Report) {
+    if ($null -eq $Report) { throw 'Portable smoke report is empty.' }
+    foreach ($requiredField in @('Success', 'MainUi', 'AutomationEnabled', 'GameplayAttached', 'InputSent', 'OriginalFeatureForms')) {
+        if ($null -eq $Report.PSObject.Properties[$requiredField]) {
+            throw "Portable smoke report is missing $requiredField."
+        }
+    }
+    if ($Report.Success -isnot [bool] -or -not $Report.Success) { throw 'Portable smoke test reported failure.' }
+    if ($Report.MainUi -cne 'Container') { throw 'Portable smoke test did not validate the original 4RTools main window.' }
+    foreach ($inactiveField in @('AutomationEnabled', 'GameplayAttached', 'InputSent')) {
+        if ($Report.$inactiveField -isnot [bool] -or $Report.$inactiveField) {
+            throw "Portable smoke test did not prove $inactiveField was false."
+        }
+    }
+    if (($Report.OriginalFeatureForms -isnot [int] -and $Report.OriginalFeatureForms -isnot [long]) -or $Report.OriginalFeatureForms -lt 10) {
+        throw 'Portable smoke test did not validate the original 4RTools feature forms.'
+    }
+}
+
 function Test-PortableArchive([string] $ArchivePath, [string] $ExpectedZipHash) {
     $smokeRoot = Assert-RepositoryPath (Join-Path $distRoot ('.smoke-' + [Guid]::NewGuid().ToString('N')))
     $smokeLogRoot = Join-Path ([IO.Path]::GetFullPath($CacheRoot)) ('portable-tests/' + [Guid]::NewGuid().ToString('N'))
@@ -135,7 +154,8 @@ function Test-PortableArchive([string] $ArchivePath, [string] $ExpectedZipHash) 
     if ($smokeProcess.ExitCode -ne 0) { throw "Portable smoke test failed (exit $($smokeProcess.ExitCode)). Evidence: $smokeLogRoot" }
     if (-not (Test-Path -LiteralPath $smokeOutput -PathType Leaf)) { throw "Portable smoke test did not produce its report: $smokeOutput" }
     $smokeResult = Get-Content -LiteralPath $smokeOutput -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not $smokeResult.Success) { throw "Portable smoke test reported failure. See $smokeOutput" }
+    try { Assert-PortableSmokeResult $smokeResult }
+    catch { throw "$($_.Exception.Message) See $smokeOutput" }
     if ((Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash -ne $ExpectedZipHash) {
         throw 'Portable ZIP changed during validation.'
     }
@@ -223,7 +243,9 @@ New-Item -ItemType Directory -Path (Assert-RepositoryPath $distRoot) -Force | Ou
 $stagingRoot = Assert-RepositoryPath (Join-Path $distRoot ('.staging-' + [Guid]::NewGuid().ToString('N')))
 $stagingPath = Join-Path $stagingRoot $releaseName
 New-Item -ItemType Directory -Path $stagingPath | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $stagingPath 'Profiles') | Out-Null
+foreach ($profileDirectory in @('Profile', 'Profiles')) {
+    New-Item -ItemType Directory -Path (Join-Path $stagingPath $profileDirectory) | Out-Null
+}
 
 try {
     foreach ($name in @($applicationName, "$applicationName.config")) {
@@ -250,7 +272,7 @@ try {
     $packagedNotes = [Regex]::Replace($notes, $checksumBlockPattern, '').TrimEnd() + "`n"
     Write-Utf8 (Join-Path $stagingPath 'RELEASE-NOTES.md') $packagedNotes
     $versionInfo = @(
-        "Product: 4RTools Vanilla Companion",
+        "Product: 4RTools Vanilla",
         "Fork version: $Version",
         "Executable file version: $($executableVersion.FileVersion)",
         'Architecture: x86 (32BITREQUIRED)',

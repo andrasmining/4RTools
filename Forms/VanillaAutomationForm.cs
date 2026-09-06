@@ -47,6 +47,8 @@ namespace _4RTools.Forms
         private const int WmHotkey = 0x0312;
         private readonly IAutomationSession session;
         private readonly System.Action openDiagnostics;
+        private readonly bool hosted;
+        private readonly bool ownsSession;
         private readonly Timer timer = new Timer { Interval = 250 };
         private readonly ToolTip tips = new ToolTip { AutoPopDelay = 15000 };
         private readonly ComboBox profiles = DropDown(210);
@@ -60,7 +62,7 @@ namespace _4RTools.Forms
         private readonly Label build = StatusLabel();
         private readonly Label validation = StatusLabel();
         private readonly Label saveStatus = new Label { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(850, 0) };
-        private readonly Label activity = StatusLabel();
+        private readonly Control activity = new BufferedReadout { Dock = DockStyle.Fill, Margin = new Padding(0, 16, 0, 0) };
         private readonly ListBox ruleSummary = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
         private readonly CheckBox teleportEnabled = new CheckBox { Text = "Enable teleport", AutoSize = true };
         private readonly ComboBox teleportMode = DropDown(180);
@@ -76,7 +78,7 @@ namespace _4RTools.Forms
         private readonly NumericUpDown spThreshold = new NumericUpDown { Minimum = 0, Maximum = 100, DecimalPlaces = 2, Width = 100 };
         private readonly NumericUpDown spCooldown = Seconds();
         private readonly CheckBox outOfCombat = new CheckBox { Text = "Only when out of combat", AutoSize = true };
-        private readonly DataGridView sequence = new DataGridView
+        private readonly DataGridView sequence = new BufferedDataGridView
         {
             Dock = DockStyle.Fill, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
             RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
@@ -84,7 +86,7 @@ namespace _4RTools.Forms
             BackgroundColor = Color.White, BorderStyle = BorderStyle.FixedSingle
         };
         private readonly ComboBox newStepKind = DropDown(140);
-        private readonly DataGridView state = new DataGridView
+        private readonly DataGridView state = new BufferedDataGridView
         {
             Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
             RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
@@ -102,17 +104,24 @@ namespace _4RTools.Forms
         private int registeredEmergencyKey;
         private VanillaClientState displayedSnapshot;
 
-        public VanillaAutomationForm(IAutomationSession session, System.Action openDiagnostics = null)
+        public System.Action EmergencyStopRequested { get; set; }
+        public Func<int, bool> EmergencyKeyAllowed { get; set; }
+
+        public VanillaAutomationForm(IAutomationSession session, System.Action openDiagnostics = null, bool hosted = false, bool ownsSession = true)
         {
             this.session = session ?? throw new ArgumentNullException(nameof(session));
             this.openDiagnostics = openDiagnostics;
-            Text = "4RTools Vanilla Companion";
+            this.hosted = hosted;
+            this.ownsSession = ownsSession;
+            Text = hosted ? "4RTools — Vanilla extra features" : "4RTools Vanilla Companion";
             Font = new Font("Segoe UI", 9F);
             ClientSize = new Size(1120, 840);
             MinimumSize = new Size(980, 740);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Color.FromArgb(245, 247, 250);
             AutoScaleMode = AutoScaleMode.Dpi;
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
             noTarget.Minimum = noCombat.Minimum = grace.Minimum = 0.1M;
             cooldown.Minimum = fixedInterval.Minimum = stuckTimeout.Minimum = spCooldown.Minimum = 1;
             grace.Maximum = 600;
@@ -133,13 +142,13 @@ namespace _4RTools.Forms
 
         private void BuildLayout()
         {
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 6 };
+            var layout = new BufferedTableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 6 };
             for (int i = 0; i < 4; i++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.Controls.Add(new Label { Text = "Vanilla Automation", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 12) }, 0, 0);
 
-            var selection = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Top, ColumnCount = 1, RowCount = 2 };
+            var selection = new BufferedTableLayoutPanel { AutoSize = true, Dock = DockStyle.Top, ColumnCount = 1, RowCount = 2 };
             var profileRow = Flow();
             profileRow.Controls.Add(Caption("Profile"));
             profileRow.Controls.Add(profiles);
@@ -147,19 +156,27 @@ namespace _4RTools.Forms
             AddButton(profileRow, "Save as…", SaveAs);
             AddButton(profileRow, "Import…", ImportProfile);
             AddButton(profileRow, "Export…", ExportProfile);
-            AddButton(profileRow, "Original 4RTools", () => { session.SetEnabled(false); Program.OpenStockTools(); });
+            if (!hosted) AddButton(profileRow, "Original 4RTools", () => { session.SetEnabled(false); Program.OpenStockTools(); });
             selection.Controls.Add(profileRow, 0, 0);
             var clientRow = Flow();
             clientRow.Controls.Add(Caption("Client"));
             clientRow.Controls.Add(processes);
-            AddButton(clientRow, "Refresh", RefreshProcesses);
-            AddButton(clientRow, "Connect", Connect);
-            AddButton(clientRow, "Disconnect", () => { session.Disconnect(); UpdateStatus(); });
+            if (hosted && !ownsSession)
+            {
+                processes.Enabled = false;
+                clientRow.Controls.Add(Caption("Client selected in the main 4RTools window."));
+            }
+            else
+            {
+                AddButton(clientRow, "Refresh", RefreshProcesses);
+                AddButton(clientRow, "Connect", Connect);
+                AddButton(clientRow, "Disconnect", () => { session.Disconnect(); UpdateStatus(); });
+            }
             selection.Controls.Add(clientRow, 0, 1);
             layout.Controls.Add(selection, 0, 1);
 
             var statusBox = new GroupBox { Text = "Selected client", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(10) };
-            var statusLayout = new TableLayoutPanel { ColumnCount = 2, RowCount = 4, AutoSize = true, Dock = DockStyle.Top };
+            var statusLayout = new BufferedTableLayoutPanel { ColumnCount = 2, RowCount = 4, AutoSize = true, Dock = DockStyle.Top };
             statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 95));
             statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             AddStatusRow(statusLayout, 0, "Connection", connection);
@@ -198,7 +215,7 @@ namespace _4RTools.Forms
         private TabPage BuildRulesPage()
         {
             var page = new TabPage("Timed & status rules") { Padding = new Padding(14) };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
+            var layout = new BufferedTableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             var buttons = Flow();
@@ -231,10 +248,13 @@ namespace _4RTools.Forms
         private TabPage BuildTeleportPage()
         {
             var page = new TabPage("Smart Teleport") { Padding = new Padding(14), BackColor = Color.White, AutoScroll = true };
-            var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, RowCount = 10 };
+            var grid = new BufferedTableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, RowCount = 10 };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 215));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 195));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int row = 0; row < 9; row++) grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // A stable readout row prevents live status text from resizing the surrounding table.
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 135));
             grid.Controls.Add(teleportEnabled, 0, 0);
             grid.SetColumnSpan(teleportEnabled, 3);
             teleportMode.Items.Add(new ModeChoice(TeleportMode.SmartIdle, "Smart idle"));
@@ -249,7 +269,6 @@ namespace _4RTools.Forms
             grid.Controls.Add(stuckEnabled, 0, 8);
             grid.Controls.Add(stuckTimeout, 1, 8);
             grid.Controls.Add(Hint("Seconds at the same position without combat; verified X/Y required."), 2, 8);
-            activity.Margin = new Padding(0, 16, 0, 0);
             grid.Controls.Add(activity, 0, 9);
             grid.SetColumnSpan(activity, 3);
             page.Controls.Add(grid);
@@ -259,7 +278,7 @@ namespace _4RTools.Forms
         private TabPage BuildRecoveryPage()
         {
             var page = new TabPage("SP Recovery") { Padding = new Padding(14), BackColor = Color.White };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+            var layout = new BufferedTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -306,7 +325,7 @@ namespace _4RTools.Forms
         private TabPage BuildStatePage()
         {
             var page = new TabPage("Current State") { Padding = new Padding(14), BackColor = Color.White };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+            var layout = new BufferedTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             var buttons = Flow();
@@ -329,7 +348,7 @@ namespace _4RTools.Forms
         private TabPage BuildLogPage()
         {
             var page = new TabPage("Activity Log") { Padding = new Padding(14), BackColor = Color.White };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+            var layout = new BufferedTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             var buttons = Flow();
@@ -399,7 +418,8 @@ namespace _4RTools.Forms
         {
             try
             {
-                session.Tick();
+                // A hosted window observes the Container's shared session; it must not poll it twice.
+                if (ownsSession) session.Tick();
                 if (dirty && !sequence.IsCurrentCellInEditMode && DateTimeOffset.UtcNow - lastEdit > TimeSpan.FromSeconds(1))
                 {
                     try { SaveCurrent(false); }
@@ -508,7 +528,6 @@ namespace _4RTools.Forms
             if (!dirty && !explicitSave) return;
             var settings = ReadControls();
             RegisterEmergency(settings.EmergencyKey);
-            if (dirty) session.ApplySettings(settings);
             session.SaveProfile(session.CurrentProfileName, settings);
             dirty = false;
             saveStatus.Text = "Saved profile: " + session.CurrentProfileName + ".";
@@ -524,7 +543,6 @@ namespace _4RTools.Forms
             session.SetEnabled(false);
             RegisterEmergency(settings.EmergencyKey);
             session.SaveProfile(name, settings);
-            session.ApplySettings(settings);
             LoadControls();
             RefreshProfiles();
         }
@@ -636,6 +654,30 @@ namespace _4RTools.Forms
             UpdateStatus();
         }
 
+        /// <summary>Synchronizes the selected Vanilla client from the original 4RTools window.</summary>
+        public void SelectClient(int processId)
+        {
+            if (processId <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
+            session.SetEnabled(false);
+            if (dirty) SaveCurrent(false);
+            RefreshProcesses();
+            loading = true;
+            try
+            {
+                var selected = processes.Items.Cast<ProcessChoice>().FirstOrDefault(item => item.Id == processId);
+                if (selected == null)
+                {
+                    // The host owns selection. Connect below still validates the actual executable.
+                    selected = new ProcessChoice(processId, "Selected in 4RTools");
+                    processes.Items.Add(selected);
+                }
+                processes.SelectedItem = selected;
+            }
+            finally { loading = false; }
+            if (session.Snapshot?.ProcessId != processId) session.Connect(processId);
+            UpdateStatus();
+        }
+
         private void AddStep()
         {
             if (sequence.Rows.Count >= 64) throw new ArgumentException("A sequence supports at most 64 steps.");
@@ -681,18 +723,22 @@ namespace _4RTools.Forms
         private void UpdateStatus()
         {
             var snapshot = session.Snapshot;
-            connection.Text = snapshot?.ProcessId.HasValue == true
+            string sessionStatus = session.Status ?? "Waiting for a client.";
+            SetTextIfChanged(connection, snapshot?.ProcessId.HasValue == true
                 ? "Vanilla MMO.exe — PID " + snapshot.ProcessId + " | " + (snapshot.ConnectionStatus ?? session.Status)
-                : "Disconnected — select a client and connect.";
-            tips.SetToolTip(connection, session.ExecutablePath ?? "");
-            character.Text = snapshot?.CharacterName.IsAvailable == true ? snapshot.CharacterName.Value : "Unavailable";
+                : "Disconnected — select a client and connect.");
+            SetToolTipIfChanged(connection, session.ExecutablePath ?? "");
+            SetTextIfChanged(character, snapshot?.CharacterName.IsAvailable == true ? snapshot.CharacterName.Value : "Unavailable");
             string fingerprint = session.Fingerprint;
-            build.Text = (string.IsNullOrWhiteSpace(session.BuildProfile) ? "No recognized build profile" : session.BuildProfile)
-                + (string.IsNullOrWhiteSpace(fingerprint) ? "" : " | " + (fingerprint.Length > 24 ? fingerprint.Substring(0, 24) + "…" : fingerprint));
-            tips.SetToolTip(build, fingerprint ?? "");
-            validation.Text = session.Status ?? "Waiting for a client.";
-            toggle.Text = session.IsEnabled ? (session.Settings.DryRun ? "DRY RUN ON" : "AUTOMATION ON") : "AUTOMATION OFF";
-            toggle.BackColor = session.IsEnabled ? (session.Settings.DryRun ? Color.FromArgb(39, 87, 145) : Color.FromArgb(38, 116, 74)) : Color.FromArgb(154, 47, 47);
+            SetTextIfChanged(build, (string.IsNullOrWhiteSpace(session.BuildProfile) ? "No recognized build profile" : session.BuildProfile)
+                + (string.IsNullOrWhiteSpace(fingerprint) ? "" : " | " + (fingerprint.Length > 24 ? fingerprint.Substring(0, 24) + "…" : fingerprint)));
+            SetToolTipIfChanged(build, fingerprint ?? "");
+            SetTextIfChanged(validation, sessionStatus);
+            bool isEnabled = session.IsEnabled;
+            bool isDryRun = isEnabled && session.Settings.DryRun;
+            SetTextIfChanged(toggle, isEnabled ? (isDryRun ? "DRY RUN ON" : "AUTOMATION ON") : "AUTOMATION OFF");
+            Color toggleColor = isEnabled ? (isDryRun ? Color.FromArgb(39, 87, 145) : Color.FromArgb(38, 116, 74)) : Color.FromArgb(154, 47, 47);
+            if (toggle.BackColor != toggleColor) toggle.BackColor = toggleColor;
             if (farming.Checked != session.FarmingEnabled)
             {
                 loading = true;
@@ -701,26 +747,30 @@ namespace _4RTools.Forms
             }
             string target = snapshot?.CurrentTargetId.IsAvailable == true ? snapshot.CurrentTargetId.Value.ToString(CultureInfo.InvariantCulture) + " (" + snapshot.CurrentTargetId.Validation + ")" : "Unavailable";
             string position = snapshot?.X.IsAvailable == true && snapshot.Y.IsAvailable ? snapshot.X.Value + ", " + snapshot.Y.Value : "Unavailable";
-            activity.Text = "Target: " + target + "     Position: " + position + Environment.NewLine + (session.Status ?? "");
-            if (snapshot != null) activity.Text += Environment.NewLine + "Last movement: " + FormatTime(snapshot.LastMovementAtUtc)
+            string activityText = "Target: " + target + "     Position: " + position + Environment.NewLine + sessionStatus;
+            if (snapshot != null) activityText += Environment.NewLine + "Last movement: " + FormatTime(snapshot.LastMovementAtUtc)
                 + " | target activity: " + FormatTime(snapshot.LastTargetActivityAtUtc) + " | combat: " + FormatTime(snapshot.LastCombatActivityAtUtc);
-            activity.Text += Environment.NewLine + session.ActivitySummary;
-            if (ReferenceEquals(displayedSnapshot, snapshot)) return;
+            activityText += Environment.NewLine + session.ActivitySummary;
+            // Assign the complete text once. Intermediate AutoSize labels caused the visible blink.
+            SetTextIfChanged(activity, activityText);
+            if (!state.Visible || ReferenceEquals(displayedSnapshot, snapshot)) return;
             displayedSnapshot = snapshot;
             foreach (DataGridViewRow row in state.Rows)
             {
                 StateValue value = null;
                 snapshot?.Fields.TryGetValue((VanillaField)row.Cells[0].Value, out value);
-                row.Cells[1].Value = value?.ToString() ?? "Unavailable";
-                row.Cells[2].Value = value?.Validation.ToString() ?? "Unavailable";
-                row.Cells[3].Value = FormatTime(value?.LastObservedAtUtc);
-                row.Cells[4].Value = FormatTime(value?.LastChangedAtUtc);
-                row.Cells[5].Value = value?.Error ?? value?.Evidence ?? "No observation.";
+                SetCellIfChanged(row.Cells[1], value?.ToString() ?? "Unavailable");
+                SetCellIfChanged(row.Cells[2], value?.Validation.ToString() ?? "Unavailable");
+                SetCellIfChanged(row.Cells[3], FormatTime(value?.LastObservedAtUtc));
+                SetCellIfChanged(row.Cells[4], FormatTime(value?.LastChangedAtUtc));
+                SetCellIfChanged(row.Cells[5], value?.Error ?? value?.Evidence ?? "No observation.");
             }
         }
 
         private void RegisterEmergency(int key)
         {
+            if (EmergencyKeyAllowed != null && !EmergencyKeyAllowed(key))
+                throw new InvalidOperationException("The emergency stop key conflicts with the original 4RTools ON/OFF key. Choose a different emergency key.");
             if (registeredEmergencyKey == key && key != 0) return;
             if (!IsHandleCreated) return;
             int old = registeredEmergencyKey;
@@ -741,7 +791,8 @@ namespace _4RTools.Forms
         {
             if (message.Msg == WmHotkey && message.WParam.ToInt32() == EmergencyHotkeyId)
             {
-                session.SetEnabled(false);
+                try { EmergencyStopRequested?.Invoke(); }
+                finally { session.SetEnabled(false); }
                 AppendLog("EMERGENCY STOP — Vanilla automation OFF.");
                 UpdateStatus();
                 return;
@@ -777,7 +828,8 @@ namespace _4RTools.Forms
                 if (registeredEmergencyKey != 0 && IsHandleCreated) Native.UnregisterHotKey(Handle, EmergencyHotkeyId);
                 registeredEmergencyKey = 0;
                 session.Logged -= AppendLog;
-                session.Dispose();
+                if (ownsSession) session.Dispose();
+                else session.SetEnabled(false);
                 tips.Dispose();
             }
             base.Dispose(disposing);
@@ -817,14 +869,17 @@ namespace _4RTools.Forms
         }
 
         private static ComboBox DropDown(int width) => new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = width };
-        private static FlowLayoutPanel Flow() => new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Margin = new Padding(0, 2, 0, 3) };
+        private static FlowLayoutPanel Flow() => new BufferedFlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Margin = new Padding(0, 2, 0, 3) };
         private static Label Caption(string text) => new Label { Text = text, AutoSize = true, Padding = new Padding(0, 6, 4, 0) };
-        private static Label StatusLabel() => new Label { AutoSize = true, MaximumSize = new Size(890, 0), Margin = new Padding(0, 3, 0, 3) };
+        private static Label StatusLabel() => new BufferedLabel { AutoSize = true, MaximumSize = new Size(890, 0), Margin = new Padding(0, 3, 0, 3) };
         private static Label Hint(string text) => new Label { Text = text, AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(950, 0), Padding = new Padding(0, 5, 0, 0) };
         private static NumericUpDown Seconds() => new NumericUpDown { Minimum = 0, Maximum = 3600, DecimalPlaces = 1, Increment = 1, Width = 100 };
         private static int Milliseconds(NumericUpDown number) => checked((int)(number.Value * 1000));
         private static void SetSeconds(NumericUpDown number, int milliseconds) { number.Value = milliseconds / 1000M; }
         private static string FormatTime(DateTimeOffset? time) => time?.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture) ?? "—";
+        private static void SetTextIfChanged(Control control, string value) { if (!string.Equals(control.Text, value, StringComparison.Ordinal)) control.Text = value; }
+        private void SetToolTipIfChanged(Control control, string value) { if (!string.Equals(tips.GetToolTip(control), value, StringComparison.Ordinal)) tips.SetToolTip(control, value); }
+        private static void SetCellIfChanged(DataGridViewCell cell, object value) { if (!Equals(cell.Value, value)) cell.Value = value; }
         private static void AddStatusRow(TableLayoutPanel grid, int row, string text, Control value) { grid.Controls.Add(Caption(text), 0, row); grid.Controls.Add(value, 1, row); }
         private static void AddSetting(TableLayoutPanel grid, int row, string text, Control value, string hint)
         {
@@ -901,6 +956,56 @@ namespace _4RTools.Forms
             private readonly string title;
             public ProcessChoice(int id, string title) { Id = id; this.title = title; }
             public override string ToString() => "Vanilla MMO.exe — " + Id + (string.IsNullOrWhiteSpace(title) ? "" : " — " + title);
+        }
+
+        private sealed class BufferedLabel : Label
+        {
+            public BufferedLabel() { DoubleBuffered = true; }
+        }
+
+        // Label.Text performs parent layout even with AutoSize disabled. This fixed readout
+        // only invalidates its own buffered surface when a complete observation changes.
+        private sealed class BufferedReadout : Control
+        {
+            private string content = string.Empty;
+            public BufferedReadout()
+            {
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+                AccessibleRole = AccessibleRole.StaticText;
+                TabStop = false;
+            }
+            public override string Text
+            {
+                get { return content; }
+                set
+                {
+                    if (string.Equals(content, value, StringComparison.Ordinal)) return;
+                    content = value ?? string.Empty;
+                    OnTextChanged(EventArgs.Empty);
+                    Invalidate();
+                }
+            }
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                TextRenderer.DrawText(e.Graphics, content, Font, ClientRectangle, ForeColor,
+                    TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            }
+        }
+
+        private sealed class BufferedTableLayoutPanel : TableLayoutPanel
+        {
+            public BufferedTableLayoutPanel() { DoubleBuffered = true; }
+        }
+
+        private sealed class BufferedFlowLayoutPanel : FlowLayoutPanel
+        {
+            public BufferedFlowLayoutPanel() { DoubleBuffered = true; }
+        }
+
+        private sealed class BufferedDataGridView : DataGridView
+        {
+            public BufferedDataGridView() { DoubleBuffered = true; }
         }
 
         private static class Native

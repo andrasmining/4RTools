@@ -132,6 +132,16 @@ abandoned experiments, unnecessary architectural rewrites, TODO-only work, and
 placeholder features presented as finished. Evolve a necessary prototype into
 production code or remove it when it is no longer needed before completion.
 
+## Product direction
+
+The original 4RTools window is the primary application. Add Vanilla to its
+Ragnarok Client selector through the read-only adapter, reuse existing feature
+forms and verified state readers, and extend that application where needed.
+Diagnostics and discovery support address mapping; they are not a replacement
+product. Additional Vanilla controls may open as an owned window from the
+original interface. Preserve useful existing extensions while integrating them.
+Selecting a process does not prove its gameplay addresses or feature support.
+
 If the requirement is clear, inspect, implement, test, commit, push, and continue
 without asking after each small change. Work until the requested deliverable is
 actually complete. Do not stop merely because one desired field cannot be

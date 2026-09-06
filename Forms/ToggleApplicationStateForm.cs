@@ -16,20 +16,27 @@ namespace _4RTools.Forms
 
         //Store key used for last profile - necessarly to clean when change profile
         private Keys lastKey;
+        private readonly bool smokeTest;
+        private readonly Func<string> enableGuard;
+        private readonly ToolTip statusTip = new ToolTip();
+        public bool IsOn { get { return this.btnStatusToggle.Text == "ON"; } }
 
-        public ToggleApplicationStateForm(Subject subject)
+        public ToggleApplicationStateForm(Subject subject, bool smokeTest = false, Func<string> enableGuard = null)
         {
+            this.smokeTest = smokeTest;
+            this.enableGuard = enableGuard;
             InitializeComponent();
 
             subject.Attach(this);
             this.subject = subject;
-            KeyboardHook.Enable();
+            if (!smokeTest) KeyboardHook.Enable();
             this.txtStatusToggleKey.Text = ProfileSingleton.GetCurrent().UserPreferences.toggleStateKey;
             this.txtStatusToggleKey.KeyDown += new KeyEventHandler(FormUtils.OnKeyDown);
             this.txtStatusToggleKey.KeyPress += new KeyPressEventHandler(FormUtils.OnKeyPress);
             this.txtStatusToggleKey.TextChanged += new EventHandler(this.onStatusToggleKeyChange);
 
             InitializeContextualMenu();
+            if (smokeTest) this.notifyIconTray.Visible = false;
         }
 
         private void InitializeContextualMenu()
@@ -49,13 +56,14 @@ namespace _4RTools.Forms
 
         public void Update(ISubject subject)
         {
+            if ((subject as Subject).Message.code == MessageCode.TURN_OFF) ForceOff(null, false);
             if ((subject as Subject).Message.code == MessageCode.PROFILE_CHANGED)
             {
                 Keys currentToggleKey = (Keys)Enum.Parse(typeof(Keys), ProfileSingleton.GetCurrent().UserPreferences.toggleStateKey);
-                KeyboardHook.Remove(lastKey); //Remove last key hook to prevent toggle with last profile key used.
+                if (!smokeTest) KeyboardHook.Remove(lastKey);
 
                 this.txtStatusToggleKey.Text = currentToggleKey.ToString();
-                KeyboardHook.Add(currentToggleKey, new KeyboardHook.KeyPressed(this.toggleStatus));
+                if (!smokeTest) KeyboardHook.Add(currentToggleKey, new KeyboardHook.KeyPressed(this.toggleStatus));
                 lastKey = currentToggleKey;
             }
         }
@@ -64,10 +72,11 @@ namespace _4RTools.Forms
 
         private void onStatusToggleKeyChange(object sender, EventArgs e)
         {
+            if (IsOn) ForceOff("Toggle key changed");
             //Get last key from profile before update it in json
             Keys currentToggleKey = (Keys)Enum.Parse(typeof(Keys), this.txtStatusToggleKey.Text);
-            KeyboardHook.Remove(lastKey);
-            KeyboardHook.Add(currentToggleKey, new KeyboardHook.KeyPressed(this.toggleStatus));
+            if (!smokeTest) KeyboardHook.Remove(lastKey);
+            if (!smokeTest) KeyboardHook.Add(currentToggleKey, new KeyboardHook.KeyPressed(this.toggleStatus));
             ProfileSingleton.GetCurrent().UserPreferences.toggleStateKey = currentToggleKey.ToString(); //Update profile key
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().UserPreferences);
 
@@ -76,14 +85,11 @@ namespace _4RTools.Forms
 
         private bool toggleStatus()
         {
+            if (smokeTest) return true;
             bool isOn = this.btnStatusToggle.Text == "ON";
             if (isOn)
             {
-                this.btnStatusToggle.BackColor = Color.Red;
-                this.btnStatusToggle.Text = "OFF";
-                this.notifyIconTray.Icon = Resources._4RTools.ETCResource.logo_4rtools_off;
-                this.subject.Notify(new Utils.Message(MessageCode.TURN_OFF, null));
-                this.lblStatusToggle.Text = "Press the key to start!";
+                ForceOff(null);
 
                 if (this.cbAudio.Checked) { new SoundPlayer(Resources._4RTools.ETCResource.Speech_Off).Play(); }
             }
@@ -92,14 +98,21 @@ namespace _4RTools.Forms
                 Client client = ClientSingleton.GetClient();
                 if (client != null)
                 {
+                    try
+                    {
+                    string error = enableGuard?.Invoke() ?? client.GetEnableError(ProfileSingleton.GetCurrent());
+                    if (error != null) { ForceOff(error); MessageBox.Show(this, error, "Feature unavailable"); return true; }
+                    client.SetAutomationEnabled(true);
+                    this.subject.Notify(new Utils.Message(MessageCode.TURN_ON, null));
                     this.btnStatusToggle.BackColor = Color.Green;
                     this.btnStatusToggle.Text = "ON";
                     this.notifyIconTray.Icon = Resources._4RTools.ETCResource.logo_4rtools_on;
-                    this.subject.Notify(new Utils.Message(MessageCode.TURN_ON, null));
                     this.lblStatusToggle.Text = "Press the key to stop!";
                     this.lblStatusToggle.ForeColor = Color.Black;
 
                     if (this.cbAudio.Checked) { new SoundPlayer(Resources._4RTools.ETCResource.Speech_On).Play(); }
+                    }
+                    catch (Exception ex) { ForceOff(ex.Message); MessageBox.Show(this, ex.Message, "Automation stopped"); }
                 }
                 else
                 {
@@ -109,6 +122,17 @@ namespace _4RTools.Forms
             }
 
             return true;
+        }
+
+        public void ForceOff(string reason, bool notify = true)
+        {
+            ClientSingleton.GetClient()?.SetAutomationEnabled(false);
+            this.btnStatusToggle.BackColor = Color.Red;
+            this.btnStatusToggle.Text = "OFF";
+            this.notifyIconTray.Icon = Resources._4RTools.ETCResource.logo_4rtools_off;
+            if (notify) this.subject.Notify(new Utils.Message(MessageCode.TURN_OFF, null));
+            this.lblStatusToggle.Text = string.IsNullOrWhiteSpace(reason) ? "Press the key to start!" : "OFF — see Vanilla status";
+            statusTip.SetToolTip(this.lblStatusToggle, reason ?? "");
         }
 
         private void notifyIconDoubleClick(object sender, MouseEventArgs e)

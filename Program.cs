@@ -35,7 +35,7 @@ namespace _4RTools
             }
             System.Windows.Forms.Application.EnableVisualStyles();
             System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
-            if (args.Length > 0 && args[0] == "--portable-smoke-test")
+            if (args.Length > 0 && (args[0] == "--portable-smoke-test" || args[0] == "--original-ui-check"))
             {
                 PortableSmokeTest(args);
                 return;
@@ -58,8 +58,9 @@ namespace _4RTools
             }
             try
             {
-                if (args.Contains("--stock-ui"))
+                if (!args.Contains("--vanilla-tools"))
                 {
+                    ProfileSingleton.Create("Default");
                     LoadStockClients();
                     System.Windows.Forms.Application.Run(new Forms.Container());
                     return;
@@ -99,7 +100,7 @@ namespace _4RTools
             clients.AddRange(JsonConvert.DeserializeObject<System.Collections.Generic.List<ClientDTO>>(Resources._4RTools.ETCResource.supported_servers));
             foreach (var client in clients)
             {
-                // Vanilla always goes through the read-only, fingerprinted companion path.
+                // Vanilla uses the shared read-only backend instead of legacy address definitions.
                 if (Client.IsVanillaProcessName(client.name)) continue;
                 ClientListSingleton.AddClient(new Client(client));
             }
@@ -114,34 +115,73 @@ namespace _4RTools
                 if (outputIndex < 0 || outputIndex + 1 >= args.Length) throw new ArgumentException("Smoke test requires --output <new-json-path>.");
                 output = args[outputIndex + 1];
                 if (File.Exists(output)) throw new IOException("Smoke report already exists.");
-                using (var session = new VanillaAutomationSession(AppDomain.CurrentDomain.BaseDirectory))
-                using (var form = new Forms.VanillaAutomationForm(session))
+                ProfileSingleton.Create("Default");
+                LoadStockClients();
+                using (var form = new Forms.Container(smokeTest: true))
                 {
                     form.ShowInTaskbar = false;
                     form.Opacity = 0;
                     form.Show();
                     System.Windows.Forms.Application.DoEvents();
-                    form.VerifyDisplayedSettings();
-                    session.Tick();
-                    session.Settings.Validate();
-                    if (session.IsEnabled || session.Snapshot != null || IntPtr.Size != 4)
+                    if (form.AutomationEnabled || form.GameplayAttached || IntPtr.Size != 4)
                         throw new InvalidOperationException("Unexpected startup automation, game attachment, or process architecture.");
+                    // Upstream reparents its child forms into tab pages, so MdiChildren
+                    // does not contain them all after the window is constructed.
+                    string[] originalForms = Descendants(form).OfType<System.Windows.Forms.Form>()
+                        .Select(child => child.GetType().Name).ToArray();
+                    int featureForms = originalForms.Length;
+                    if (featureForms < 10) throw new InvalidOperationException("Original feature forms are missing.");
                     var stock = JsonConvert.DeserializeObject<System.Collections.Generic.List<ClientDTO>>(Resources._4RTools.ETCResource.supported_servers);
                     if (stock == null || stock.Count == 0) throw new InvalidOperationException("Bundled stock resources missing.");
+                    bool liveCheck = args[0] == "--original-ui-check";
+                    VanillaClientState snapshot = null;
+                    if (liveCheck)
+                    {
+                        int pid;
+                        if (args.Length < 2 || !int.TryParse(args[1], out pid) || pid <= 0)
+                            throw new ArgumentException("Original UI check requires a positive Vanilla process ID.");
+                        form.SelectClientForValidation(pid);
+                        snapshot = form.VanillaSnapshot;
+                        if (snapshot == null || snapshot.ProcessId != pid || form.AutomationEnabled)
+                            throw new InvalidOperationException("Original UI did not attach read-only to the requested client.");
+                    }
                     int imageIndex = Array.IndexOf(args, "--screenshot");
                     if (imageIndex >= 0 && imageIndex + 1 < args.Length)
+                    {
+                        form.Refresh();
+                        System.Windows.Forms.Application.DoEvents();
                         using (var bitmap = new System.Drawing.Bitmap(form.Width, form.Height))
-                        { form.DrawToBitmap(bitmap, form.ClientRectangle); bitmap.Save(args[imageIndex + 1]); }
+                        {
+                            form.DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, form.Width, form.Height));
+                            // MdiClient paints over reparented stock controls in DrawToBitmap.
+                            // Render those controls directly, without capturing other windows.
+                            var origin = form.PointToScreen(System.Drawing.Point.Empty);
+                            foreach (var control in form.Controls.Cast<System.Windows.Forms.Control>().Reverse())
+                            {
+                                if (!control.Visible || control is System.Windows.Forms.MdiClient) continue;
+                                var bounds = new System.Drawing.Rectangle(origin.X - form.Left + control.Left,
+                                    origin.Y - form.Top + control.Top, control.Width, control.Height);
+                                bounds = System.Drawing.Rectangle.Intersect(bounds, new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height));
+                                if (bounds.Width > 0 && bounds.Height > 0)
+                                    control.DrawToBitmap(bitmap, bounds);
+                            }
+                            bitmap.Save(args[imageIndex + 1]);
+                        }
+                    }
                     form.Close();
                     File.WriteAllText(output, JsonConvert.SerializeObject(new
                     {
-                        Success = true, Version = "0.1.0", PointerBytes = IntPtr.Size,
+                        Success = true, Version = "0.2.0", PointerBytes = IntPtr.Size,
+                        MainUi = "Container", OriginalFeatureForms = featureForms,
+                        FeatureForms = originalForms,
+                        AutomationEnabled = false,
                         ExecutableDirectory = AppDomain.CurrentDomain.BaseDirectory,
                         WorkingDirectory = Environment.CurrentDirectory,
-                        ProfileRoundTrip = session.GetProfileNames().Count > 0,
+                        ProfileRoundTrip = Profile.ListAll().Count > 0,
                         StockClientDefinitions = stock.Count,
-                        GameplayAttached = false, InputSent = false,
-                        Checked = "Embedded JSON dependency, resources, portable settings, UI construction/show/close and automation OFF"
+                        GameplayAttached = liveCheck, InputSent = false, Snapshot = snapshot,
+                        Checked = liveCheck ? "Original client selector and shared read-only snapshot; automation OFF without input or keyboard hook"
+                            : "Original 4RTools window and feature forms, embedded dependencies, portable profiles, UI show/close; automation OFF without game attachment or keyboard hook"
                     }, Formatting.Indented));
                 }
             }
@@ -150,6 +190,15 @@ namespace _4RTools
                 Environment.ExitCode = 1;
                 if (output != null && !File.Exists(output))
                     File.WriteAllText(output, JsonConvert.SerializeObject(new { Success = false, Error = ex.ToString() }, Formatting.Indented));
+            }
+        }
+
+        private static System.Collections.Generic.IEnumerable<System.Windows.Forms.Control> Descendants(System.Windows.Forms.Control parent)
+        {
+            foreach (System.Windows.Forms.Control child in parent.Controls)
+            {
+                yield return child;
+                foreach (var descendant in Descendants(child)) yield return descendant;
             }
         }
 

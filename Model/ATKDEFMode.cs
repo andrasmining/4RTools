@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Newtonsoft.Json;
 using _4RTools.Utils;
 using System.Threading;
@@ -38,10 +38,11 @@ namespace _4RTools.Model
 
         public void Start()
         {
+            Stop();
             Client roClient = ClientSingleton.GetClient();
             if (roClient != null)
             {
-                this.thread = new _4RThread(_ => AHKThreadExecution(roClient));
+                this.thread = new _4RThread(_ => AHKThreadExecution(roClient), roClient.HandleWorkerFailure);
                 _4RThread.Start(this.thread);
             }
         }
@@ -53,7 +54,7 @@ namespace _4RTools.Model
             {
                 foreach (Key key in atkKeys.Values)
                 {
-                    Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, toKeys(key), 0); //Equip ATK Items
+                    Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, toKeys(key), 0); //Equip ATK Items
                     Thread.Sleep(this.switchDelay);
                 }
 
@@ -62,10 +63,10 @@ namespace _4RTools.Model
                     while (Keyboard.IsKeyDown(keySpammer))
                     {
 
-                        Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
-                        Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_LBUTTONDOWN, 0, 0);
+                        Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
+                        Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_LBUTTONDOWN, 0, 0);
                         Thread.Sleep(1);
-                        Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_LBUTTONUP, 0, 0);
+                        Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_LBUTTONUP, 0, 0);
                         Thread.Sleep(this.ahkDelay);
                     }
                 }
@@ -73,14 +74,14 @@ namespace _4RTools.Model
                 {
                     while (Keyboard.IsKeyDown(keySpammer))
                     {
-                        Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
+                        Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
                         Thread.Sleep(this.ahkDelay);
                     }
                 }
 
                 foreach (Key key in defKeys.Values)
                 {
-                    Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, toKeys(key), 0); //Equip DEF Items
+                    Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, toKeys(key), 0); //Equip DEF Items
                     Thread.Sleep(this.switchDelay);
                 }
             }

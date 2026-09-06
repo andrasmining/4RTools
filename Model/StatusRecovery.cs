@@ -27,9 +27,9 @@ namespace _4RTools.Model
             Client roClient = ClientSingleton.GetClient();
             _4RThread statusEffectsThread = new _4RThread(_ =>
             {
-                for (int i = 0; i <= Constants.MAX_BUFF_LIST_INDEX_SIZE - 1; i++)
+                if (buffMapping.Count == 0 && !autoStand) { Thread.Sleep(Math.Max(1, delay)); return 0; }
+                foreach (uint currentStatus in c.ReadStatusSnapshot())
                 {
-                    uint currentStatus = c.CurrentBuffStatusCode(i);
                     EffectStatusIDs status = (EffectStatusIDs)currentStatus;
                     if (buffMapping.ContainsKey((EffectStatusIDs)currentStatus)) //IF FOR REMOVE STATUS - CHECK IF STATUS EXISTS IN STATUS LIST AND DO ACTION
                     {
@@ -37,19 +37,19 @@ namespace _4RTools.Model
                         Key key = buffMapping[(EffectStatusIDs)currentStatus];
                         if (Enum.IsDefined(typeof(EffectStatusIDs), currentStatus))
                         {
-                            this.useStatusRecovery(key);
+                            this.useStatusRecovery(c, key);
                         }
                     }
 
                     if (this.autoStand && EffectStatusIDs.EFST_SIT == status)
                     {
-                        this.useStatusRecovery(Key.Insert);
+                        this.useStatusRecovery(c, Key.Insert);
                     }
                 }
 
                 Thread.Sleep(this.delay);
                 return 0;
-            });
+            }, c.HandleWorkerFailure);
 
             return statusEffectsThread;
         }
@@ -88,10 +88,10 @@ namespace _4RTools.Model
             _4RThread.Stop(this.thread);
         }
 
-        private void useStatusRecovery(Key key)
+        private void useStatusRecovery(Client client, Key key)
         {
             if ((key != Key.None) && !Keyboard.IsKeyDown(Key.LeftAlt) && !Keyboard.IsKeyDown(Key.RightAlt))
-                Interop.PostMessage(ClientSingleton.GetClient().process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, (Keys)Enum.Parse(typeof(Keys), key.ToString()), 0);
+                Interop.PostMessage(client, client.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, (Keys)Enum.Parse(typeof(Keys), key.ToString()), 0, true);
         }
 
     }

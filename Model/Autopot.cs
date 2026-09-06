@@ -51,7 +51,7 @@ namespace _4RTools.Model
             if(roClient != null)
             {
                 int hpPotCount = 0;
-                this.thread = new _4RThread(_ => AutopotThreadExecution(roClient, hpPotCount));
+                this.thread = new _4RThread(_ => AutopotThreadExecution(roClient, hpPotCount), roClient.HandleWorkerFailure);
                 _4RThread.Start(this.thread);
             }
         }
@@ -59,37 +59,37 @@ namespace _4RTools.Model
         private int AutopotThreadExecution(Client roClient, int hpPotCount)
         {
             // check hp first
-            if (roClient.IsHpBelow(hpPercent))
+            if (hpKey != Key.None && hpPercent > 0 && roClient.IsHpBelow(hpPercent))
             {
-                pot(this.hpKey);
+                pot(roClient, this.hpKey);
                 hpPotCount++;
 
                 if (hpPotCount == 3)
                 {
                     hpPotCount = 0;
-                    if (roClient.IsSpBelow(spPercent))
+                    if (spKey != Key.None && spPercent > 0 && roClient.IsSpBelow(spPercent))
                     {
-                        pot(this.spKey);
+                        pot(roClient, this.spKey);
                     }
                 }
             }
             // check sp
-            if (roClient.IsSpBelow(spPercent))
+            if (spKey != Key.None && spPercent > 0 && roClient.IsSpBelow(spPercent))
             {
-                pot(this.spKey);
+                pot(roClient, this.spKey);
             }
 
             Thread.Sleep(this.delay);
             return 0;
         }
 
-        private void pot(Key key)
+        private void pot(Client client, Key key)
         {
             Keys k = (Keys)Enum.Parse(typeof(Keys), key.ToString());
             if ((k != Keys.None) && !Keyboard.IsKeyDown(Key.LeftAlt) && !Keyboard.IsKeyDown(Key.RightAlt))
             {
-                Interop.PostMessage(ClientSingleton.GetClient().process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, k, 0); // keydown
-                Interop.PostMessage(ClientSingleton.GetClient().process.MainWindowHandle, Constants.WM_KEYUP_MSG_ID, k, 0); // keyup
+                Interop.PostMessage(client, client.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, k, 0, true); // keydown
+                Interop.PostMessage(client, client.process.MainWindowHandle, Constants.WM_KEYUP_MSG_ID, k, 0, true); // keyup
             }
         }
 

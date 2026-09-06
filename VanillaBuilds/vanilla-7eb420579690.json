@@ -1,15 +1,21 @@
 {
   "SchemaVersion": 1,
-  "Label": "Vanilla client observed 2026-09-06; gameplay fields unverified",
+  "Label": "Vanilla — HP/SP and character-name mapping under validation",
   "Sha256": "7eb420579690bd2f5c81b42fa69888cb3d144486d3c275a19073f5216698b3ef",
   "Machine": 332,
   "ImageSize": 15839232,
-  "Evidence": "Executable fingerprint, 32-bit architecture, module metadata and read-only executable-header access were observed locally on 2026-09-06. HP/SP, target, combat, position, readiness and all other gameplay fields have NOT been verified. This profile identifies the executable only and does not enable automation.",
+  "Evidence": "2026-09-07: one unique main-data HP/SP quartet matched the user screenshot (456/456 HP, 113/113 SP), and one exact null-terminated string matched the visible character name. Both were repeatedly observed read-only. Controlled changes and lifecycle validation remain outstanding; these mappings expose diagnostic observations but do not enable automation. Target, combat, position, readiness and statuses are unmapped.",
   "MemoryMap": {
     "SchemaVersion": 1,
     "ProcessName": "Vanilla MMO.exe",
-    "Evidence": "No gameplay addresses are published without controlled semantic verification.",
-    "Fields": {}
+    "Evidence": "Module-relative candidates matched visible character values. Unverified fields are never used by automated actions.",
+    "Fields": {
+      "CurrentHP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DDC", "Encoding": "UInt32", "Evidence": "Unique quartet matched visible HP 456; controlled HP change untested." },
+      "MaxHP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE0", "Encoding": "UInt32", "Evidence": "Unique quartet matched visible max HP 456; maximum change untested." },
+      "CurrentSP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE4", "Encoding": "UInt32", "Evidence": "Unique quartet matched visible SP 113; controlled SP use untested." },
+      "MaxSP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE8", "Encoding": "UInt32", "Evidence": "Unique quartet matched visible max SP 113; maximum change untested." },
+      "CharacterName": { "Module": "Vanilla MMO.exe", "Address": "0xD3B7B0", "Encoding": "Utf8", "ByteCount": 40, "Evidence": "One exact null-terminated string in main data matched the visible character name; character switch untested." }
+    }
   },
   "VerifiedFields": [],
   "ActionStates": [],

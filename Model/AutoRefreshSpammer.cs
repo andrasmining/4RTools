@@ -21,13 +21,14 @@ namespace _4RTools.Model
 
         public void Start()
         {
+            Stop();
             Client roClient = ClientSingleton.GetClient();
             if (roClient != null)
             {
                 const int defaultDelayInSeconds = 1000;
                 int delayInSeconds = this.RefreshDelay * 1000;
                 int delay = delayInSeconds == 0 ? defaultDelayInSeconds : delayInSeconds;
-                this.thread = new _4RThread(_ => AutorefreshThreadExecution(roClient, delay));
+                this.thread = new _4RThread(_ => AutorefreshThreadExecution(roClient, delay), roClient.HandleWorkerFailure);
                 _4RThread.Start(this.thread);
             }
         }
@@ -36,7 +37,8 @@ namespace _4RTools.Model
         {
             if (this.RefreshKey != Key.None)
             {
-                Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, (Keys)Enum.Parse(typeof(Keys), this.RefreshKey.ToString()), 0);
+                roClient.EnsureAutomaticActionsReady();
+                Interop.PostMessage(roClient, roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, (Keys)Enum.Parse(typeof(Keys), this.RefreshKey.ToString()), 0, true);
             }
             Thread.Sleep(delay);
             return 0;
