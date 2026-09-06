@@ -39,6 +39,8 @@ namespace _4RTools.Utils
         private readonly Dictionary<string, ulong> modules = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase);
         public int ProcessId { get; private set; }
         public string ProcessName { get; private set; }
+        public string ExecutablePath { get; private set; }
+        public uint MainModuleSize { get; private set; }
         public int PointerSize { get; private set; }
         public ulong MainModuleBaseAddress { get; private set; }
         public bool IsStopped { get; private set; }
@@ -60,7 +62,8 @@ namespace _4RTools.Utils
                 var path = new StringBuilder(32768);
                 int length = path.Capacity;
                 if (!Native.QueryFullProcessImageName(handle, 0, path, ref length)) throw NativeFailure("QueryFullProcessImageName", Marshal.GetLastWin32Error());
-                ProcessName = Path.GetFileNameWithoutExtension(path.ToString());
+                ExecutablePath = path.ToString();
+                ProcessName = Path.GetFileNameWithoutExtension(ExecutablePath);
                 ReadModuleMetadata();
                 EnsureAlive();
             }
@@ -124,6 +127,7 @@ namespace _4RTools.Utils
                 var entry = new Native.ModuleEntry { Size = (uint)Marshal.SizeOf(typeof(Native.ModuleEntry)) };
                 if (!Native.Module32First(snapshot, ref entry)) throw NativeFailure("Module32First", Marshal.GetLastWin32Error());
                 MainModuleBaseAddress = ToAddress(entry.BaseAddress);
+                MainModuleSize = entry.BaseSize;
                 do
                 {
                     modules[entry.ModuleName] = ToAddress(entry.BaseAddress);

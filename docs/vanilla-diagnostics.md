@@ -1,5 +1,29 @@
 # Vanilla diagnostics engineering record
 
+## Continued runtime discovery
+
+On 2026-09-06 the current client executable was fingerprinted as SHA-256
+`7eb420579690bd2f5c81b42fa69888cb3d144486d3c275a19073f5216698b3ef`,
+PE machine `0x014c` (x86), image timestamp `1648704405`, image size `15839232`.
+The main image's writable `.data` section was read successfully (3,989,092 bytes)
+using exact, bounded reads. Plausible HP/maxHP/SP/maxSP quartets are candidates
+only; matching displayed values across changes is still required. No game code,
+security module, heap actor data, or packets were scanned or modified.
+
+The reusable developer command `--vanilla-discover <pid> --output <new-path>`
+records executable identity. `--scan` additionally scans only writable,
+non-executable `.data`/`.bss` sections of the main image, with a 16 MiB total
+bound and immediate stop on any read failure. `--stats HP,MaxHP,SP,MaxSP` narrows
+matches to a known visible comparison. Only up to 512 candidates are exported,
+so an unfiltered candidate list is not exhaustive. No raw dump is written.
+`--capture <new-png-path>` uses normal PrintWindow; `--restore-window` explicitly
+restores a minimized window first. Current normal window captures return black
+pixels even after restoration, so visible character values have been requested
+as external comparison evidence. No capture/security workaround was attempted.
+
+Both configurations passed 25 offline test groups after this discovery change,
+including stable PE fingerprinting and malformed-image rejection.
+
 This extension provides optional read-only state observations, a separate diagnostics window, and a deterministic demo that works without Vanilla. No Vanilla gameplay field has been verified yet. Smart Teleport, stuck detection, SP recovery, and an action/rule runner are not implemented in this initial deliverable; their live action gates depend on verified state and permission for modified functionality.
 
 Starting 4RTools normally retains its existing updater, server selection, profiles, and features. The diagnostics entry points skip normal startup so observing a process does not enable existing macros. A successfully built or launched modified executable is not proof that Vanilla permits that executable.

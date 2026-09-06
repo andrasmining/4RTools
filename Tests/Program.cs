@@ -41,6 +41,7 @@ namespace Vanilla.Diagnostics.Tests
             Run("Profile settings accept legacy objects, strings and absent sections", ProfileSettings);
             Run("Polling configuration enforces bounded intervals", PollingBounds);
             Run("Demo source works without process memory", Demo);
+            Run("Executable fingerprint is stable and rejects malformed images", DiscoveryTests.Run);
 
             Console.WriteLine("{0} passed; {1} failed. All tests used offline data.", passed, failed);
             return failed == 0 ? 0 : 1;

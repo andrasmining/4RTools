@@ -16,6 +16,11 @@ namespace _4RTools
         [STAThread]
         static void Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "--vanilla-discover")
+            {
+                Discover(args);
+                return;
+            }
             // This developer entry point creates no stock workers or updater.
             if (args.Length > 0 && args[0] == "--vanilla-snapshot")
             {
@@ -95,6 +100,28 @@ namespace _4RTools
                     catch (Exception writeError) { Console.Error.WriteLine(writeError); }
                 }
             }
+        }
+
+        private static void Discover(string[] args)
+        {
+            try
+            {
+                int pid;
+                int outputIndex = Array.IndexOf(args, "--output"), captureIndex = Array.IndexOf(args, "--capture");
+                if (args.Length < 2 || !int.TryParse(args[1], out pid) || outputIndex < 0 || outputIndex + 1 >= args.Length)
+                    throw new ArgumentException("Use --vanilla-discover <pid> --output <new-json-path> [--scan] [--capture <new-png-path>].");
+                string output = args[outputIndex + 1];
+                if (File.Exists(output)) throw new IOException("Output already exists.");
+                string capture = captureIndex >= 0 && captureIndex + 1 < args.Length ? args[captureIndex + 1] : null;
+                if (capture != null && File.Exists(capture)) throw new IOException("Capture output already exists.");
+                int statsIndex = Array.IndexOf(args, "--stats");
+                uint[] expected = statsIndex >= 0 && statsIndex + 1 < args.Length
+                    ? args[statsIndex + 1].Split(',').Select(value => uint.Parse(value, System.Globalization.CultureInfo.InvariantCulture)).ToArray() : null;
+                var result = VanillaDiscovery.Inspect(pid, args.Contains("--scan"), capture, expected, args.Contains("--restore-window"));
+                File.WriteAllText(output, JsonConvert.SerializeObject(result, Formatting.Indented));
+                if (result.Error != null) Environment.ExitCode = 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
         }
     }
 }
