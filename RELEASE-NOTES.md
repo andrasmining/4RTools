@@ -186,9 +186,12 @@ cover ordinary OFF without a failure latch and stopped callbacks that must not
 send into a later ON interval. The owned extra window's emergency stop covers
 both sets of controls, with conflicting hotkeys rejected.
 
-The final extracted **0.2.0** portable ZIP launch is still pending. The tests and
-live display checks above do not establish Autopot, macro, teleport, or recovery
-effects in the game, and no real input was sent during these checks.
+The **0.2.0** portable ZIP was extracted into a fresh repository directory and
+its executable passed the original-window launch check: `Container`, 13 original
+feature forms, automation OFF, no game attachment, and no input. All packaged
+payload checksums matched after launch. The tests and live display checks above
+do not establish Autopot, macro, teleport, or recovery effects in the game, and
+no real input was sent during these checks.
 
 The prior **0.1.0** x86 Release and Debug configurations rebuilt with
 **zero errors and the same six baseline warnings**, passing **88 offline test
@@ -273,3 +276,13 @@ for application users.
 ZIP and executable hashes are generated below only after a successful complete
 packaging run. The packaged notes omit that generated block to avoid a circular
 ZIP checksum; `SHA256SUMS.txt` inside the package covers its original payload.
+
+<!-- BEGIN GENERATED RELEASE CHECKSUMS -->
+
+Release version: 0.2.0. SHA256:
+
+- `4RTools-Vanilla-v0.2.0-portable.zip`: `d6bdcc4efb7455d59fc0f2aab0f81445143c096c73e80b58ca06e5b4dc75c2f1`
+- `4RTools-Vanilla.exe`: `4ae0abdef0357c3d5f80146c497cfebd8f76aec9e7a587bca75f2315945ed695`
+
+These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
+<!-- END GENERATED RELEASE CHECKSUMS -->
