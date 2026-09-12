@@ -1,0 +1,67 @@
+name: Verified release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Properties/AssemblyInfo.cs'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: verified-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Restore NuGet packages
+        shell: powershell
+        run: nuget restore 4RTools.sln -NonInteractive
+
+      - name: Resolve release version
+        shell: powershell
+        run: |
+          $text = Get-Content 'Properties/AssemblyInfo.cs' -Raw
+          $match = [regex]::Match($text, 'AssemblyFileVersion\("([0-9]+\.[0-9]+\.[0-9]+)\.0"\)')
+          if (-not $match.Success) { throw 'Could not resolve semantic version from AssemblyFileVersion.' }
+          "VERSION=$($match.Groups[1].Value)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build, test, package and smoke-test
+        shell: powershell
+        run: '& .\scripts\build-release.ps1 -Version $env:VERSION'
+
+      - name: Publish GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:VERSION"
+          $zip = "dist/4RTools-Vanilla-v$env:VERSION-portable.zip"
+          $checksum = "$zip.sha256"
+          if (-not (Test-Path -LiteralPath $zip)) { throw "Missing release ZIP: $zip" }
+          if (-not (Test-Path -LiteralPath $checksum)) { throw "Missing release checksum: $checksum" }
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip $checksum --clobber --repo $env:GITHUB_REPOSITORY
+            if ($LASTEXITCODE -ne 0) { throw "Failed to refresh assets for $tag." }
+          }
+          else {
+            gh release create $tag $zip $checksum --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "4RTools Vanilla $env:VERSION" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw "Failed to publish $tag." }
+          }
+
+          $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "Published $tag"
+          Write-Host "Portable ZIP SHA256: $sha"
