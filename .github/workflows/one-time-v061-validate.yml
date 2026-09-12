@@ -1,5 +1,5 @@
 name: One-time 0.6.1 professionalization validation
-# Validation attempt 6: idempotent compatibility/migration patch.
+# Validation attempt 7: remove PowerShell's built-in `write` alias so the migration script's Write helper actually writes files.
 
 on:
   push:
@@ -23,6 +23,10 @@ jobs:
       - name: Apply proposed changes
         shell: powershell
         run: |
+          # PowerShell exposes `write` as an alias for Write-Output. The one-time script
+          # intentionally defines a Write helper; remove the inherited alias so the
+          # helper wins command resolution and creates the generated source files.
+          Remove-Item Alias:write -Force -ErrorAction SilentlyContinue
           & .\scripts\one-time-v061-professionalize.ps1
           & .\scripts\one-time-v061-fix.ps1
       - name: Restore NuGet packages
