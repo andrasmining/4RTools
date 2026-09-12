@@ -86,17 +86,17 @@ namespace _4RTools.Forms
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             var header = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(0, 0, 0, 6) };
-            header.Controls.Add(new Label { Text = "Vanilla workspace", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Margin = new Padding(4, 8, 14, 0) });
+            header.Controls.Add(new Label { Text = "Vanilla workspace", Font = new Font(Font.FontFamily, 11F, FontStyle.Bold), AutoSize = true, Margin = new Padding(4, 8, 14, 0) });
             AddIntegratedButton(header, "OPEN DATA FOLDER", OpenDataFolder);
             AddIntegratedButton(header, "CHECK FOR UPDATES", () => CheckForUpdates(false));
-            integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText + " â€” settings persist in Windows user data.";
+            integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText + " - settings persist in Windows user data.";
             header.Controls.Add(integratedUpdateStatus);
             root.Controls.Add(header, 0, 0);
 
-            vanillaWorkspace = new TabControl { Dock = DockStyle.Fill, Padding = new Point(14, 6) };
-            vanillaRecoveryPage = new TabPage("Recovery & relog") { Padding = new Padding(4) };
-            vanillaRulesPage = new TabPage("Automation rules") { Padding = new Padding(4) };
-            vanillaDiagnosticsPage = new TabPage("Diagnostics") { Padding = new Padding(4) };
+            vanillaWorkspace = new TabControl { Dock = DockStyle.Fill, Padding = new Point(16, 7), Font = new Font(Font.FontFamily, 9F, FontStyle.Regular) };
+            vanillaRecoveryPage = new TabPage("Recovery & relog") { Padding = new Padding(6) };
+            vanillaRulesPage = new TabPage("Automation rules") { Padding = new Padding(6) };
+            vanillaDiagnosticsPage = new TabPage("Diagnostics") { Padding = new Padding(6) };
             vanillaAboutPage = new TabPage("Data & updates") { Padding = new Padding(12) };
             vanillaWorkspace.TabPages.AddRange(new[] { vanillaRecoveryPage, vanillaRulesPage, vanillaDiagnosticsPage, vanillaAboutPage });
             vanillaWorkspace.SelectedIndexChanged += (s, e) =>
@@ -160,8 +160,8 @@ namespace _4RTools.Forms
             panel.Controls.Add(PathLabel("Logs", VanillaAppData.LogsDirectory));
             panel.Controls.Add(new Label
             {
-                AutoSize = true, MaximumSize = new Size(1050, 0), Margin = new Padding(3, 12, 3, 10), ForeColor = Color.DimGray,
-                Text = "The versioned application folder no longer stores user profiles or recovery credentials. On first run this version migrates compatible data from the current folder and nearby older 4RTools-Vanilla-v* folders. Passwords remain Windows-DPAPI protected for this Windows user/PC."
+                AutoSize = true, MaximumSize = new Size(1200, 0), Margin = new Padding(3, 12, 3, 10), ForeColor = Color.DimGray,
+                Text = "The application folder no longer stores user profiles or recovery credentials. Compatible data is migrated from older releases into this persistent Windows-user data location. Passwords remain Windows-DPAPI protected for this Windows user/PC."
             });
             var buttons = new FlowLayoutPanel { AutoSize = true };
             AddIntegratedButton(buttons, "OPEN DATA FOLDER", OpenDataFolder);
@@ -170,7 +170,7 @@ namespace _4RTools.Forms
             panel.Controls.Add(buttons);
             panel.Controls.Add(new Label
             {
-                AutoSize = true, MaximumSize = new Size(1050, 0), Margin = new Padding(3, 12, 3, 3),
+                AutoSize = true, MaximumSize = new Size(1200, 0), Margin = new Padding(3, 12, 3, 3),
                 Text = "Updates are checked at every normal startup. A newer verified GitHub Release is offered for download; its ZIP checksum and packaged SHA256SUMS manifest are verified before 4RTools restarts into the new version."
             });
             vanillaAboutPage.Controls.Add(panel);
@@ -178,7 +178,7 @@ namespace _4RTools.Forms
 
         private static Label PathLabel(string caption, string path)
         {
-            return new Label { AutoSize = true, MaximumSize = new Size(1080, 0), Text = caption + ":  " + path, Margin = new Padding(3, 6, 3, 0) };
+            return new Label { AutoSize = true, MaximumSize = new Size(1250, 0), Text = caption + ":  " + path, Margin = new Padding(3, 6, 3, 0) };
         }
 
         private static void AddIntegratedButton(Control parent, string text, System.Action action)
@@ -198,13 +198,13 @@ namespace _4RTools.Forms
         {
             if (updateCheckRunning || smokeTest) return;
             updateCheckRunning = true;
-            integratedUpdateStatus.Text = "Checking GitHub Releasesâ€¦";
+            integratedUpdateStatus.Text = "Checking GitHub Releases...";
             try
             {
                 VanillaUpdateInfo update = await VanillaUpdater.CheckAsync();
                 if (update == null)
                 {
-                    integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText + " â€” up to date.";
+                    integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText + " - up to date.";
                     if (!startup) MessageBox.Show(this, "4RTools Vanilla " + VanillaUpdater.CurrentVersionText + " is the latest published release.", "Updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
@@ -213,15 +213,15 @@ namespace _4RTools.Forms
                     "4RTools Vanilla " + update.Version.ToString(3) + " is available. Download the verified GitHub Release and restart now?\n\nYour profiles and recovery settings are stored outside the application folder and will be preserved.",
                     "4RTools Vanilla update", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
                 if (answer != DialogResult.Yes) return;
-                integratedUpdateStatus.Text = "Downloading and verifying " + update.TagName + "â€¦";
+                integratedUpdateStatus.Text = "Downloading and verifying " + update.TagName + "...";
                 string payload = await VanillaUpdater.DownloadAndStageAsync(update);
-                integratedUpdateStatus.Text = "Update verified. Restartingâ€¦";
+                integratedUpdateStatus.Text = "Update verified. Restarting...";
                 VanillaUpdater.BeginApplyAndRestart(payload);
                 BeginInvoke((MethodInvoker)Application.Exit);
             }
             catch (Exception ex)
             {
-                integratedUpdateStatus.Text = startup ? "Update check unavailable â€” normal use continues." : "Update check failed.";
+                integratedUpdateStatus.Text = startup ? "Update check unavailable - normal use continues." : "Update check failed.";
                 if (!startup) MessageBox.Show(this, ex.Message, "Update check failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { updateCheckRunning = false; }
