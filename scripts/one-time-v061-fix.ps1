@@ -17,18 +17,21 @@ if ($t -match 'UseShellExecute') { throw 'UseShellExecute remained in VanillaUpd
 # graph on .NET Framework and the CI compiler resolves those exception types inconsistently.
 # Retrying every copy failure is safe: retries are bounded and the update payload is hash-
 # verified before and after staging; the final failure is still surfaced to the user.
-$old='                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { last = ex; Thread.Sleep(500); }'
-$new='                catch (Exception ex) { last = ex; Thread.Sleep(500); }'
-if(-not $t.Contains($old)){throw 'Updater retry exception-filter anchor missing.'}
-$t=$t.Replace($old,$new)
+$filteredCatch='catch\s*\(Exception\s+ex\)\s*when\s*\(ex\s+is\s+IOException\s*\|\|\s*ex\s+is\s+UnauthorizedAccessException\)\s*\{\s*last\s*=\s*ex;\s*Thread\.Sleep\(500\);\s*\}'
+$plainCatch='catch (Exception ex) { last = ex; Thread.Sleep(500); }'
+if ([Text.RegularExpressions.Regex]::IsMatch($t, $filteredCatch)) {
+    $t=[Text.RegularExpressions.Regex]::Replace($t, $filteredCatch, $plainCatch)
+}
+if (-not $t.Contains($plainCatch)) { throw 'Updater bounded retry catch is missing after compatibility patch.' }
 if ($t -match 'ex\s+is\s+(IOException|UnauthorizedAccessException)') { throw 'Legacy exception type-pattern remained in VanillaUpdater.cs.' }
 Write $p $t
 
 $p='Model/Vanilla/VanillaIntegratedShell.cs'
 $t=Read $p
 $old='            Process.Start(new ProcessStartInfo { FileName = VanillaAppData.RootDirectory, UseShellExecute = true });'
-if(-not $t.Contains($old)){throw 'Integrated data-folder opener anchor missing.'}
-$t=$t.Replace($old,'            Process.Start(VanillaAppData.RootDirectory);')
+$new='            Process.Start(VanillaAppData.RootDirectory);'
+if ($t.Contains($old)) { $t=$t.Replace($old,$new) }
+if (-not $t.Contains($new)) { throw 'Integrated data-folder opener is missing after compatibility patch.' }
 if ($t -match 'UseShellExecute') { throw 'UseShellExecute remained in VanillaIntegratedShell.cs after compatibility patch.' }
 Write $p $t
 
@@ -64,8 +67,10 @@ $new=@'
             catch { yield break; }
             foreach (var sibling in siblings)
 '@
-if(-not $t.Contains($old)){throw 'LegacyInstallCandidates sibling-discovery anchor missing.'}
-$t=$t.Replace($old,$new)
+if ($t.Contains($old)) { $t=$t.Replace($old,$new) }
+if (-not $t.Contains('try { parent = new DirectoryInfo(current).Parent; }') -or -not $t.Contains('.Where(d => d.Name.StartsWith("4RTools-Vanilla-v", StringComparison.OrdinalIgnoreCase))')) {
+    throw 'Hardened sibling-release discovery is missing after compatibility patch.'
+}
 Write $p $t
 
 Write-Host '0.6.1 compatibility and migration patches applied.'
