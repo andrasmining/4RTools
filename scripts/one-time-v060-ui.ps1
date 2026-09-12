@@ -10,28 +10,32 @@ $t=Read $p
 $t=$t.Replace('public double UserNameY { get; set; } = 0.66;','public double UserNameY { get; set; } = 0.635;')
 $t=$t.Replace('public double PasswordY { get; set; } = 0.685;','public double PasswordY { get; set; } = 0.660;')
 
-$old="            Accounts = unique;`r`n        }`r`n`r`n        private static bool IsSyntheticDefault"
+$old='            Accounts = unique;'+$nl+'        }'+$nl+$nl+'        private static bool IsSyntheticDefault'
 if(-not $t.Contains($old)){throw 'NormalizeAccounts anchor missing'}
-$new="            Accounts = unique;`r`n            if (Anchors == null) Anchors = new VanillaUiAnchors();`r`n            if (Math.Abs(Anchors.UserNameY - 0.66) < 0.0001 -and Math.Abs(Anchors.PasswordY - 0.685) < 0.0001) { }`r`n        }`r`n`r`n        private static bool IsSyntheticDefault"
-# Keep the C# replacement separate so PowerShell does not reinterpret &&.
-$new=$new.Replace('if (Math.Abs(Anchors.UserNameY - 0.66) < 0.0001 -and Math.Abs(Anchors.PasswordY - 0.685) < 0.0001) { }','if (Math.Abs(Anchors.UserNameY - 0.66) < 0.0001 && Math.Abs(Anchors.PasswordY - 0.685) < 0.0001) { Anchors.UserNameY = 0.635; Anchors.PasswordY = 0.660; }')
+$new='            Accounts = unique;'+$nl+
+'            if (Anchors == null) Anchors = new VanillaUiAnchors();'+$nl+
+'            if (Math.Abs(Anchors.UserNameY - 0.66) < 0.0001 && Math.Abs(Anchors.PasswordY - 0.685) < 0.0001) { Anchors.UserNameY = 0.635; Anchors.PasswordY = 0.660; }'+$nl+
+'        }'+$nl+$nl+'        private static bool IsSyntheticDefault'
 $t=$t.Replace($old,$new)
 
 $old='        public string SettingsPath { get { return store.FilePath; } }'
 if(-not $t.Contains($old)){throw 'SettingsPath anchor missing'}
-$t=$t.Replace($old,$old+$nl+'        public string LogPath { get { return Path.Combine(baseDirectory, "Logs", "reconnect.log"); } }')
+$t=$t.Replace($old,$old+$nl+'        public string LogPath { get { return Path.Combine(baseDirectory, "Logs", "reconnect.log"); } }'.Replace('\"','"'))
 
 $old='        private readonly Label testState = new Label { AutoSize = true, ForeColor = Color.DarkSlateBlue };'
 if(-not $t.Contains($old)){throw 'testState anchor missing'}
 $t=$t.Replace($old,$old+$nl+'        private readonly ToolTip help = new ToolTip { InitialDelay = 650, ReshowDelay = 200, AutoPopDelay = 30000, ShowAlways = true };'+$nl+'        private bool exitRequested;')
 
-$old="            BuildUi();`r`n            supervisor.Updated += SupervisorUpdated;"
+$old='            BuildUi();'+$nl+'            supervisor.Updated += SupervisorUpdated;'
 if(-not $t.Contains($old)){throw 'BuildUi anchor missing'}
-$t=$t.Replace($old,"            BuildUi();`r`n            ConfigureHoverHelp();`r`n            supervisor.Updated += SupervisorUpdated;")
+$t=$t.Replace($old,'            BuildUi();'+$nl+'            ConfigureHoverHelp();'+$nl+'            supervisor.Updated += SupervisorUpdated;')
 
-$old="            AddButton(commands, \"DETECT RUNNING CLIENTS\", DetectRunningClients);`r`n            runState.Font"
+$old='            AddButton(commands, "DETECT RUNNING CLIENTS", DetectRunningClients);'.Replace('\"','"')+$nl+'            runState.Font'
 if(-not $t.Contains($old)){throw 'commands anchor missing'}
-$t=$t.Replace($old,"            AddButton(commands, \"DETECT RUNNING CLIENTS\", DetectRunningClients);`r`n            AddButton(commands, \"OPEN LOG\", OpenLog);`r`n            AddButton(commands, \"COPY LOG\", CopyLog);`r`n            runState.Font")
+$new='            AddButton(commands, "DETECT RUNNING CLIENTS", DetectRunningClients);'.Replace('\"','"')+$nl+
+'            AddButton(commands, "OPEN LOG", OpenLog);'.Replace('\"','"')+$nl+
+'            AddButton(commands, "COPY LOG", CopyLog);'.Replace('\"','"')+$nl+'            runState.Font'
+$t=$t.Replace($old,$new)
 
 $anchor='        private void LoadFromSupervisor()'
 if(-not $t.Contains($anchor)){throw 'LoadFromSupervisor anchor missing'}
@@ -93,6 +97,7 @@ $methods=@'
         }
 
 '@
+$methods=$methods.Replace('\"','"')
 $t=$t.Replace($anchor,$methods+$anchor)
 
 $old=@'
@@ -129,9 +134,10 @@ $new=@'
 '@
 $t=$t.Replace($old,$new)
 
-$old='            menu.Items.Add("Stop reconnect supervisor", null, (s, e) => { supervisor?.Stop(); });'
+$old='            menu.Items.Add("Stop reconnect supervisor", null, (s, e) => { supervisor?.Stop(); });'.Replace('\"','"')
 if(-not $t.Contains($old)){throw 'tray menu anchor missing'}
-$t=$t.Replace($old,$old+$nl+'            menu.Items.Add(new ToolStripSeparator());'+$nl+'            menu.Items.Add("Exit 4RTools", null, (s, e) => Application.Exit());')
+$new=$old+$nl+'            menu.Items.Add(new ToolStripSeparator());'+$nl+'            menu.Items.Add("Exit 4RTools", null, (s, e) => Application.Exit());'.Replace('\"','"')
+$t=$t.Replace($old,$new)
 Write $p $t
 
 $p='Forms/Container.cs';$t=Read $p;$t=$t.Replace('v0.5.0','v0.6.0');Write $p $t
