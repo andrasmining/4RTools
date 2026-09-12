@@ -31,9 +31,6 @@ if(-not $text.Contains($anchor)){ throw 'Foreground input Press anchor missing.'
 $text=$text.Replace($anchor,$addition+$anchor)
 WriteText $path $text
 
-# Model/Vanilla/*.cs is already compiled through a wildcard in 4RTools.csproj,
-# so the newly added detector/logger require no per-file project entries.
-
 $path='Model/Vanilla/VanillaReconnect.cs'
 $text=ReadText $path
 $old=@'
@@ -54,7 +51,7 @@ $new=@'
                             try { Directory.CreateDirectory(Path.GetDirectoryName(proxyCapture)); proxyImage.Save(proxyCapture, ImageFormat.Png); } catch { }
                             int routeIndex = (int)config.Proxy;
                             Rectangle safe = proxyLayout.Rows[routeIndex];
-                            var random = new Random(unchecked(Environment.TickCount ^ runtime.ProcessId.Value ^ (routeIndex * 7919)));
+                            var random = new Random(unchecked(Environment.TickCount ^ pid ^ (routeIndex * 7919)));
                             int marginX = Math.Max(1, safe.Width / 4), marginY = Math.Max(1, safe.Height / 4);
                             int px = random.Next(safe.Left + marginX, Math.Max(safe.Left + marginX + 1, safe.Right - marginX));
                             int py = random.Next(safe.Top + marginY, Math.Max(safe.Top + marginY + 1, safe.Bottom - marginY));
