@@ -73,4 +73,33 @@ if (-not $t.Contains('try { parent = new DirectoryInfo(current).Parent; }') -or 
 }
 Write $p $t
 
-Write-Host '0.6.1 compatibility and migration patches applied.'
+# Keep AutomationProfileStore honest about its constructor argument. Tests and explicit
+# import/export scenarios need an isolated root, while the production session deliberately
+# passes the stable per-user data root. This avoids hidden global state in the store and
+# still keeps normal user profiles outside versioned application folders.
+$p='Model/Vanilla/Automation/AutomationProfileStore.cs'
+$t=Read $p
+$old=@'
+            VanillaAppData.InitializeAndMigrateLegacy(AppDomain.CurrentDomain.BaseDirectory);
+            directory = VanillaAppData.VanillaProfilesDirectory;
+            Directory.CreateDirectory(directory);
+'@
+$new=@'
+            string root = Path.GetFullPath(baseDirectory);
+            directory = Path.Combine(root, "Profiles", "Vanilla");
+            Directory.CreateDirectory(directory);
+'@
+if ($t.Contains($old)) { $t=$t.Replace($old,$new) }
+if (-not $t.Contains('directory = Path.Combine(root, "Profiles", "Vanilla");')) { throw 'Automation profile store root patch is missing.' }
+if ($t.Contains('directory = VanillaAppData.VanillaProfilesDirectory;')) { throw 'Automation profile store still ignores its constructor root.' }
+Write $p $t
+
+$p='Model/Vanilla/Automation/VanillaAutomationSession.cs'
+$t=Read $p
+$old='            profiles = new AutomationProfileStore(this.baseDirectory);'
+$new='            profiles = new AutomationProfileStore(VanillaAppData.RootDirectory);'
+if ($t.Contains($old)) { $t=$t.Replace($old,$new) }
+if (-not $t.Contains($new)) { throw 'Production automation session does not use persistent user profile storage.' }
+Write $p $t
+
+Write-Host '0.6.1 compatibility, migration and persistent-profile patches applied.'
