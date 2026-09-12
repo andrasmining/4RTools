@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 // Assembly metadata for the independent Vanilla-focused 4RTools fork; version changes publish verified GitHub Releases.
 [assembly: AssemblyTitle("4RTools Vanilla Companion")]
-[assembly: AssemblyDescription("Vanilla-focused 4RTools companion with launcher startup, restart/relogin recovery and guarded read-only automation")]
+[assembly: AssemblyDescription("Vanilla-focused 4RTools companion with reliable launcher startup, step-tested relog recovery and guarded read-only automation")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("4RTools Vanilla Companion")]
