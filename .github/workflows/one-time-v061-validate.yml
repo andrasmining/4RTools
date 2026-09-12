@@ -1,5 +1,5 @@
 name: One-time 0.6.1 professionalization validation
-# Validation attempt 3: updater compatibility fix.
+# Validation attempt 4: simplify legacy exception-filter compatibility.
 
 on:
   push:
