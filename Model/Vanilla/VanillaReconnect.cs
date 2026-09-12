@@ -943,10 +943,15 @@ namespace _4RTools.Model.Vanilla
                 {
                     Runtime runtime = runtimes[account.Id];
                     Process match = null;
-                    if (runtime.ProcessId.HasValue && aliveIds.Contains(runtime.ProcessId.Value))
+                    if (runtime.ProcessId.HasValue && aliveIds.Contains(runtime.ProcessId.Value) && !claimed.Contains(runtime.ProcessId.Value))
                         match = existing.FirstOrDefault(p => p.Id == runtime.ProcessId.Value);
                     if (match == null) match = existing.FirstOrDefault(p => !claimed.Contains(p.Id));
-                    if (match == null) continue;
+                    if (match == null)
+                    {
+                        runtime.ProcessId = null;
+                        runtime.ResumeSent = false;
+                        continue;
+                    }
                     claimed.Add(match.Id);
                     assigned++;
                     runtime.ProcessId = match.Id;
@@ -1143,7 +1148,7 @@ namespace _4RTools.Model.Vanilla
         public VanillaReconnectForm(VanillaReconnectSupervisor supervisor)
         {
             this.supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
-            Text = "4RTools Vanilla — Restart & Relog";
+            Text = "4RTools Vanilla â€” Restart & Relog";
             Font = new Font("Segoe UI", 9F);
             StartPosition = FormStartPosition.CenterScreen;
             Size = new Size(1180, 850);
@@ -1169,7 +1174,7 @@ namespace _4RTools.Model.Vanilla
             var pathRow = Flow();
             pathRow.Controls.Add(new Label { Text = "Launcher EXE (Vanilla Launcher.exe / patcher.exe)", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
             pathRow.Controls.Add(launchPath);
-            AddButton(pathRow, "Browse…", Browse);
+            AddButton(pathRow, "Browseâ€¦", Browse);
             top.Controls.Add(pathRow);
 
             var opts = Flow();
@@ -1593,7 +1598,7 @@ namespace _4RTools.Model.Vanilla
                 foreach (var item in supervisor.Statuses())
                 {
                     var row = new ListViewItem(item.Label);
-                    row.SubItems.Add(item.ProcessId.HasValue ? item.ProcessId.Value.ToString() : "—");
+                    row.SubItems.Add(item.ProcessId.HasValue ? item.ProcessId.Value.ToString() : "â€”");
                     row.SubItems.Add(item.Stage.ToString());
                     row.SubItems.Add(item.VisualState.ToString());
                     row.SubItems.Add(item.Detail ?? "");
@@ -1684,7 +1689,7 @@ namespace _4RTools.Model.Vanilla
             AddRow(table, 1, "Label", label);
             AddRow(table, 2, "Username", user);
             AddRow(table, 3, "Password", password);
-            AddRow(table, 4, "Character slot (1–15)", slot);
+            AddRow(table, 4, "Character slot (1â€“15)", slot);
             AddRow(table, 5, "Resume hotkey", hotkey);
             var hint = new Label { AutoSize = true, MaximumSize = new Size(290, 0), Text = "Click the hotkey box and press the combination (default Ctrl+2).", ForeColor = Color.DimGray };
             table.Controls.Add(hint, 1, 6);
