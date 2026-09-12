@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Apply corrected auth/server reliability wiring
+      - name: Apply final auth/server reliability wiring
         shell: powershell
         run: '& .\scripts\one-time-v068-auth-server.ps1'
       - name: Restore NuGet packages
