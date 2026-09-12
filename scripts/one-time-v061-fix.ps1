@@ -12,6 +12,16 @@ $t=Read $p
 $t=[Text.RegularExpressions.Regex]::Replace($t, '(?m)^\s*UseShellExecute\s*=\s*true,?\s*\r?\n', '')
 $t=[Text.RegularExpressions.Regex]::Replace($t, ',\s*UseShellExecute\s*=\s*true', '')
 if ($t -match 'UseShellExecute') { throw 'UseShellExecute remained in VanillaUpdater.cs after compatibility patch.' }
+
+# Avoid exception-filter type-patterns here. This project carries an old package/reference
+# graph on .NET Framework and the CI compiler resolves those exception types inconsistently.
+# Retrying every copy failure is safe: retries are bounded and the update payload is hash-
+# verified before and after staging; the final failure is still surfaced to the user.
+$old='                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { last = ex; Thread.Sleep(500); }'
+$new='                catch (Exception ex) { last = ex; Thread.Sleep(500); }'
+if(-not $t.Contains($old)){throw 'Updater retry exception-filter anchor missing.'}
+$t=$t.Replace($old,$new)
+if ($t -match 'ex\s+is\s+(IOException|UnauthorizedAccessException)') { throw 'Legacy exception type-pattern remained in VanillaUpdater.cs.' }
 Write $p $t
 
 $p='Model/Vanilla/VanillaIntegratedShell.cs'
