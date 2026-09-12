@@ -37,7 +37,7 @@ namespace _4RTools.Forms
             this.subject.Attach(this);
 
             InitializeComponent();
-            this.Text = "4RTools - Vanilla extension v0.3.0";
+            this.Text = "4RTools - Vanilla extension v0.4.0";
 
             //Container Configuration
             this.IsMdiContainer = true;

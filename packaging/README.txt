@@ -13,9 +13,9 @@ Quick start: overnight restart/relogin
 --------------------------------------
 1. Unzip the entire portable folder into a writable location.
 2. Run 4RTools-Vanilla.exe and accept its Windows administrator prompt.
-3. The Vanilla Restart & Relog manager opens on first use. If Vanilla is already
-   running, choose "Use running client path"; otherwise browse to the Vanilla
-   executable/launcher that normally starts the protected client.
+3. The Vanilla Restart & Relog manager opens on first use. Set the launcher path
+   to Vanilla's patcher.exe. If a client is already running, choose "Use patcher
+   from running client"; it prefers patcher.exe beside Vanilla MMO.exe.
 4. Leave Proxy on Tokyo unless you intentionally use another route.
 5. Configure up to two account profiles on this PC. For each one enter the
    username, password, character slot, and Autobattle resume hotkey (default
@@ -23,6 +23,10 @@ Quick start: overnight restart/relogin
 6. Save, enable "Auto relaunch/relogin", and press START SUPERVISOR.
 7. Once verified locally, enable "Start supervisor with 4RTools" for unattended
    recovery after a 4RTools restart.
+
+When patcher.exe is configured, the supervisor starts it, waits for its window,
+clicks the visible GAME START button, and stops retrying as soon as a new Vanilla
+MMO process appears. Direct executable launching remains supported.
 
 The supervisor can relaunch a closed Vanilla client, wait for the Gepard/client
 startup path, choose the configured proxy, login, select the first Vanilla
@@ -74,7 +78,8 @@ Release identity and integrity
 VERSION.txt records the fork version, architecture, source commit, and build
 validation. RELEASE-NOTES.md records feature and validation details.
 SHA256SUMS.txt lists original packaged payload hashes and the ZIP has an adjacent
-.sha256 file.
+.sha256 file. Versioned ZIPs are published by verified GitHub Releases and are not
+committed to the source tree.
 
 The MIT license for 4RTools is in LICENSE. Embedded third-party dependencies
 have their own licenses/notices in THIRD-PARTY-NOTICES.txt.

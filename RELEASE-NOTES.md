@@ -1,6 +1,12 @@
-# 4RTools Vanilla 0.3.0
+# 4RTools Vanilla 0.4.0
 
 4RTools Vanilla is an independent MIT-licensed fork of 4RTools focused on Vanilla MMO. Vanilla's own documentation lists **4R Tools Supported**, **Gepard 3.0 Protection**, and its 24/7 Auto-Attack system. This fork does not disable, patch, hide from, bypass, or otherwise interfere with Gepard. Vanilla-specific automation uses ordinary targeted window input and, for existing diagnostic features, read-only client observation.
+
+## New in 0.4.0: patcher startup and GitHub Releases
+
+Vanilla recovery now launches the configured executable exactly as selected. When that path is `patcher.exe`, 4RTools waits for the patcher window, clicks its visible **GAME START** button at normalized window coordinates, and retries while patching is still in progress. The retry loop stops immediately when a new `Vanilla MMO.exe` process appears. Launches are serialized so two managed accounts do not race the same patcher. The existing path picker now prefers `patcher.exe` beside a running Vanilla client when available; direct-client launching remains supported.
+
+Release distribution is also moved to normal **GitHub Releases**. Every version bump runs a dedicated Windows release workflow that rebuilds the x86 executable, runs the full offline test suite, creates and smoke-tests the portable ZIP, verifies checksums, and only then publishes the ZIP plus SHA256 file as GitHub Release assets. Portable ZIPs remain CI/release artifacts and are not committed to the source tree.
 
 ## New in 0.3.0: overnight restart and relog recovery
 
@@ -70,12 +76,22 @@ If Gepard blocks the custom executable or an input path, that is a hard boundary
 
 ## Portable release
 
-The intended 0.3.0 output is:
+The intended 0.4.0 output is:
 
-- `dist/4RTools-Vanilla-v0.3.0/`
-- `dist/4RTools-Vanilla-v0.3.0-portable.zip`
-- `dist/4RTools-Vanilla-v0.3.0-portable.zip.sha256`
+- `dist/4RTools-Vanilla-v0.4.0/`
+- `dist/4RTools-Vanilla-v0.4.0-portable.zip`
+- `dist/4RTools-Vanilla-v0.4.0-portable.zip.sha256`
 
 The portable package targets x86 and .NET Framework 4.7.2 or later 4.x. It does not require Visual Studio, Git, NuGet, source code, or manual offset entry to run. The upstream administrator manifest is retained.
 
 The original 4RTools MIT license and attribution remain included. This fork is not an official Vanilla MMO or upstream 4RTools release.
+
+<!-- BEGIN GENERATED RELEASE CHECKSUMS -->
+
+Release version: 0.4.0. SHA256:
+
+- `4RTools-Vanilla-v0.4.0-portable.zip`: `dd4f66de42e0acb7f3bf361cda46bbdff679c9f2c3962f792615922eaf335d08`
+- `4RTools-Vanilla.exe`: `09228b647fc6109c14cb6b3177ad3a1b9f83942486610b067edcee4dd5be7fb4`
+
+These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
+<!-- END GENERATED RELEASE CHECKSUMS -->

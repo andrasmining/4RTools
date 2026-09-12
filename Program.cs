@@ -171,7 +171,7 @@ namespace _4RTools
                     form.Close();
                     File.WriteAllText(output, JsonConvert.SerializeObject(new
                     {
-                        Success = true, Version = "0.3.0", PointerBytes = IntPtr.Size,
+                        Success = true, Version = "0.4.0", PointerBytes = IntPtr.Size,
                         MainUi = "Container", OriginalFeatureForms = featureForms,
                         FeatureForms = originalForms,
                         AutomationEnabled = false,

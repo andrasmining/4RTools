@@ -547,7 +547,7 @@ namespace _4RTools.Model.Vanilla
             try { path = p.MainModule.FileName; }
             finally { p.Dispose(); }
             var copy = Settings;
-            copy.LaunchExecutable = path;
+            copy.LaunchExecutable = VanillaPatcherLauncher.PreferPatcherBesideClient(path);
             Apply(copy, true);
         }
 
@@ -695,7 +695,7 @@ namespace _4RTools.Model.Vanilla
 
         private bool CanLaunch(Runtime runtime, int aliveCount, DateTimeOffset now)
         {
-            if (!settings.AutoRecover || aliveCount >= settings.MaxClients || runtime.ScriptRunning) return false;
+            if (!settings.AutoRecover || aliveCount >= settings.MaxClients || runtime.ScriptRunning || runtimes.Values.Any(r => r.ScriptRunning && !r.ProcessId.HasValue)) return false;
             if (string.IsNullOrWhiteSpace(settings.LaunchExecutable) || !File.Exists(settings.LaunchExecutable))
             {
                 SetStage(runtime, VanillaReconnectStage.NeedsConfiguration, "Set the Vanilla launch executable");
@@ -707,29 +707,60 @@ namespace _4RTools.Model.Vanilla
 
         private void Launch(Runtime runtime, DateTimeOffset now)
         {
-            try
-            {
-                var info = new ProcessStartInfo
-                {
-                    FileName = settings.LaunchExecutable,
-                    Arguments = settings.LaunchArguments ?? "",
-                    WorkingDirectory = Path.GetDirectoryName(settings.LaunchExecutable),
-                    UseShellExecute = true
-                };
-                Process.Start(info)?.Dispose();
-                runtime.LastLaunch = now;
-                runtime.ResumeSent = false;
-                SetStage(runtime, VanillaReconnectStage.Launching, "Started Vanilla; waiting for Gepard/client window");
-                Log(runtime.Account.Label + ": launched Vanilla.");
-            }
-            catch (Exception ex)
-            {
-                runtime.LastLaunch = now;
-                SetStage(runtime, VanillaReconnectStage.Backoff, "Launch failed: " + ex.Message);
-                Log(runtime.Account.Label + ": launch failed: " + ex.Message);
-            }
-        }
+            string executable = settings.LaunchExecutable;
+            string arguments = settings.LaunchArguments ?? "";
+            string accountId = runtime.Account.Id;
+            string label = runtime.Account.Label;
+            runtime.LastLaunch = now;
+            runtime.ResumeSent = false;
+            runtime.ScriptRunning = true;
+            SetStage(runtime, VanillaReconnectStage.Launching,
+                VanillaPatcherLauncher.IsPatcher(executable)
+                    ? "Starting patcher.exe and waiting for GAME START"
+                    : "Starting configured Vanilla executable");
 
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                string error = null;
+                bool aborted = false;
+                try
+                {
+                    VanillaPatcherLauncher.Launch(executable, arguments,
+                        message => Log(label + ": " + message),
+                        () =>
+                        {
+                            lock (gate)
+                            {
+                                aborted = disposed || !running;
+                                return aborted;
+                            }
+                        });
+                }
+                catch (Exception ex) { error = ex.Message; }
+
+                lock (gate)
+                {
+                    Runtime current;
+                    if (!runtimes.TryGetValue(accountId, out current)) return;
+                    current.ScriptRunning = false;
+                    if (aborted || disposed || !running)
+                    {
+                        SetStage(current, VanillaReconnectStage.Stopped, "Supervisor stopped");
+                    }
+                    else if (error == null)
+                    {
+                        SetStage(current, VanillaReconnectStage.WaitingForWindow,
+                            "Launcher completed; waiting for Vanilla MMO window");
+                    }
+                    else
+                    {
+                        SetStage(current, VanillaReconnectStage.Backoff, "Launch failed: " + error);
+                        Log(label + ": launch failed: " + error);
+                    }
+                }
+                RaiseUpdated();
+            });
+        }
         private void Bind(Runtime runtime, int pid, bool freshLaunch, string detail)
         {
             runtime.ProcessId = pid;
@@ -1052,10 +1083,10 @@ namespace _4RTools.Model.Vanilla
 
             var top = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
             var pathRow = Flow();
-            pathRow.Controls.Add(new Label { Text = "Vanilla launch EXE", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
+            pathRow.Controls.Add(new Label { Text = "Launcher EXE (patcher.exe recommended)", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
             pathRow.Controls.Add(launchPath);
             AddButton(pathRow, "Browse…", Browse);
-            AddButton(pathRow, "Use running client path", DetectPath);
+            AddButton(pathRow, "Use patcher from running client", DetectPath);
             top.Controls.Add(pathRow);
 
             var opts = Flow();
