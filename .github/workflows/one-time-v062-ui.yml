@@ -1,0 +1,41 @@
+name: One-time 0.6.2 Vanilla UI integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-time-v062-ui.yml'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  integrate:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Apply changes
+        shell: powershell
+        run: '& .\scripts\one-time-v062-ui.ps1'
+      - name: Restore NuGet packages
+        shell: powershell
+        run: nuget restore 4RTools.sln -NonInteractive
+      - name: Build and test
+        shell: powershell
+        run: '& .\scripts\build-release.ps1 -Version 0.6.1'
+      - name: Commit validated source
+        shell: powershell
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Model/Vanilla/VanillaIntegratedShell.cs Model/Vanilla/VanillaReconnectDiagnostics.cs Model/Vanilla/VanillaForegroundInput.cs Tests/VanillaPatcherLauncherTests.cs
+          git diff --cached --check
+          git commit -m 'feat: prioritize Vanilla workspace and harden launcher startup'
+          git push origin HEAD:main
