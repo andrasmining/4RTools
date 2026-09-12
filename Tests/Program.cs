@@ -59,6 +59,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += LegacyProfileTests.Run();
             failed += VanillaPatcherLauncherTests.Run();
             failed += VanillaProxyPatternTests.Run();
+            failed += VanillaAuthPatternTests.Run();
             failed += VanillaSessionLogTests.Run();
             failed += VanillaReconnectRegressionTests.Run();
 

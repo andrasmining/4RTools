@@ -166,22 +166,13 @@ namespace _4RTools.Model.Vanilla
                                 break;
                             case VanillaReconnectTestStep.FillCredentials:
                                 string password = store.UnprotectPassword(account.ProtectedPassword);
-                                if (string.IsNullOrEmpty(account.UserName) || string.IsNullOrEmpty(password)) throw new InvalidOperationException("Username/password is missing.");
-                                input.ClickNormalized(config.Anchors.UserNameX, config.Anchors.UserNameY);
-                                Thread.Sleep(180);
-                                input.ReplaceFocusedText(account.UserName);
-                                input.Press(Keys.Tab);
-                                Thread.Sleep(180);
-                                input.ReplaceFocusedText(password);
-                                Log("TEST " + account.Label + ": username then password filled without submitting; password was not logged.");
+                                FillDetectedCredentials(input, account, password, discoveredPid.Value, false, "TEST " + account.Label + ": ");
                                 break;
                             case VanillaReconnectTestStep.SubmitCredentials:
                                 input.Press(Keys.Enter);
                                 break;
                             case VanillaReconnectTestStep.SelectGameServer:
-                                input.ClickNormalized(config.Anchors.ServiceListX, config.Anchors.ServiceListY);
-                                input.Press(Keys.Home);
-                                input.Press(Keys.Enter);
+                                SelectDetectedGameServer(input, discoveredPid.Value, config.StageDelayMs, "TEST " + account.Label + ": ");
                                 break;
                             case VanillaReconnectTestStep.SelectCharacter:
                                 int slot = Math.Max(1, Math.Min(15, account.CharacterSlot)) - 1;

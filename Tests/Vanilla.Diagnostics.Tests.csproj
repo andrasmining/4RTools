@@ -53,6 +53,7 @@
     <Compile Include="LegacyProfileTests.cs" />
     <Compile Include="VanillaPatcherLauncherTests.cs" />
     <Compile Include="VanillaProxyPatternTests.cs" />
+    <Compile Include="VanillaAuthPatternTests.cs" />
     <Compile Include="VanillaSessionLogTests.cs" />
     <Compile Include="VanillaReconnectRegressionTests.cs" />
     <ProjectReference Include="..\4RTools.csproj">
