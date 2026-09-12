@@ -9,7 +9,6 @@ function ReplaceExact([string]$p,[string]$old,[string]$new) {
   WriteText $p ($t.Replace($old,$new))
 }
 
-# Make Vanilla the primary full-window workspace and keep stock 4RTools in a second tab.
 $p='Model/Vanilla/VanillaIntegratedShell.cs'
 $t=ReadText $p
 if(-not $t.Contains('using System.Linq;')) { $t=$t.Replace("using System.IO;`r`n", "using System.IO;`r`nusing System.Linq;`r`n") }
@@ -71,10 +70,8 @@ if(-not [regex]::IsMatch($t,$pattern)){ throw 'Could not replace integrated work
 $t=[regex]::Replace($t,$pattern,$replacement,1)
 $t=$t.Replace('            tabPageVanilla.Controls.Clear();'+[Environment]::NewLine,'')
 $t=$t.Replace('            tabPageVanilla.Controls.Add(root);','            primaryVanillaPage.Controls.Add(root);')
-$t=$t.Replace('â€”','-').Replace('â€¦','...')
 WriteText $p $t
 
-# Prevent the one-client step-test group from collapsing vertically inside the embedded host.
 $p='Model/Vanilla/VanillaReconnectDiagnostics.cs'
 $t=ReadText $p
 $pattern='(?s)        private Control BuildStepTests\(\)\r?\n        \{.*?\r?\n        \}\r?\n\r?\n        private void ConfigureStepTestHoverHelp\(\)'
@@ -114,7 +111,6 @@ $t=[regex]::Replace($t,$pattern,$replacement,1)
 $t=$t.Replace('This opens the launcher, performs one real foreground click on GAME START, and waits for Vanilla/Gepard.', 'This opens the launcher, visually locates the yellow GAME START button, clicks it with foreground input, and waits for Vanilla/Gepard.')
 WriteText $p $t
 
-# Make physical launcher clicks less likely to be lost by skinned/web-style controls.
 $p='Model/Vanilla/VanillaForegroundInput.cs'
 $t=ReadText $p
 $old=@'
@@ -142,7 +138,6 @@ $new=@'
 if(-not $t.Contains($old)){ throw 'Foreground click anchor not found.' }
 WriteText $p ($t.Replace($old,$new))
 
-# Keep an offline regression that confirms the visual detector remains part of the launcher.
 $p='Tests/VanillaPatcherLauncherTests.cs'
 $t=ReadText $p
 $t=$t.Replace('            Test("Patcher beside Vanilla client is preferred when present", PreferAdjacentPatcher);', '            Test("Patcher beside Vanilla client is preferred when present", PreferAdjacentPatcher);`r`n            Test("GAME START visual detector is available", VisualDetectorAvailable);')
