@@ -31,14 +31,8 @@ if(-not $text.Contains($anchor)){ throw 'Foreground input Press anchor missing.'
 $text=$text.Replace($anchor,$addition+$anchor)
 WriteText $path $text
 
-$path='4RTools.csproj'
-$text=ReadText $path
-$anchor='    <Compile Include="Model\Vanilla\VanillaPatcherLauncher.cs" />'
-if(-not $text.Contains($anchor)){ throw 'Main project VanillaPatcherLauncher include missing.' }
-if(-not $text.Contains('Model\Vanilla\VanillaProxyPattern.cs')){
-    $text=$text.Replace($anchor,$anchor+[Environment]::NewLine+'    <Compile Include="Model\Vanilla\VanillaProxyPattern.cs" />'+[Environment]::NewLine+'    <Compile Include="Model\Vanilla\VanillaSessionLog.cs" />')
-}
-WriteText $path $text
+# Model/Vanilla/*.cs is already compiled through a wildcard in 4RTools.csproj,
+# so the newly added detector/logger require no per-file project entries.
 
 $path='Model/Vanilla/VanillaReconnect.cs'
 $text=ReadText $path
@@ -60,13 +54,17 @@ $new=@'
                             try { Directory.CreateDirectory(Path.GetDirectoryName(proxyCapture)); proxyImage.Save(proxyCapture, ImageFormat.Png); } catch { }
                             int routeIndex = (int)config.Proxy;
                             Rectangle safe = proxyLayout.Rows[routeIndex];
-                            double x = (safe.Left + safe.Right) / 2.0 / proxyImage.Width;
-                            double y = (safe.Top + safe.Bottom) / 2.0 / proxyImage.Height;
+                            var random = new Random(unchecked(Environment.TickCount ^ runtime.ProcessId.Value ^ (routeIndex * 7919)));
+                            int marginX = Math.Max(1, safe.Width / 4), marginY = Math.Max(1, safe.Height / 4);
+                            int px = random.Next(safe.Left + marginX, Math.Max(safe.Left + marginX + 1, safe.Right - marginX));
+                            int py = random.Next(safe.Top + marginY, Math.Max(safe.Top + marginY + 1, safe.Bottom - marginY));
+                            double x = (px + 0.5) / proxyImage.Width;
+                            double y = (py + 0.5) / proxyImage.Height;
                             input.ClickNormalized(x, y);
                             for (int i = 0; i < 8; i++) { input.Press(Keys.Up); Thread.Sleep(55); }
                             for (int i = 0; i < routeIndex; i++) { input.Press(Keys.Down); Thread.Sleep(70); }
                             input.Press(Keys.Enter);
-                            Log(account.Label + ": proxy " + config.Proxy + " selected from detected safe row " + safe + "; " + proxyDetection);
+                            Log(account.Label + ": proxy " + config.Proxy + " selected from detected safe row " + safe + " at verified-inside point (" + px + "," + py + "); " + proxyDetection);
                         }
                         Thread.Sleep(config.StageDelayMs);
 '@
@@ -160,13 +158,17 @@ $new=@'
                                     try { Directory.CreateDirectory(Path.GetDirectoryName(proxyCapture)); proxyImage.Save(proxyCapture); } catch { }
                                     int routeIndex = (int)config.Proxy;
                                     Rectangle safe = proxyLayout.Rows[routeIndex];
-                                    double x = (safe.Left + safe.Right) / 2.0 / proxyImage.Width;
-                                    double y = (safe.Top + safe.Bottom) / 2.0 / proxyImage.Height;
+                                    var random = new Random(unchecked(Environment.TickCount ^ discoveredPid.Value ^ (routeIndex * 7919)));
+                                    int marginX = Math.Max(1, safe.Width / 4), marginY = Math.Max(1, safe.Height / 4);
+                                    int px = random.Next(safe.Left + marginX, Math.Max(safe.Left + marginX + 1, safe.Right - marginX));
+                                    int py = random.Next(safe.Top + marginY, Math.Max(safe.Top + marginY + 1, safe.Bottom - marginY));
+                                    double x = (px + 0.5) / proxyImage.Width;
+                                    double y = (py + 0.5) / proxyImage.Height;
                                     input.ClickNormalized(x, y);
                                     for (int i = 0; i < 8; i++) { input.Press(Keys.Up); Thread.Sleep(55); }
                                     for (int i = 0; i < routeIndex; i++) { input.Press(Keys.Down); Thread.Sleep(70); }
                                     input.Press(Keys.Enter);
-                                    Log("TEST " + account.Label + ": proxy " + config.Proxy + " selected from detected safe row " + safe + "; " + proxyDetection);
+                                    Log("TEST " + account.Label + ": proxy " + config.Proxy + " selected from detected safe row " + safe + " at verified-inside point (" + px + "," + py + "); " + proxyDetection);
                                 }
                                 break;
 '@
