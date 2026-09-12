@@ -318,7 +318,7 @@ namespace _4RTools.Model.Vanilla
                             finally { graphics.ReleaseHdc(hdc); }
                             SaveDebugBitmap(debugDirectory, "launcher-print-last.png", bitmap);
                             double printX, printY;
-                            string detector;
+                            string detector = captured ? "detector not yet evaluated" : "PrintWindow failed before detector";
                             if (captured && TryFindGameStart(bitmap, out printX, out printY, out detector))
                             {
                                 x = printX; y = printY;
