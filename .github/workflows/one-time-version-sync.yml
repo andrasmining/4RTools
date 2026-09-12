@@ -1,0 +1,40 @@
+name: One-time 0.3.0 version sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-time-version-sync.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Synchronize UI and smoke metadata
+        shell: powershell
+        run: |
+          $targets = @(
+            @{ Path = 'Forms/Container.cs'; Old = 'this.Text = "4RTools - Vanilla extension v0.2.0";'; New = 'this.Text = "4RTools - Vanilla extension v0.3.0";' },
+            @{ Path = 'Program.cs'; Old = 'Success = true, Version = "0.2.0", PointerBytes = IntPtr.Size,'; New = 'Success = true, Version = "0.3.0", PointerBytes = IntPtr.Size,' }
+          )
+          foreach ($target in $targets) {
+            $text = [IO.File]::ReadAllText($target.Path)
+            if (-not $text.Contains($target.Old)) { throw "Expected version fragment not found in $($target.Path)." }
+            $text = $text.Replace($target.Old, $target.New)
+            [IO.File]::WriteAllText($target.Path, $text, (New-Object Text.UTF8Encoding($false)))
+          }
+          Remove-Item '.github/workflows/one-time-version-sync.yml'
+      - name: Commit version sync and remove one-time workflow
+        shell: powershell
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Forms/Container.cs Program.cs .github/workflows/one-time-version-sync.yml
+          git commit -m 'release: synchronize 0.3.0 application identity'
+          git push origin HEAD:main
