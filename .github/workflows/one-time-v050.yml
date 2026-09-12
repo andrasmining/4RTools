@@ -42,7 +42,21 @@ jobs:
 
       - name: Validate 0.5.0 build, tests and portable package
         shell: powershell
-        run: '& .\scripts\build-release.ps1 -Version 0.5.0'
+        run: |
+          try {
+            & .\scripts\build-release.ps1 -Version 0.5.0
+          }
+          catch {
+            Write-Host '--- portable smoke evidence ---'
+            $root = Join-Path $env:LOCALAPPDATA '4RTools-Engineering\portable-tests'
+            if (Test-Path $root) {
+              Get-ChildItem $root -Recurse -Filter 'portable-smoke.json' -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1 |
+                ForEach-Object { Get-Content $_.FullName -Raw }
+            }
+            throw
+          }
 
       - name: Commit migration and remove one-time files
         shell: powershell
