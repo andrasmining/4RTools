@@ -1,0 +1,94 @@
+name: One-time 0.6.5 launcher diagnostics compile fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-time-v065-compile-fix.yml'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fix native GAME START child-control scan
+        shell: powershell
+        run: |
+          $path = 'Model/Vanilla/VanillaPatcherLauncher.cs'
+          $text = Get-Content $path -Raw
+          $old = @'
+        private static bool TryFindNativeGameStart(IntPtr root, out IntPtr control, out string inventory)
+        {
+            control = IntPtr.Zero;
+            var rows = new List<string>();
+            if (root == IntPtr.Zero) { inventory = "root=none"; return false; }
+            EnumChildWindows(root, (hwnd, state) =>
+            {
+                string title = WindowTitle(hwnd);
+                string cls = WindowClass(hwnd);
+                if (rows.Count < 16) rows.Add("0x" + hwnd.ToInt64().ToString("X") + ":" + cls + ":'" + Clean(title) + "'");
+                if (control == IntPtr.Zero && title.IndexOf("GAME START", StringComparison.OrdinalIgnoreCase) >= 0)
+                    control = hwnd;
+                return true;
+            }, IntPtr.Zero);
+            inventory = rows.Count == 0 ? "none" : string.Join(" | ", rows);
+            return control != IntPtr.Zero;
+        }
+'@
+          $new = @'
+        private static bool TryFindNativeGameStart(IntPtr root, out IntPtr control, out string inventory)
+        {
+            IntPtr found = IntPtr.Zero;
+            var rows = new List<string>();
+            if (root == IntPtr.Zero)
+            {
+                control = IntPtr.Zero;
+                inventory = "root=none";
+                return false;
+            }
+            EnumChildWindows(root, (hwnd, state) =>
+            {
+                string title = WindowTitle(hwnd);
+                string cls = WindowClass(hwnd);
+                if (rows.Count < 16) rows.Add("0x" + hwnd.ToInt64().ToString("X") + ":" + cls + ":'" + Clean(title) + "'");
+                if (found == IntPtr.Zero && title.IndexOf("GAME START", StringComparison.OrdinalIgnoreCase) >= 0)
+                    found = hwnd;
+                return true;
+            }, IntPtr.Zero);
+            control = found;
+            inventory = rows.Count == 0 ? "none" : string.Join(" | ", rows);
+            return found != IntPtr.Zero;
+        }
+'@
+          if (-not $text.Contains($old)) { throw 'Expected native GAME START scan block not found.' }
+          $text = $text.Replace($old, $new)
+          [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false)))
+
+      - name: Restore NuGet packages
+        shell: powershell
+        run: nuget restore 4RTools.sln -NonInteractive
+
+      - name: Build, test, package and smoke-test
+        shell: powershell
+        run: '& .\scripts\build-release.ps1 -Version 0.6.4'
+
+      - name: Commit validated source
+        shell: powershell
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Model/Vanilla/VanillaPatcherLauncher.cs
+          git diff --cached --check
+          git commit -m 'fix: compile launcher child-control diagnostics'
+          git push origin HEAD:main
