@@ -36,16 +36,26 @@ jobs:
         shell: powershell
         run: '& .\scripts\one-time-v050.ps1'
 
-      - name: Fix primary-tab smoke selector
+      - name: Make primary-tab smoke validation explicit
         shell: powershell
         run: |
-          $path = 'Program.cs'
-          $text = [IO.File]::ReadAllText($path)
-          $old = '.OrderByDescending(tabs => tabs.TabPages.Count).FirstOrDefault();'
-          $new = '.FirstOrDefault(tabs => tabs.Name == "atkDefMode");'
-          if (-not $text.Contains($old)) { throw 'Generated primary-tab smoke selector was not found.' }
-          $text = $text.Replace($old, $new)
-          [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false)))
+          $utf8 = New-Object Text.UTF8Encoding($false)
+
+          $containerPath = 'Forms/Container.cs'
+          $container = [IO.File]::ReadAllText($containerPath)
+          $anchor = '        internal VanillaClientState VanillaSnapshot { get { return vanillaSession.Snapshot; } }'
+          $addition = $anchor + [Environment]::NewLine + '        internal bool VanillaTabIsFirst { get { return atkDefMode.TabPages.Count > 0 && atkDefMode.TabPages[0].Name == "tabPageVanilla"; } }'
+          if (-not $container.Contains($anchor)) { throw 'Container smoke-property anchor was not found.' }
+          $container = $container.Replace($anchor, $addition)
+          [IO.File]::WriteAllText($containerPath, $container, $utf8)
+
+          $programPath = 'Program.cs'
+          $program = [IO.File]::ReadAllText($programPath)
+          $old = 'if (mainTabs == null || mainTabs.TabPages.Count == 0 || mainTabs.TabPages[0].Text != "Vanilla")'
+          $new = 'if (!form.VanillaTabIsFirst)'
+          if (-not $program.Contains($old)) { throw 'Generated primary-tab smoke condition was not found.' }
+          $program = $program.Replace($old, $new)
+          [IO.File]::WriteAllText($programPath, $program, $utf8)
 
       - name: Restore NuGet packages
         shell: powershell
