@@ -23,7 +23,14 @@ jobs:
           fetch-depth: 0
       - name: Apply source changes
         shell: powershell
-        run: '& .\scripts\one-time-v064-live-test-control.ps1'
+        run: |
+          $path = '.\scripts\one-time-v064-live-test-control.ps1'
+          $text = Get-Content $path -Raw
+          $text = $text.Replace('            string stoppedPrefix = "Diagnostic test stopped:";', '            string stoppedPrefix = "Diagnostic test stopped:";')
+          $text = $text.Replace('            string stoppedPrefix = "Diagnostic test stopped:";', '            string stoppedPrefix = "Diagnostic test stopped:";')
+          $text = $text.Replace(',1)' + [Environment]::NewLine + '# Replace second occurrence as well.', ')' + [Environment]::NewLine + '# Replace second occurrence as well.')
+          Set-Content -Path $path -Value $text -Encoding UTF8
+          & $path
       - name: Restore NuGet packages
         shell: powershell
         run: nuget restore 4RTools.sln -NonInteractive
