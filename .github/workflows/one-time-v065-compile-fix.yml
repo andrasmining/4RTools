@@ -1,4 +1,4 @@
-name: One-time 0.6.5 launcher diagnostics compile fix
+name: One-time 0.6.5 unique client assignment validation
 
 on:
   push:
@@ -22,17 +22,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fix native GAME START child-control scan
+      - name: Prevent duplicate PID assignment across configured accounts
         shell: powershell
         run: |
-          $path = 'Model/Vanilla/VanillaPatcherLauncher.cs'
+          $path = 'Model/Vanilla/VanillaReconnect.cs'
           $text = Get-Content $path -Raw
-          $text = $text.Replace('            control = IntPtr.Zero;' + [Environment]::NewLine + '            var rows = new List<string>();', '            IntPtr found = IntPtr.Zero;' + [Environment]::NewLine + '            var rows = new List<string>();')
-          $text = $text.Replace('            if (root == IntPtr.Zero) { inventory = "root=none"; return false; }', '            if (root == IntPtr.Zero) { control = IntPtr.Zero; inventory = "root=none"; return false; }')
-          $text = $text.Replace('                if (control == IntPtr.Zero && title.IndexOf("GAME START", StringComparison.OrdinalIgnoreCase) >= 0)', '                if (found == IntPtr.Zero && title.IndexOf("GAME START", StringComparison.OrdinalIgnoreCase) >= 0)')
-          $text = $text.Replace('                    control = hwnd;', '                    found = hwnd;')
-          $text = $text.Replace('            inventory = rows.Count == 0 ? "none" : string.Join(" | ", rows);' + [Environment]::NewLine + '            return control != IntPtr.Zero;', '            control = found;' + [Environment]::NewLine + '            inventory = rows.Count == 0 ? "none" : string.Join(" | ", rows);' + [Environment]::NewLine + '            return found != IntPtr.Zero;')
-          if ($text -notmatch 'IntPtr found = IntPtr.Zero;') { throw 'Native GAME START scan was not updated.' }
+          $oldPreserve = '                    if (runtime.ProcessId.HasValue && aliveIds.Contains(runtime.ProcessId.Value))'
+          $newPreserve = '                    if (runtime.ProcessId.HasValue && aliveIds.Contains(runtime.ProcessId.Value) && !claimed.Contains(runtime.ProcessId.Value))'
+          if (-not $text.Contains($oldPreserve)) { throw 'Expected existing-client ownership check was not found.' }
+          $text = $text.Replace($oldPreserve, $newPreserve)
+          $oldMissing = '                    if (match == null) continue;'
+          $newMissing = '                    if (match == null)' + [Environment]::NewLine + '                    {' + [Environment]::NewLine + '                        runtime.ProcessId = null;' + [Environment]::NewLine + '                        runtime.ResumeSent = false;' + [Environment]::NewLine + '                        continue;' + [Environment]::NewLine + '                    }'
+          if (-not $text.Contains($oldMissing)) { throw 'Expected no-match branch was not found.' }
+          $text = $text.Replace($oldMissing, $newMissing)
           [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false)))
 
       - name: Restore NuGet packages
@@ -48,7 +50,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Model/Vanilla/VanillaPatcherLauncher.cs
+          git add Model/Vanilla/VanillaReconnect.cs
           git diff --cached --check
-          git commit -m 'fix: compile launcher child-control diagnostics'
+          git commit -m 'fix: keep configured clients uniquely assigned'
           git push origin HEAD:main
