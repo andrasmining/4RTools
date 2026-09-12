@@ -1,0 +1,27 @@
+name: One-time 0.6.3 input reliability validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-time-v063-validate.yml'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Apply source changes
+        shell: powershell
+        run: '& .\scripts\one-time-v063-launcher-focus.ps1'
+      - name: Restore NuGet packages
+        shell: powershell
+        run: nuget restore 4RTools.sln -NonInteractive
+      - name: Build and test
+        shell: powershell
+        run: '& .\scripts\build-release.ps1 -Version 0.6.2'
