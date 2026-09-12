@@ -20,6 +20,8 @@ namespace Vanilla.Diagnostics.Tests
             Test("Legacy version folders migrate into one persistent Profiles root", PersistentDataMigration);
             Test("Updater only accepts strictly newer semantic versions", UpdaterVersionComparison);
             Test("Legacy login anchors migrate to verified field centers", LoginAnchorMigration);
+            Test("Reconnect backoff doubles and caps at one hour", ExponentialBackoff);
+            Test("Recovery ownership blocks parallel client workflows", SequentialRecoveryGate);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -87,6 +89,23 @@ namespace Vanilla.Diagnostics.Tests
             migrated = interim.Clone();
             Assert(Math.Abs(migrated.Anchors.UserNameY - 0.677) < 0.0001 && Math.Abs(migrated.Anchors.PasswordY - 0.697) < 0.0001,
                 "Interim login-field coordinates were not migrated.");
+        }
+        private static void ExponentialBackoff()
+        {
+            Assert(VanillaRecoveryPolicy.RetryDelayMs(1, 30000, 3600000) == 30000, "First failure should wait 30 seconds.");
+            Assert(VanillaRecoveryPolicy.RetryDelayMs(2, 30000, 3600000) == 60000, "Second failure should wait 60 seconds.");
+            Assert(VanillaRecoveryPolicy.RetryDelayMs(3, 30000, 3600000) == 120000, "Third failure should wait 120 seconds.");
+            Assert(VanillaRecoveryPolicy.RetryDelayMs(8, 30000, 3600000) == 3600000, "Retry interval must cap at one hour.");
+            Assert(VanillaRecoveryPolicy.RetryDelayMs(20, 30000, 3600000) == 3600000, "Retry interval exceeded one-hour cap.");
+            var defaults = VanillaReconnectSettings.CreateDefault();
+            Assert(defaults.MaxRetryBackoffMs == 3600000, "Default maximum retry backoff is not one hour.");
+        }
+
+        private static void SequentialRecoveryGate()
+        {
+            Assert(!VanillaRecoveryPolicy.BlocksParallelRecovery(false, false), "Idle client unexpectedly blocks recovery.");
+            Assert(VanillaRecoveryPolicy.BlocksParallelRecovery(true, false), "Recovery owner did not block parallel recovery.");
+            Assert(VanillaRecoveryPolicy.BlocksParallelRecovery(false, true), "Active script did not block parallel recovery.");
         }
         private static void PersistentDataMigration()
         {

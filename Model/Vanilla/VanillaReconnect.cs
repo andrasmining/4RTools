@@ -87,6 +87,7 @@ namespace _4RTools.Model.Vanilla
         public int GameLoadMs { get; set; } = 8000;
         public int LoginStableMs { get; set; } = 4500;
         public int RetryBackoffMs { get; set; } = 30000;
+        public int MaxRetryBackoffMs { get; set; } = 3600000;
         public int PopupCooldownMs { get; set; } = 5000;
         public VanillaUiAnchors Anchors { get; set; } = new VanillaUiAnchors();
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
@@ -152,6 +153,8 @@ namespace _4RTools.Model.Vanilla
             if (GameLoadMs < 1000 || GameLoadMs > 120000) throw new ArgumentException("Game load wait must be between 1 and 120 seconds.");
             if (LoginStableMs < 1000 || LoginStableMs > 60000) throw new ArgumentException("Login detection wait must be between 1 and 60 seconds.");
             if (RetryBackoffMs < 5000 || RetryBackoffMs > 600000) throw new ArgumentException("Retry backoff must be between 5 seconds and 10 minutes.");
+            if (MaxRetryBackoffMs < RetryBackoffMs || MaxRetryBackoffMs > 3600000)
+                throw new ArgumentException("Maximum reconnect backoff must be at least the base backoff and at most 60 minutes.");
             if (PopupCooldownMs < 1000 || PopupCooldownMs > 60000) throw new ArgumentException("Popup cooldown must be between 1 and 60 seconds.");
             if (Anchors == null) throw new ArgumentException("UI anchors are missing.");
             Check01(Anchors.ServiceListX); Check01(Anchors.ServiceListY);
@@ -183,6 +186,24 @@ namespace _4RTools.Model.Vanilla
         {
             if (double.IsNaN(value) || double.IsInfinity(value) || value < 0 || value > 1)
                 throw new ArgumentException("A normalized UI anchor is invalid.");
+        }
+    }
+
+    internal static class VanillaRecoveryPolicy
+    {
+        internal static int RetryDelayMs(int failureCount, int baseMs, int maxMs)
+        {
+            if (failureCount <= 0) return 0;
+            long delay = Math.Max(1, baseMs);
+            long ceiling = Math.Max(delay, maxMs);
+            for (int attempt = 1; attempt < failureCount && delay < ceiling; attempt++)
+                delay = Math.Min(ceiling, delay * 2L);
+            return (int)Math.Min(int.MaxValue, delay);
+        }
+
+        internal static bool BlocksParallelRecovery(bool recoveryOwned, bool scriptRunning)
+        {
+            return recoveryOwned || scriptRunning;
         }
     }
 
@@ -485,8 +506,12 @@ namespace _4RTools.Model.Vanilla
             public DateTimeOffset? LastRecovery;
             public DateTimeOffset? LastPopup;
             public DateTimeOffset? LastLaunch;
+            public DateTimeOffset? NextRecoveryAt;
+            public int RecoveryFailures;
             public bool ScriptRunning;
             public bool ResumeSent;
+            public bool RecoveryOwned;
+            public bool HasBeenOnline;
         }
 
         private readonly object gate = new object();
@@ -641,13 +666,22 @@ namespace _4RTools.Model.Vanilla
                 if (runtime.ProcessId.HasValue && !aliveIds.Contains(runtime.ProcessId.Value))
                 {
                     int old = runtime.ProcessId.Value;
+                    bool failedDuringRecovery = runtime.RecoveryOwned;
                     runtime.ProcessId = null;
                     runtime.ResumeSent = false;
                     runtime.Visual = VanillaVisualState.Unknown;
                     runtime.LoginLikeSince = runtime.GameplaySince = null;
                     runtime.ScriptRunning = false;
-                    SetStage(runtime, VanillaReconnectStage.WaitingForClient, "PID " + old + " exited; waiting to relaunch");
-                    Log(runtime.Account.Label + ": Vanilla exited; relaunch will be attempted.");
+                    runtime.RecoveryOwned = false;
+                    runtime.HasBeenOnline = false;
+                    if (failedDuringRecovery)
+                        ScheduleRecoveryFailureLocked(runtime, now, "PID " + old + " exited during recovery");
+                    else
+                    {
+                        runtime.NextRecoveryAt = now;
+                        SetStage(runtime, VanillaReconnectStage.WaitingForClient, "PID " + old + " exited; queued for sequential relaunch");
+                        Log(runtime.Account.Label + ": Vanilla exited; first relaunch attempt is queued immediately.");
+                    }
                 }
             }
 
@@ -659,7 +693,7 @@ namespace _4RTools.Model.Vanilla
                     var candidate = alive.Where(p => !claimed.Contains(p.Id)).OrderBy(p => SafeStart(p)).FirstOrDefault();
                     if (candidate != null)
                     {
-                        Bind(runtime, candidate.Id, runtime.LastLaunch.HasValue, runtime.LastLaunch.HasValue ? "New Vanilla client detected" : "Existing Vanilla client adopted");
+                        Bind(runtime, candidate.Id, runtime.RecoveryOwned, runtime.RecoveryOwned ? "New Vanilla client detected" : "Existing Vanilla client adopted");
                         claimed.Add(candidate.Id);
                     }
                     else if (CanLaunch(runtime, alive.Count, now)) Launch(runtime, now);
@@ -676,6 +710,11 @@ namespace _4RTools.Model.Vanilla
             Process p = null;
             try
             {
+                if (runtime.NextRecoveryAt.HasValue && runtime.NextRecoveryAt.Value > now)
+                {
+                    SetStage(runtime, VanillaReconnectStage.Backoff, BackoffDetail(runtime, now));
+                    return;
+                }
                 p = Process.GetProcessById(runtime.ProcessId.Value);
                 p.Refresh();
                 if (p.MainWindowHandle == IntPtr.Zero)
@@ -689,27 +728,38 @@ namespace _4RTools.Model.Vanilla
                 if (visual == VanillaVisualState.Gameplay)
                 {
                     runtime.LoginLikeSince = null;
+                    runtime.HasBeenOnline = true;
                     if (!runtime.GameplaySince.HasValue) runtime.GameplaySince = now;
                     if (!runtime.ResumeSent && (now - runtime.GameplaySince.Value).TotalMilliseconds >= Math.Max(1500, settings.StageDelayMs))
                     {
                         SendResume(runtime);
                         runtime.ResumeSent = true;
+                        ResetRecoverySuccessLocked(runtime);
                         SetStage(runtime, VanillaReconnectStage.Online, "Gameplay detected; Autobattle resume hotkey sent once");
                     }
-                    else if (runtime.ResumeSent) SetStage(runtime, VanillaReconnectStage.Online, "Gameplay detected");
+                    else if (runtime.ResumeSent)
+                    {
+                        ResetRecoverySuccessLocked(runtime);
+                        SetStage(runtime, VanillaReconnectStage.Online, "Gameplay detected");
+                    }
                     return;
                 }
 
                 runtime.GameplaySince = null;
                 if (visual == VanillaVisualState.ModalDialog)
                 {
+                    if (runtime.HasBeenOnline && settings.AutoRecover)
+                    {
+                        CloseForRecovery(runtime, p, now, "Disconnect/logged-out modal detected after gameplay", false);
+                        return;
+                    }
                     if (!runtime.LastPopup.HasValue || (now - runtime.LastPopup.Value).TotalMilliseconds >= settings.PopupCooldownMs)
                     {
                         using (var input = new VanillaTargetedInput(runtime.ProcessId.Value)) { input.Activate(); input.Press(Keys.Enter); }
                         runtime.LastPopup = now;
                         runtime.ResumeSent = false;
-                        SetStage(runtime, VanillaReconnectStage.AcknowledgingPopup, "Detected modal dialog; pressed Enter to acknowledge it");
-                        Log(runtime.Account.Label + ": acknowledged a Vanilla modal dialog.");
+                        SetStage(runtime, VanillaReconnectStage.AcknowledgingPopup, "Pre-login modal detected; pressed Enter to acknowledge it");
+                        Log(runtime.Account.Label + ": acknowledged a pre-login Vanilla modal dialog.");
                     }
                     return;
                 }
@@ -717,11 +767,20 @@ namespace _4RTools.Model.Vanilla
                 if (visual == VanillaVisualState.LoginShell)
                 {
                     if (!runtime.LoginLikeSince.HasValue) runtime.LoginLikeSince = now;
-                    if (settings.AutoRecover
-                        && (now - runtime.LoginLikeSince.Value).TotalMilliseconds >= settings.LoginStableMs
-                        && (!runtime.LastRecovery.HasValue || (now - runtime.LastRecovery.Value).TotalMilliseconds >= settings.RetryBackoffMs))
+                    if (runtime.HasBeenOnline && settings.AutoRecover
+                        && (now - runtime.LoginLikeSince.Value).TotalMilliseconds >= settings.LoginStableMs)
                     {
-                        QueueLogin(runtime, runtime.LastLaunch.HasValue && (!runtime.LastRecovery.HasValue || runtime.LastLaunch.Value > runtime.LastRecovery.Value), "Login shell detected after disconnect");
+                        CloseForRecovery(runtime, p, now, "Login/service screen detected after gameplay disconnect", false);
+                        return;
+                    }
+                    if (settings.AutoRecover && (now - runtime.LoginLikeSince.Value).TotalMilliseconds >= settings.LoginStableMs)
+                    {
+                        if (runtime.RecoveryOwned && runtime.LastRecovery.HasValue && !runtime.ScriptRunning)
+                        {
+                            CloseForRecovery(runtime, p, now, "Login/service screen remained after a recovery attempt", true);
+                            return;
+                        }
+                        QueueLogin(runtime, runtime.RecoveryOwned, "Initial/recovery login shell detected");
                     }
                     else SetStage(runtime, VanillaReconnectStage.WaitingForGameplay, "Vanilla login/service screen detected");
                     return;
@@ -738,7 +797,8 @@ namespace _4RTools.Model.Vanilla
             }
             catch (Exception ex)
             {
-                SetStage(runtime, VanillaReconnectStage.Backoff, "Probe failed: " + ex.Message);
+                if (runtime.RecoveryOwned) ScheduleRecoveryFailureLocked(runtime, now, "Probe failed: " + ex.Message);
+                else SetStage(runtime, VanillaReconnectStage.Backoff, "Probe failed: " + ex.Message);
             }
             finally { p?.Dispose(); }
         }
@@ -754,16 +814,26 @@ namespace _4RTools.Model.Vanilla
 
         private bool CanLaunch(Runtime runtime, int aliveCount, DateTimeOffset now)
         {
-            if (!settings.AutoRecover || aliveCount >= settings.MaxClients || runtime.ScriptRunning || runtimes.Values.Any(r => r.ScriptRunning && !r.ProcessId.HasValue)) return false;
+            if (!settings.AutoRecover || aliveCount >= settings.MaxClients || runtime.ScriptRunning) return false;
+            Runtime owner = OtherRecoveryOwner(runtime);
+            if (owner != null)
+            {
+                SetStage(runtime, VanillaReconnectStage.WaitingForClient,
+                    "Queued: waiting for " + owner.Account.Label + " recovery to finish before starting this client");
+                return false;
+            }
             if (string.IsNullOrWhiteSpace(settings.LaunchExecutable) || !File.Exists(settings.LaunchExecutable))
             {
                 SetStage(runtime, VanillaReconnectStage.NeedsConfiguration, "Set the Vanilla launch executable");
                 return false;
             }
-            if (runtime.LastLaunch.HasValue && (now - runtime.LastLaunch.Value).TotalMilliseconds < settings.RetryBackoffMs) return false;
+            if (runtime.NextRecoveryAt.HasValue && runtime.NextRecoveryAt.Value > now)
+            {
+                SetStage(runtime, VanillaReconnectStage.Backoff, BackoffDetail(runtime, now));
+                return false;
+            }
             return true;
         }
-
         private void Launch(Runtime runtime, DateTimeOffset now)
         {
             string executable = settings.LaunchExecutable;
@@ -771,8 +841,11 @@ namespace _4RTools.Model.Vanilla
             string accountId = runtime.Account.Id;
             string label = runtime.Account.Label;
             runtime.LastLaunch = now;
+            runtime.NextRecoveryAt = null;
             runtime.ResumeSent = false;
             runtime.ScriptRunning = true;
+            runtime.RecoveryOwned = true;
+            runtime.HasBeenOnline = false;
             SetStage(runtime, VanillaReconnectStage.Launching,
                 VanillaPatcherLauncher.IsPatcher(executable)
                     ? "Starting patcher.exe and waiting for GAME START"
@@ -813,8 +886,7 @@ namespace _4RTools.Model.Vanilla
                     }
                     else
                     {
-                        SetStage(current, VanillaReconnectStage.Backoff, "Launch failed: " + error);
-                        Log(label + ": launch failed: " + error);
+                        ScheduleRecoveryFailureLocked(current, DateTimeOffset.UtcNow, "Launch failed: " + error);
                     }
                 }
                 RaiseUpdated();
@@ -826,6 +898,8 @@ namespace _4RTools.Model.Vanilla
             // Never toggle Autobattle merely because 4RTools adopted an already-running client.
             // A fresh launch or a relog sequence explicitly arms the one-shot resume hotkey.
             runtime.ResumeSent = !freshLaunch;
+            runtime.RecoveryOwned = freshLaunch || runtime.RecoveryOwned;
+            if (freshLaunch) runtime.HasBeenOnline = false;
             runtime.LoginLikeSince = runtime.GameplaySince = null;
             SetStage(runtime, freshLaunch ? VanillaReconnectStage.Launching : VanillaReconnectStage.WaitingForGameplay, detail + " (PID " + pid + ")");
         }
@@ -833,13 +907,27 @@ namespace _4RTools.Model.Vanilla
         private void QueueLogin(Runtime runtime, bool freshLaunch, string reason)
         {
             if (runtime.ScriptRunning || !runtime.ProcessId.HasValue) return;
+            Runtime owner = OtherRecoveryOwner(runtime);
+            if (owner != null)
+            {
+                SetStage(runtime, VanillaReconnectStage.WaitingForGameplay,
+                    "Queued: waiting for " + owner.Account.Label + " recovery to finish before login input");
+                return;
+            }
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            if (runtime.NextRecoveryAt.HasValue && runtime.NextRecoveryAt.Value > now)
+            {
+                SetStage(runtime, VanillaReconnectStage.Backoff, BackoffDetail(runtime, now));
+                return;
+            }
             if (string.IsNullOrWhiteSpace(runtime.Account.UserName) || string.IsNullOrWhiteSpace(runtime.Account.ProtectedPassword))
             {
                 SetStage(runtime, VanillaReconnectStage.NeedsConfiguration, "Username/password missing");
                 return;
             }
             runtime.ScriptRunning = true;
-            runtime.LastRecovery = DateTimeOffset.UtcNow;
+            runtime.RecoveryOwned = true;
+            runtime.LastRecovery = now;
             runtime.ResumeSent = false;
             SetStage(runtime, VanillaReconnectStage.LoggingIn, reason);
             int pid = runtime.ProcessId.Value;
@@ -906,6 +994,9 @@ namespace _4RTools.Model.Vanilla
             catch (Exception ex) { error = ex.Message; }
             finally
             {
+                bool closedAfterFailure = false;
+                string closeEvidence = null;
+                if (error != null) closedAfterFailure = TryCloseProcess(pid, out closeEvidence);
                 lock (gate)
                 {
                     Runtime runtime;
@@ -913,13 +1004,21 @@ namespace _4RTools.Model.Vanilla
                     {
                         runtime.ScriptRunning = false;
                         runtime.LoginLikeSince = runtime.GameplaySince = null;
-                        if (error == null) SetStage(runtime, VanillaReconnectStage.WaitingForGameplay,
-                            "Login sequence completed; waiting for gameplay before sending " + account.HotkeyText);
-                        else SetStage(runtime, VanillaReconnectStage.Backoff, "Login sequence failed: " + error);
+                        if (error == null)
+                        {
+                            SetStage(runtime, VanillaReconnectStage.WaitingForGameplay,
+                                "Login sequence completed; waiting for gameplay before sending " + account.HotkeyText);
+                        }
+                        else
+                        {
+                            if (closedAfterFailure) runtime.ProcessId = null;
+                            runtime.HasBeenOnline = false;
+                            ScheduleRecoveryFailureLocked(runtime, DateTimeOffset.UtcNow,
+                                "Login sequence failed: " + error + (string.IsNullOrEmpty(closeEvidence) ? "" : "; " + closeEvidence));
+                        }
                     }
                 }
                 if (error == null) Log(account.Label + ": login sequence completed; no password was logged.");
-                else Log(account.Label + ": login sequence failed: " + error);
                 RaiseUpdated();
             }
         }
@@ -1063,6 +1162,112 @@ namespace _4RTools.Model.Vanilla
             }
             catch { }
         }
+        private Runtime OtherRecoveryOwner(Runtime except)
+        {
+            return runtimes.Values.FirstOrDefault(runtime => !object.ReferenceEquals(runtime, except)
+                && VanillaRecoveryPolicy.BlocksParallelRecovery(runtime.RecoveryOwned, runtime.ScriptRunning));
+        }
+
+        private void ResetRecoverySuccessLocked(Runtime runtime)
+        {
+            if (runtime.RecoveryFailures > 0 || runtime.NextRecoveryAt.HasValue || runtime.RecoveryOwned)
+                Log(runtime.Account.Label + ": recovery succeeded; exponential retry state reset.");
+            runtime.RecoveryFailures = 0;
+            runtime.NextRecoveryAt = null;
+            runtime.RecoveryOwned = false;
+        }
+
+        private void ScheduleRecoveryFailureLocked(Runtime runtime, DateTimeOffset now, string reason)
+        {
+            runtime.RecoveryFailures = Math.Min(30, runtime.RecoveryFailures + 1);
+            int delay = VanillaRecoveryPolicy.RetryDelayMs(runtime.RecoveryFailures, settings.RetryBackoffMs, settings.MaxRetryBackoffMs);
+            runtime.NextRecoveryAt = now.AddMilliseconds(delay);
+            runtime.RecoveryOwned = false;
+            runtime.ScriptRunning = false;
+            SetStage(runtime, VanillaReconnectStage.Backoff, reason + "; retry in " + FormatDelay(delay)
+                + " (failure " + runtime.RecoveryFailures + ", capped at 1 hour)");
+            Log(runtime.Account.Label + ": " + reason + "; next recovery attempt in " + FormatDelay(delay)
+                + ". Backoff doubles after each failed attempt and is capped at 1 hour.");
+        }
+
+        private string BackoffDetail(Runtime runtime, DateTimeOffset now)
+        {
+            if (!runtime.NextRecoveryAt.HasValue) return "Waiting for next recovery attempt";
+            TimeSpan remaining = runtime.NextRecoveryAt.Value - now;
+            if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
+            return "Backoff after failed recovery; next attempt in " + FormatDelay((int)Math.Ceiling(remaining.TotalMilliseconds))
+                + " (failure " + runtime.RecoveryFailures + ", max interval 1 hour)";
+        }
+
+        private static string FormatDelay(int milliseconds)
+        {
+            TimeSpan value = TimeSpan.FromMilliseconds(Math.Max(0, milliseconds));
+            if (value.TotalMinutes >= 60) return "1h";
+            if (value.TotalMinutes >= 1) return Math.Ceiling(value.TotalMinutes).ToString("0") + "m";
+            return Math.Max(1, Math.Ceiling(value.TotalSeconds)).ToString("0") + "s";
+        }
+
+        private void CloseForRecovery(Runtime runtime, Process process, DateTimeOffset now, string reason, bool failedAttempt)
+        {
+            int pid = runtime.ProcessId.GetValueOrDefault();
+            string evidence;
+            bool exited = TryCloseProcess(process, out evidence);
+            runtime.ProcessId = exited ? (int?)null : pid;
+            runtime.ResumeSent = false;
+            runtime.Visual = VanillaVisualState.Unknown;
+            runtime.LoginLikeSince = runtime.GameplaySince = null;
+            runtime.ScriptRunning = false;
+            runtime.RecoveryOwned = false;
+            runtime.HasBeenOnline = false;
+            if (failedAttempt)
+            {
+                ScheduleRecoveryFailureLocked(runtime, now, reason + (string.IsNullOrEmpty(evidence) ? "" : "; " + evidence));
+            }
+            else
+            {
+                runtime.NextRecoveryAt = now;
+                SetStage(runtime, exited ? VanillaReconnectStage.WaitingForClient : VanillaReconnectStage.Backoff,
+                    reason + "; client close " + (exited ? "completed" : "is still pending") + "; sequential relaunch queued");
+                Log(runtime.Account.Label + ": " + reason + "; " + evidence + ". Relaunch will be serialized with other clients.");
+            }
+        }
+
+        private static bool TryCloseProcess(int pid, out string evidence)
+        {
+            try
+            {
+                using (var process = Process.GetProcessById(pid)) return TryCloseProcess(process, out evidence);
+            }
+            catch (Exception ex)
+            {
+                evidence = "process already gone or unavailable: " + ex.Message;
+                return true;
+            }
+        }
+
+        private static bool TryCloseProcess(Process process, out string evidence)
+        {
+            try
+            {
+                process.Refresh();
+                if (process.HasExited) { evidence = "process already exited"; return true; }
+                bool requested = process.CloseMainWindow();
+                if (requested && process.WaitForExit(3000)) { evidence = "normal window close succeeded"; return true; }
+                process.Refresh();
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                    if (process.WaitForExit(3000)) { evidence = "normal close did not finish; process was terminated"; return true; }
+                }
+                evidence = "process did not exit after close/terminate request";
+                return process.HasExited;
+            }
+            catch (Exception ex)
+            {
+                evidence = "client close failed: " + ex.Message;
+                try { process.Refresh(); return process.HasExited; } catch { return true; }
+            }
+        }
         private static void WaitForWindow(int pid, int timeoutMs)
         {
             Stopwatch watch = Stopwatch.StartNew();
@@ -1106,6 +1311,7 @@ namespace _4RTools.Model.Vanilla
                     runtime.ProcessId = match.Id;
                     runtime.ResumeSent = true;
                     runtime.ScriptRunning = false;
+                    runtime.RecoveryOwned = false;
                     runtime.Visual = VanillaVisualState.Unknown;
                     runtime.LoginLikeSince = runtime.GameplaySince = null;
                     SetStage(runtime, supervise ? VanillaReconnectStage.WaitingForGameplay : VanillaReconnectStage.Stopped,
@@ -1347,8 +1553,7 @@ namespace _4RTools.Model.Vanilla
             top.Controls.Add(commands);
 
             var tests = Flow();
-            AddButton(tests, "TEST STARTUP (clients closed)", TestStartup);
-            AddButton(tests, "TEST RESTART RECOVERY", TestRestartRecovery);
+            AddButton(tests, "TEST STARTUP (SEQUENTIAL)", TestStartup);
             AddButton(tests, "ARM MANUAL NETWORK-DROP TEST", ArmManualNetworkDropTest);
             testState.Margin = new Padding(16, 8, 0, 0);
             tests.Controls.Add(testState);
@@ -1429,8 +1634,7 @@ namespace _4RTools.Model.Vanilla
             TipByText(this, "START SUPERVISOR", "Start continuous recovery monitoring now. Existing clients are adopted; missing clients can be relaunched.");
             TipByText(this, "STOP", "Stop automatic recovery. Running Vanilla clients stay open.");
             TipByText(this, "DETECT RUNNING CLIENTS", "Find currently running Vanilla MMO.exe processes and assign them to configured account rows.");
-            TipByText(this, "TEST STARTUP (clients closed)", "Full cold-start test: launcher -> GAME START -> proxy -> login -> server -> character -> resume hotkey.");
-            TipByText(this, "TEST RESTART RECOVERY", "Close detected Vanilla windows normally and verify the full relaunch/relogin recovery path.");
+            TipByText(this, "TEST STARTUP (SEQUENTIAL)", "Full cold-start test. With multiple configured clients, 4RTools completes launcher -> proxy -> login -> server -> character -> resume hotkey for ONE client before starting the next.");
             TipByText(this, "ARM MANUAL NETWORK-DROP TEST", "Arm a five-minute recovery test while you briefly disconnect/reconnect internet yourself.");
             TipByText(this, "OPEN LOG", "Open the current startup session log. A fresh log is created on every 4RTools startup and each part is capped at 10 MB.");
             TipByText(this, "COPY LOG", "Copy the current startup session log part to the clipboard for diagnostics.");
@@ -1611,46 +1815,17 @@ namespace _4RTools.Model.Vanilla
                 {
                     if (live.Length > 0)
                     {
-                        MessageBox.Show(this, "The cold-start test requires the Vanilla clients to be closed first. Close them, then press TEST STARTUP again.",
+                        MessageBox.Show(this, "The sequential cold-start test requires the managed Vanilla clients to be closed first. It will then recover them strictly one at a time.",
                             "Startup test", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         return;
                     }
                 }
                 finally { foreach (var process in live) process.Dispose(); }
-                int generation = BeginTest("STARTUP TEST: launching " + configured.Length + " configured client(s)...");
+                int generation = BeginTest("STARTUP TEST: recovering " + configured.Length + " configured client(s) strictly one at a time...");
                 supervisor.Start();
                 WaitForOnline(generation, "Startup test", configured.Select(a => a.Id).ToArray(), false, 300000);
             }
             catch (Exception ex) { FailTestImmediately("Startup test", ex); }
-        }
-
-        private void TestRestartRecovery()
-        {
-            try
-            {
-                if (testRunning) throw new InvalidOperationException("A recovery test is already running.");
-                ReadTop(); supervisor.Apply(settings, true); LoadFromSupervisor();
-                var configured = TestAccounts();
-                if (!supervisor.IsRunning) supervisor.Start();
-                supervisor.DetectRunningClients();
-                var ids = configured.Select(a => a.Id).ToArray();
-                var current = supervisor.Statuses().Where(s => ids.Contains(s.AccountId)).ToArray();
-                if (current.Length != ids.Length || current.Any(s => !s.ProcessId.HasValue))
-                    throw new InvalidOperationException("Every configured account must have a detected running Vanilla client before the restart-recovery test.");
-                if (MessageBox.Show(this, "This test closes the detected Vanilla client windows normally and verifies that the supervisor launches, logs in and restores all configured clients. Continue?",
-                    "Test restart recovery", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-                int generation = BeginTest("RESTART TEST: closing clients and waiting for full relaunch...");
-                WaitForOnline(generation, "Restart recovery test", ids, true, 300000);
-                foreach (int pid in current.Select(s => s.ProcessId.Value))
-                {
-                    using (var process = Process.GetProcessById(pid))
-                    {
-                        if (!process.CloseMainWindow()) throw new InvalidOperationException("Vanilla PID " + pid + " did not accept a normal window-close request.");
-                    }
-                }
-                supervisor.RecordTestLog("Restart recovery test requested normal close for " + current.Length + " Vanilla client(s).");
-            }
-            catch (Exception ex) { FailTestImmediately("Restart recovery test", ex); }
         }
 
         private void ArmManualNetworkDropTest()

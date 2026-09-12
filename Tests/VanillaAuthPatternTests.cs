@@ -81,6 +81,19 @@ namespace Vanilla.Diagnostics.Tests
             }
         }
 
+        private static void ServerSoftened()
+        {
+            using (Bitmap large = ServerImage(1920, 1080))
+            using (Bitmap reduced = new Bitmap(1280, 720))
+            using (Graphics graphics = Graphics.FromImage(reduced))
+            {
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.DrawImage(large, new Rectangle(0, 0, reduced.Width, reduced.Height));
+                VanillaServerLayout layout;
+                string evidence;
+                Assert(VanillaAuthPattern.TryDetectServerDialog(reduced, out layout, out evidence), "Softened server dialog failed: " + evidence);
+            }
+        }
         private static void RejectBlank()
         {
             using (var bitmap = new Bitmap(1280, 720))
