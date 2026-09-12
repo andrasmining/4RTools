@@ -1,15 +1,15 @@
-# 4RTools Vanilla 0.6.3
+# 4RTools Vanilla 0.6.4
 
-This is another focused patch release while the live Vanilla/Gepard relog flow is being calibrated step by step.
+This remains a focused patch release while the live Vanilla/Gepard relog path is being verified one stage at a time.
 
-- Fixed the real GAME START blocker observed on the user's PC: Windows could see the launcher window but refused `SetForegroundWindow`, and the previous input layer treated that as a fatal condition before any mouse click was sent. Launcher mouse clicks now use best-effort focus and still perform the real screen-coordinate click when Windows refuses to grant foreground keyboard focus.
-- Kept strict foreground-focus requirements for keyboard-driven Vanilla steps, where typing or hotkeys must not be sent to the wrong window.
-- Preserved the visual yellow GAME START detector and normalized launcher-coordinate targeting from 0.6.2.
-- Changed the numbered one-client diagnostics so a newer step can supersede a previous diagnostic wait instead of reporting `Another test is already running`.
-- If exactly one Vanilla client is already running, pressing `2 PROXY` through `7 RESUME HOTKEY` now tests only that selected stage against the existing client.
-- If no Vanilla client is running, any numbered diagnostic can start from the beginning and run the prerequisite numbered stages up to the requested step. This makes each button independently usable for debugging.
-- If step 1 is pressed while a Vanilla client is already running, GAME START is treated as already satisfied instead of forcing the user to close the client again.
-- One-client diagnostics still refuse to guess when multiple Vanilla MMO clients are running; leave one test client open for deterministic step testing.
-- Existing persistent recovery/account configuration and the GitHub self-updater remain unchanged.
+- Added an explicit `STOP TEST` control beside the numbered one-client diagnostics. It cancels the active diagnostic worker and stops any supervisor test instead of leaving a background launcher attempt running until timeout.
+- Closing the Vanilla launcher manually during `1 GAME START` now ends that launch/test attempt automatically after a short disappearance grace period instead of continuing to retry for two minutes.
+- Closing the diagnostic Vanilla client is treated as a stopped test rather than a generic failure when the active step observes the process exit.
+- A newer numbered diagnostic now cancels the previous diagnostic worker as well as replacing its UI wait, so manually advancing the client and then pressing the next numbered step no longer leaves the earlier test running behind it.
+- Hardened GAME START targeting again using two independent ordinary Windows UI-input strategies: physical screen-coordinate `SendInput` and a targeted launcher-window mouse message on alternate retries.
+- Added a visible-screen capture fallback when `PrintWindow` cannot capture the skinned/web-style launcher. This lets the existing yellow GAME START detector inspect what is actually visible on screen and use the detected button center when possible.
+- Increased launcher retry spacing so each click has time to start Gepard/Vanilla before another strategy is attempted.
+- Logs now identify which GAME START click strategy and visual-detection path was used, making the next live failure unambiguous.
+- Persistent account settings, encrypted passwords, profiles and the GitHub self-updater remain unchanged.
 
-The exact source changes were built, tested, packaged and portable-smoke-tested in Windows GitHub Actions before being committed. Real Vanilla/Gepard interaction still requires local validation, so use the numbered steps and `COPY LOG` if a live stage fails.
+The source changes were validated by the Windows Release build/test/package/portable-smoke pipeline before being committed. GitHub Actions cannot prove the live Vanilla launcher accepts a click, so GAME START still requires the next local test on the user's PC; `COPY LOG` remains the diagnostic source if it does not.
