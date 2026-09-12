@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
@@ -171,7 +171,7 @@ namespace _4RTools
                     form.Close();
                     File.WriteAllText(output, JsonConvert.SerializeObject(new
                     {
-                        Success = true, Version = "0.2.0", PointerBytes = IntPtr.Size,
+                        Success = true, Version = "0.3.0", PointerBytes = IntPtr.Size,
                         MainUi = "Container", OriginalFeatureForms = featureForms,
                         FeatureForms = originalForms,
                         AutomationEnabled = false,

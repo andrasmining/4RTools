@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Diagnostics;
@@ -37,7 +37,7 @@ namespace _4RTools.Forms
             this.subject.Attach(this);
 
             InitializeComponent();
-            this.Text = "4RTools - Vanilla extension v0.2.0";
+            this.Text = "4RTools - Vanilla extension v0.3.0";
 
             //Container Configuration
             this.IsMdiContainer = true;
