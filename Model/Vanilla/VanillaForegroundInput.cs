@@ -16,6 +16,7 @@ namespace _4RTools.Model.Vanilla
     internal sealed class VanillaForegroundInput : IDisposable
     {
         private readonly Process process;
+        private readonly IntPtr preferredWindow;
         private IntPtr window;
 
         [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
@@ -65,9 +66,12 @@ namespace _4RTools.Model.Vanilla
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
         [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
 
-        public VanillaForegroundInput(int processId)
+        public VanillaForegroundInput(int processId) : this(processId, IntPtr.Zero) { }
+
+        public VanillaForegroundInput(int processId, IntPtr preferredWindow)
         {
             process = Process.GetProcessById(processId);
+            this.preferredWindow = preferredWindow;
             RefreshWindow();
         }
 
@@ -244,7 +248,7 @@ namespace _4RTools.Model.Vanilla
         {
             if (process.HasExited) throw new InvalidOperationException("Vanilla client exited.");
             process.Refresh();
-            window = process.MainWindowHandle;
+            window = preferredWindow != IntPtr.Zero && IsWindow(preferredWindow) ? preferredWindow : process.MainWindowHandle;
             if (window == IntPtr.Zero || !IsWindow(window)) throw new InvalidOperationException("Vanilla client window is not ready.");
         }
 

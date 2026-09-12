@@ -41,6 +41,7 @@ namespace _4RTools.Model.Vanilla
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
+        [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
         [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam,
@@ -135,7 +136,8 @@ namespace _4RTools.Model.Vanilla
                             launcherWindowLostAt = null;
                             try
                             {
-                                IntPtr launcherHwnd = GetMainWindow(patcherPid.Value);
+                                IntPtr launcherHwnd = ResolveLauncherWindow(patcherPid.Value);
+                                if (launcherHwnd == IntPtr.Zero) throw new InvalidOperationException("No visible launcher top-level window was found for PID " + patcherPid.Value + ".");
                                 string windowDescription = DescribeWindow(launcherHwnd);
                                 string childInventory;
                                 IntPtr nativeGameStart;
@@ -169,7 +171,7 @@ namespace _4RTools.Model.Vanilla
                                 string inputEvidence;
                                 if ((clickAttempt++ & 1) == 0)
                                 {
-                                    using (var input = new VanillaForegroundInput(patcherPid.Value))
+                                    using (var input = new VanillaForegroundInput(patcherPid.Value, launcherHwnd))
                                         inputEvidence = input.ClickNormalizedWithDiagnostics(clickX, clickY, requireForeground: false);
                                     strategy = "screen-coordinate SendInput";
                                 }
@@ -298,7 +300,7 @@ namespace _4RTools.Model.Vanilla
                 using (var process = Process.GetProcessById(processId))
                 {
                     process.Refresh();
-                    IntPtr hwnd = process.MainWindowHandle;
+                    IntPtr hwnd = ResolveLauncherWindow(processId);
                     if (hwnd == IntPtr.Zero) { evidence = "main window handle is zero"; return false; }
                     RECT rect;
                     if (!GetClientRect(hwnd, out rect)) { evidence = "GetClientRect failed err=" + Marshal.GetLastWin32Error(); return false; }
@@ -359,7 +361,7 @@ namespace _4RTools.Model.Vanilla
 
         private static string ClickTargetedWindowAtPoint(int processId, double x, double y)
         {
-            IntPtr main = GetMainWindow(processId);
+            IntPtr main = ResolveLauncherWindow(processId);
             if (main == IntPtr.Zero) throw new InvalidOperationException("Launcher main window handle is zero.");
             RECT rect;
             if (!GetClientRect(main, out rect)) throw new InvalidOperationException("Cannot read launcher client rectangle; err=" + Marshal.GetLastWin32Error());
@@ -405,13 +407,38 @@ namespace _4RTools.Model.Vanilla
             return found != IntPtr.Zero;
         }
 
-        private static IntPtr GetMainWindow(int processId)
+        private static IntPtr ResolveLauncherWindow(int processId)
         {
-            using (var process = Process.GetProcessById(processId))
+            IntPtr best = IntPtr.Zero;
+            long bestScore = long.MinValue;
+            EnumWindows((hwnd, state) =>
             {
-                process.Refresh();
-                return process.MainWindowHandle;
-            }
+                uint pid;
+                GetWindowThreadProcessId(hwnd, out pid);
+                if (pid != (uint)processId || !IsWindowVisible(hwnd)) return true;
+
+                RECT rect;
+                int width = 0, height = 0;
+                if (GetClientRect(hwnd, out rect))
+                {
+                    width = Math.Max(0, rect.Right - rect.Left);
+                    height = Math.Max(0, rect.Bottom - rect.Top);
+                }
+
+                string title = WindowTitle(hwnd);
+                string cls = WindowClass(hwnd);
+                long score = (long)width * height;
+                if (title.IndexOf("Vanilla MMO Launcher", StringComparison.OrdinalIgnoreCase) >= 0) score += 1000000000L;
+                if (cls.IndexOf("TThorForm", StringComparison.OrdinalIgnoreCase) >= 0) score += 500000000L;
+                if (width < 100 || height < 100) score -= 100000000L;
+                if (score > bestScore)
+                {
+                    best = hwnd;
+                    bestScore = score;
+                }
+                return true;
+            }, IntPtr.Zero);
+            return best;
         }
 
         private static void SaveDebugBitmap(string debugDirectory, string fileName, Bitmap bitmap)
@@ -468,7 +495,8 @@ namespace _4RTools.Model.Vanilla
                     try
                     {
                         process.Refresh();
-                        if (process.MainWindowHandle == IntPtr.Zero || !IsWindowVisible(process.MainWindowHandle)) continue;
+                        IntPtr resolvedWindow = ResolveLauncherWindow(process.Id);
+                        if (resolvedWindow == IntPtr.Zero || !IsWindowVisible(resolvedWindow)) continue;
                         if (!string.IsNullOrWhiteSpace(launcherDirectory))
                         {
                             try
@@ -531,7 +559,8 @@ namespace _4RTools.Model.Vanilla
                         process.Refresh();
                         string path = "?";
                         try { path = process.MainModule.FileName; } catch { }
-                        rows.Add("PID=" + process.Id + " exited=" + process.HasExited + " hwnd=" + DescribeWindow(process.MainWindowHandle)
+                        rows.Add("PID=" + process.Id + " exited=" + process.HasExited + " processMain=" + DescribeWindow(process.MainWindowHandle)
+                            + " resolvedLauncher=" + DescribeWindow(ResolveLauncherWindow(process.Id))
                             + " path='" + path + "' expectedDir='" + launcherDirectory + "'");
                     }
                     catch (Exception ex) { rows.Add("PID=" + process.Id + " inspectError=" + ex.Message); }
