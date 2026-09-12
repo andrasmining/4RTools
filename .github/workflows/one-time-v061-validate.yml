@@ -21,19 +21,42 @@ jobs:
         uses: actions/checkout@v5
       - name: Apply proposed changes
         shell: powershell
-        run: '& .\scripts\one-time-v061-professionalize.ps1'
+        run: |
+          & .\scripts\one-time-v061-professionalize.ps1
+          & .\scripts\one-time-v061-fix.ps1
       - name: Restore NuGet packages
         shell: powershell
         run: nuget restore 4RTools.sln -NonInteractive
       - name: Build, test, package and smoke-test
         shell: powershell
         run: '& .\scripts\build-release.ps1 -Version 0.6.1'
-      - name: Export changed files
+      - name: Export validated source changes
         shell: powershell
         run: |
-          git diff -- . ':!RELEASE-NOTES.md' > proposed.patch
-      - name: Upload validation patch
+          git diff --binary -- . > proposed.patch
+          $files = @(
+            'AGENTS.md',
+            'Program.cs',
+            'Properties/AssemblyInfo.cs',
+            'Utils/AppConfig.cs',
+            'Model/LocalServerManager.cs',
+            'Model/Vanilla/VanillaReconnect.cs',
+            'Model/Vanilla/VanillaAppData.cs',
+            'Model/Vanilla/VanillaUpdater.cs',
+            'Model/Vanilla/VanillaIntegratedShell.cs',
+            'Model/Vanilla/Automation/AutomationProfileStore.cs',
+            'Model/Vanilla/Automation/VanillaAutomationSession.cs',
+            'Tests/VanillaReconnectRegressionTests.cs',
+            'scripts/build-release.ps1',
+            'packaging/README.txt',
+            'RELEASE-NOTES.md'
+          )
+          foreach ($file in $files) { if (-not (Test-Path -LiteralPath $file)) { throw "Missing exported source file: $file" } }
+          Compress-Archive -Path $files -DestinationPath v061-source.zip -CompressionLevel Optimal
+      - name: Upload validation outputs
         uses: actions/upload-artifact@v4
         with:
-          name: v061-professionalization-patch
-          path: proposed.patch
+          name: v061-professionalization-validated
+          path: |
+            proposed.patch
+            v061-source.zip
