@@ -6,6 +6,9 @@ on:
     paths:
       - '.github/workflows/one-time-v063-validate.yml'
 
+permissions:
+  contents: write
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -16,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Apply source changes
         shell: powershell
         run: '& .\scripts\one-time-v063-launcher-focus.ps1'
@@ -25,3 +30,12 @@ jobs:
       - name: Build and test
         shell: powershell
         run: '& .\scripts\build-release.ps1 -Version 0.6.2'
+      - name: Commit validated source
+        shell: powershell
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Model/Vanilla/VanillaForegroundInput.cs Model/Vanilla/VanillaPatcherLauncher.cs
+          git diff --cached --check
+          git commit -m 'fix: allow launcher click without foreground focus'
+          git push origin HEAD:main
