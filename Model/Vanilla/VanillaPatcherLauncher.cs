@@ -21,7 +21,7 @@ namespace _4RTools.Model.Vanilla
         internal const double DefaultGameStartX = 0.50;
         internal const double DefaultGameStartY = 0.765;
         internal const int DefaultStartTimeoutMs = 120000;
-        internal const int DefaultRetryMs = 3000;
+        internal const int DefaultRetryMs = 8000;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
@@ -117,16 +117,10 @@ namespace _4RTools.Model.Vanilla
                                 }
 
                                 using (var input = new VanillaForegroundInput(patcherPid.Value))
-                                {
                                     input.ClickNormalized(clickX, clickY);
-                                    // A second real click is intentional. The Vanilla patcher uses a skinned/web-style
-                                    // control and some machines have ignored a single synthetic DOWN/UP sequence.
-                                    Thread.Sleep(180);
-                                    input.ClickNormalized(clickX, clickY);
-                                }
 
                                 log?.Invoke(string.Format(
-                                    "GAME START click sent to launcher PID {0} at normalized ({1:0.000}, {2:0.000}) [{3}]; waiting for Vanilla/Gepard startup.",
+                                    "GAME START click sent to launcher PID {0} at normalized ({1:0.000}, {2:0.000}) [{3}]; waiting for Vanilla/Gepard startup before any retry.",
                                     patcherPid.Value, clickX, clickY, evidence));
                             }
                             catch (Exception ex)
