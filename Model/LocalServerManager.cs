@@ -13,6 +13,13 @@ namespace _4RTools.Model
 
         private static readonly string localServerName = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "supported_servers.json");
 
+        static LocalServerManager()
+        {
+            // Normal UI startup reaches this class before the main window is shown. The bootstrap
+            // deliberately ignores developer/headless -- commands, so validation tools stay isolated.
+            Vanilla.VanillaReconnectBootstrap.Initialize();
+        }
+
         public static void AddServer(string hpAddress, string nameAddress, string processName)
         {
             if (Client.IsVanillaProcessName(processName))
