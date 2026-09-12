@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -47,6 +48,7 @@ namespace _4RTools.Model.Vanilla
         private const uint KEYEVENTF_SCANCODE = 0x0008;
 
         [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool ClientToScreen(IntPtr hwnd, ref POINT point);
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
@@ -57,6 +59,11 @@ namespace _4RTools.Model.Vanilla
         [DllImport("user32.dll", SetLastError = true)] private static extern bool GetCursorPos(out POINT point);
         [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, INPUT[] inputs, int size);
         [DllImport("user32.dll")] private static extern uint MapVirtualKey(uint code, uint mapType);
+        [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT point);
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
+        [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
 
         public VanillaForegroundInput(int processId)
         {
@@ -80,48 +87,72 @@ namespace _4RTools.Model.Vanilla
 
         public void ClickNormalized(double x, double y, bool requireForeground = true)
         {
+            ClickNormalizedWithDiagnostics(x, y, requireForeground);
+        }
+
+        public string ClickNormalizedWithDiagnostics(double x, double y, bool requireForeground = true)
+        {
             RefreshWindow();
+            IntPtr foregroundBefore = GetForegroundWindow();
             if (requireForeground)
             {
                 Activate();
             }
             else
             {
-                // SetForegroundWindow is intentionally best-effort here. Windows may deny focus
-                // when 4RTools did not most recently receive user input, even though the launcher
-                // is already visible. A mouse click only needs the launcher restored and raised;
-                // the real screen-coordinate click below can then reach GAME START without
-                // requiring keyboard focus.
+                // SetForegroundWindow is intentionally best-effort for the launcher. Windows can
+                // deny focus when 4RTools was not the most recent input owner, while a normal
+                // screen-coordinate mouse click can still be delivered to the visible launcher.
                 ShowWindow(window, 9);
                 BringWindowToTop(window);
                 SetForegroundWindow(window);
                 Thread.Sleep(120);
             }
             if (x < 0 || x > 1 || y < 0 || y > 1) throw new ArgumentOutOfRangeException("Normalized coordinates must be within 0..1.");
+
             RECT rect;
             if (!GetClientRect(window, out rect)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot read Vanilla client area.");
             int width = Math.Max(1, rect.Right - rect.Left), height = Math.Max(1, rect.Bottom - rect.Top);
+            var origin = new POINT { X = 0, Y = 0 };
+            if (!ClientToScreen(window, ref origin)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot map Vanilla client origin.");
             var target = new POINT
             {
                 X = Math.Max(0, Math.Min(width - 1, (int)Math.Round(x * width))),
                 Y = Math.Max(0, Math.Min(height - 1, (int)Math.Round(y * height)))
             };
+            var clientTarget = target;
             if (!ClientToScreen(window, ref target)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot map Vanilla client coordinate.");
+
             POINT previous;
             bool restore = GetCursorPos(out previous);
+            IntPtr hitBeforeMove = WindowFromPoint(target);
             if (!SetCursorPos(target.X, target.Y)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected the mouse position.");
             Thread.Sleep(120);
-            Send(new[]
-            {
-                new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } } }
-            });
+            POINT actual;
+            GetCursorPos(out actual);
+            IntPtr hitAtClick = WindowFromPoint(actual);
+
+            var down = new[] { new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } } } };
+            uint downSent = SendInput(1, down, Marshal.SizeOf(typeof(INPUT)));
+            int downError = downSent == 1 ? 0 : Marshal.GetLastWin32Error();
             Thread.Sleep(110);
-            Send(new[]
-            {
-                new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } } }
-            });
+            var up = new[] { new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } } } };
+            uint upSent = SendInput(1, up, Marshal.SizeOf(typeof(INPUT)));
+            int upError = upSent == 1 ? 0 : Marshal.GetLastWin32Error();
             Thread.Sleep(130);
+
+            IntPtr foregroundAfter = GetForegroundWindow();
+            string diagnostics = string.Format(
+                "main={0}; visible={1}; dpi={2}; client={3}x{4}; origin=({5},{6}); targetClient=({7},{8}); targetScreen=({9},{10}); cursorActual=({11},{12}); foregroundBefore={13}; foregroundAfter={14}; hitBefore={15}; hitAtClick={16}; SendInputDown={17}/1 err={18}; SendInputUp={19}/1 err={20}",
+                DescribeWindow(window), IsWindowVisible(window), SafeDpi(window), width, height,
+                origin.X, origin.Y, clientTarget.X, clientTarget.Y, target.X, target.Y, actual.X, actual.Y,
+                DescribeWindow(foregroundBefore), DescribeWindow(foregroundAfter), DescribeWindow(hitBeforeMove), DescribeWindow(hitAtClick),
+                downSent, downError, upSent, upError);
+
             if (restore) SetCursorPos(previous.X, previous.Y);
+            if (downSent != 1 || upSent != 1)
+                throw new Win32Exception(downError != 0 ? downError : upError, "Windows SendInput did not send the complete mouse click. " + diagnostics);
+            return diagnostics;
         }
 
         public void Press(Keys key)
@@ -215,6 +246,30 @@ namespace _4RTools.Model.Vanilla
             process.Refresh();
             window = process.MainWindowHandle;
             if (window == IntPtr.Zero || !IsWindow(window)) throw new InvalidOperationException("Vanilla client window is not ready.");
+        }
+
+        private static uint SafeDpi(IntPtr hwnd)
+        {
+            try { return hwnd == IntPtr.Zero ? 0 : GetDpiForWindow(hwnd); }
+            catch { return 0; }
+        }
+
+        private static string DescribeWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return "none";
+            uint pid;
+            GetWindowThreadProcessId(hwnd, out pid);
+            var title = new StringBuilder(256);
+            var cls = new StringBuilder(128);
+            try { GetWindowText(hwnd, title, title.Capacity); } catch { }
+            try { GetClassName(hwnd, cls, cls.Capacity); } catch { }
+            return string.Format("0x{0:X} pid={1} class='{2}' title='{3}'", hwnd.ToInt64(), pid, Clean(cls.ToString()), Clean(title.ToString()));
+        }
+
+        private static string Clean(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            return text.Replace("\r", " ").Replace("\n", " ").Trim();
         }
 
         public void Dispose() { process.Dispose(); }
