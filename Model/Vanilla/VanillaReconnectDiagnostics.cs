@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
@@ -21,6 +20,37 @@ namespace _4RTools.Model.Vanilla
 
     public sealed partial class VanillaReconnectSupervisor
     {
+        public void AssignSingleDiagnosticClient(string accountId)
+        {
+            lock (gate)
+            {
+                Runtime runtime;
+                if (!runtimes.TryGetValue(accountId, out runtime)) throw new ArgumentException("Unknown account.");
+                if (runtime.ProcessId.HasValue)
+                {
+                    try
+                    {
+                        using (var existing = Process.GetProcessById(runtime.ProcessId.Value))
+                            if (!existing.HasExited) return;
+                    }
+                    catch { runtime.ProcessId = null; }
+                }
+
+                var processes = GetVanillaProcesses().OrderBy(p => SafeStart(p)).ToList();
+                try
+                {
+                    if (processes.Count == 0) throw new InvalidOperationException("No running Vanilla client was found for this step test.");
+                    if (processes.Count > 1) throw new InvalidOperationException("This is a one-client diagnostic. Leave only the Vanilla client you want to test running, then press the step button again.");
+                    runtime.ProcessId = processes[0].Id;
+                    runtime.ResumeSent = true;
+                    runtime.ScriptRunning = false;
+                    SetStage(runtime, VanillaReconnectStage.Stopped, "Selected for one-client diagnostic (PID " + runtime.ProcessId.Value + ")");
+                }
+                finally { foreach (var process in processes) process.Dispose(); }
+            }
+            RaiseUpdated();
+        }
+
         public void RunDiagnosticStep(string accountId, VanillaReconnectTestStep step)
         {
             VanillaReconnectAccount account;
@@ -33,14 +63,13 @@ namespace _4RTools.Model.Vanilla
                 if (runtime.ScriptRunning) throw new InvalidOperationException("Another action is already running for this account.");
                 if (step != VanillaReconnectTestStep.LauncherGameStart)
                 {
-                    AdoptExistingClients(false);
-                    if (!runtime.ProcessId.HasValue) throw new InvalidOperationException("No running Vanilla client is assigned to the selected account. Use DETECT RUNNING CLIENTS first.");
+                    if (!runtime.ProcessId.HasValue) throw new InvalidOperationException("No Vanilla client is assigned to this selected account for the step test.");
                     pid = runtime.ProcessId.Value;
                 }
                 runtime.ScriptRunning = true;
                 account = runtime.Account.Clone();
                 config = settings.Clone();
-                SetStage(runtime, VanillaReconnectStage.LoggingIn, "Diagnostic step: " + step);
+                SetStage(runtime, VanillaReconnectStage.LoggingIn, "Diagnostic step running: " + step);
             }
             ThreadPool.QueueUserWorkItem(_ => DiagnosticStepWorker(accountId, account, config, pid, step));
             RaiseUpdated();
@@ -80,7 +109,7 @@ namespace _4RTools.Model.Vanilla
                                 input.Press(Keys.Tab);
                                 Thread.Sleep(180);
                                 input.ReplaceFocusedText(password);
-                                Log("TEST " + account.Label + ": credentials filled without submitting; password was not logged.");
+                                Log("TEST " + account.Label + ": username then password filled without submitting; password was not logged.");
                                 break;
                             case VanillaReconnectTestStep.SubmitCredentials:
                                 input.Press(Keys.Enter);
@@ -145,13 +174,13 @@ namespace _4RTools.Model.Vanilla
 
         private void ConfigureStepTestHoverHelp()
         {
-            TipByText(this, "1 GAME START", "Selected account only. Stops automatic recovery, opens the configured launcher, clicks GAME START and waits for one Vanilla process. It does not continue login.");
-            TipByText(this, "2 PROXY", "Selected running client only. Choose the configured proxy on Select Service.");
-            TipByText(this, "3 FILL USER/PW", "Selected running client only. Explicitly focuses/replaces username first, Tabs to password, replaces password, and deliberately does not submit so you can inspect it.");
-            TipByText(this, "4 SUBMIT LOGIN", "Selected running client only. Press Enter once to submit the visible credentials.");
-            TipByText(this, "5 SERVER", "Selected running client only. Select the first/only game server and press Enter.");
-            TipByText(this, "6 CHARACTER", "Selected running client only. Click the configured character slot and character-screen Game Start.");
-            TipByText(this, "7 RESUME HOTKEY", "Selected running client only. Focus that exact Vanilla window and send the configured Autobattle resume hotkey once.");
+            TipByText(this, "1 GAME START", "Selected account only. Close Vanilla first. This opens the launcher, performs one real foreground click on GAME START, and waits for Vanilla/Gepard. It stops there.");
+            TipByText(this, "2 PROXY", "Selected account only. With one Vanilla client running, choose the configured proxy on Select Service.");
+            TipByText(this, "3 FILL USER/PW", "Selected account only. With one client running at login, explicitly click/replace username FIRST, Tab to password, replace password, and DO NOT submit so you can visually verify both fields.");
+            TipByText(this, "4 SUBMIT LOGIN", "Selected account only. Press Enter once to submit the credentials currently visible on the login screen.");
+            TipByText(this, "5 SERVER", "Selected account only. Select the first/only game server and press Enter.");
+            TipByText(this, "6 CHARACTER", "Selected account only. Click the configured character slot and character-screen Game Start.");
+            TipByText(this, "7 RESUME HOTKEY", "Selected account only. Focus that exact Vanilla window and send the configured Autobattle resume hotkey once, e.g. Alt+2.");
         }
 
         private void RunStepTest(VanillaReconnectTestStep step)
@@ -160,15 +189,56 @@ namespace _4RTools.Model.Vanilla
             if (selected == null) { MessageBox.Show(this, "Select one account row first.", "Step test"); return; }
             try
             {
+                if (testRunning) throw new InvalidOperationException("Another test is already running.");
                 ReadTop();
                 supervisor.Apply(settings, true);
                 if (supervisor.IsRunning) supervisor.Stop();
-                if (step != VanillaReconnectTestStep.LauncherGameStart) supervisor.DetectRunningClients();
+
+                if (step == VanillaReconnectTestStep.LauncherGameStart)
+                {
+                    var live = Process.GetProcessesByName("Vanilla MMO");
+                    try
+                    {
+                        if (live.Length > 0) throw new InvalidOperationException("Close all Vanilla clients before step 1 so GAME START can be verified unambiguously.");
+                    }
+                    finally { foreach (var process in live) process.Dispose(); }
+                }
+                else supervisor.AssignSingleDiagnosticClient(selected.Id);
+
+                int generation = BeginTest("STEP TEST: " + step + " for " + selected.Label);
                 supervisor.RunDiagnosticStep(selected.Id, step);
-                testState.Text = "STEP TEST RUNNING: " + step + " for " + selected.Label;
-                testState.ForeColor = Color.DarkSlateBlue;
+                WaitForDiagnosticStep(generation, selected.Id, step, step == VanillaReconnectTestStep.LauncherGameStart ? 150000 : 30000);
             }
             catch (Exception ex) { FailTestImmediately("Step test " + step, ex); }
+        }
+
+        private void WaitForDiagnosticStep(int generation, string accountId, VanillaReconnectTestStep step, int timeoutMs)
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+                string successDetail = "Diagnostic step completed: " + step;
+                string failurePrefix = "Diagnostic step failed:";
+                while (DateTime.UtcNow < deadline)
+                {
+                    var current = supervisor.Statuses().FirstOrDefault(s => string.Equals(s.AccountId, accountId, StringComparison.OrdinalIgnoreCase));
+                    if (current != null)
+                    {
+                        if (string.Equals(current.Detail, successDetail, StringComparison.Ordinal))
+                        {
+                            CompleteTest(generation, true, "Step " + step + " passed. Continue with the next numbered step when the Vanilla screen is ready.");
+                            return;
+                        }
+                        if (current.Detail != null && current.Detail.StartsWith(failurePrefix, StringComparison.Ordinal))
+                        {
+                            CompleteTest(generation, false, current.Detail);
+                            return;
+                        }
+                    }
+                    Thread.Sleep(250);
+                }
+                CompleteTest(generation, false, "Step " + step + " timed out. Press COPY LOG and paste the reconnect log for analysis.");
+            });
         }
     }
 }
