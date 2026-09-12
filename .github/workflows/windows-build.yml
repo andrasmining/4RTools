@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-build-main
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-2022
@@ -36,4 +40,4 @@ jobs:
             dist/4RTools-Vanilla-v0.3.0-portable.zip
             dist/4RTools-Vanilla-v0.3.0-portable.zip.sha256
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
