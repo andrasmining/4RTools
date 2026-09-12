@@ -1,0 +1,39 @@
+name: One-time 0.6.1 professionalization validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-time-v061-validate.yml'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Apply proposed changes
+        shell: powershell
+        run: '& .\scripts\one-time-v061-professionalize.ps1'
+      - name: Restore NuGet packages
+        shell: powershell
+        run: nuget restore 4RTools.sln -NonInteractive
+      - name: Build, test, package and smoke-test
+        shell: powershell
+        run: '& .\scripts\build-release.ps1 -Version 0.6.1'
+      - name: Export changed files
+        shell: powershell
+        run: |
+          git diff -- . ':!RELEASE-NOTES.md' > proposed.patch
+      - name: Upload validation patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: v061-professionalization-patch
+          path: proposed.patch
