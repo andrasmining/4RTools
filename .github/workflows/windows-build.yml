@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: windows-build-main
   cancel-in-progress: true
@@ -24,20 +27,24 @@ jobs:
         shell: powershell
         run: nuget restore 4RTools.sln -NonInteractive
 
-      - name: Build and test release
+      - name: Resolve version
         shell: powershell
-        run: '& .\scripts\build.ps1 -Configuration Release -VanillaRelease'
+        run: |
+          $text = Get-Content 'Properties/AssemblyInfo.cs' -Raw
+          $match = [regex]::Match($text, 'AssemblyFileVersion\("([0-9]+\.[0-9]+\.[0-9]+)\.0"\)')
+          if (-not $match.Success) { throw 'Could not resolve semantic version from AssemblyFileVersion.' }
+          "VERSION=$($match.Groups[1].Value)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build portable release
+      - name: Build, test, package and smoke-test
         shell: powershell
-        run: '& .\scripts\build-release.ps1 -Version 0.3.0'
+        run: '& .\scripts\build-release.ps1 -Version $env:VERSION'
 
-      - name: Upload portable release
+      - name: Upload portable build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 4RTools-Vanilla-0.3.0-portable
+          name: 4RTools-Vanilla-${{ env.VERSION }}-portable
           path: |
-            dist/4RTools-Vanilla-v0.3.0-portable.zip
-            dist/4RTools-Vanilla-v0.3.0-portable.zip.sha256
+            dist/4RTools-Vanilla-v${{ env.VERSION }}-portable.zip
+            dist/4RTools-Vanilla-v${{ env.VERSION }}-portable.zip.sha256
           if-no-files-found: error
           retention-days: 30
