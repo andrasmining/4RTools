@@ -17,6 +17,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Legacy duplicated settings keep the two configured accounts", LegacyDuplicateMigration);
             Test("Runtime status contains only current configured accounts", StatusTracksCurrentSettings);
             Test("Vanilla Launcher.exe uses GAME START launcher mode", VanillaLauncherName);
+            Test("Legacy login anchors migrate to verified field centers", LoginAnchorMigration);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -68,6 +69,22 @@ namespace Vanilla.Diagnostics.Tests
             MethodInfo method = type.GetMethod("IsPatcher", BindingFlags.Static | BindingFlags.NonPublic);
             Assert((bool)method.Invoke(null, new object[] { @"C:\Games\Vanilla RO\Vanilla Launcher.exe" }), "Vanilla Launcher.exe was not recognized.");
             Assert((bool)method.Invoke(null, new object[] { @"C:\Games\Vanilla RO\patcher.exe" }), "patcher.exe regressed.");
+        }
+        private static void LoginAnchorMigration()
+        {
+            var legacy = VanillaReconnectSettings.CreateDefault();
+            legacy.Anchors.UserNameY = 0.66;
+            legacy.Anchors.PasswordY = 0.685;
+            var migrated = legacy.Clone();
+            Assert(Math.Abs(migrated.Anchors.UserNameY - 0.677) < 0.0001 && Math.Abs(migrated.Anchors.PasswordY - 0.697) < 0.0001,
+                "Legacy login-field coordinates were not migrated.");
+
+            var interim = VanillaReconnectSettings.CreateDefault();
+            interim.Anchors.UserNameY = 0.635;
+            interim.Anchors.PasswordY = 0.660;
+            migrated = interim.Clone();
+            Assert(Math.Abs(migrated.Anchors.UserNameY - 0.677) < 0.0001 && Math.Abs(migrated.Anchors.PasswordY - 0.697) < 0.0001,
+                "Interim login-field coordinates were not migrated.");
         }
         private static string Temp() { string p = Path.Combine(Path.GetTempPath(), "4rtools-reconnect-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(p); return p; }
         private static void Delete(string p) { try { Directory.Delete(p, true); } catch { } }

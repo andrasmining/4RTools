@@ -60,9 +60,9 @@ namespace _4RTools.Model.Vanilla
         public double ServiceListX { get; set; } = 0.50;
         public double ServiceListY { get; set; } = 0.60;
         public double UserNameX { get; set; } = 0.48;
-        public double UserNameY { get; set; } = 0.635;
+        public double UserNameY { get; set; } = 0.677;
         public double PasswordX { get; set; } = 0.48;
-        public double PasswordY { get; set; } = 0.660;
+        public double PasswordY { get; set; } = 0.697;
         public double CharacterGridX { get; set; } = 0.292;
         public double CharacterGridY { get; set; } = 0.375;
         public double CharacterStepX { get; set; } = 0.080;
@@ -128,7 +128,9 @@ namespace _4RTools.Model.Vanilla
             }
             Accounts = unique;
             if (Anchors == null) Anchors = new VanillaUiAnchors();
-            if (Math.Abs(Anchors.UserNameY - 0.66) < 0.0001 && Math.Abs(Anchors.PasswordY - 0.685) < 0.0001) { Anchors.UserNameY = 0.635; Anchors.PasswordY = 0.660; }
+            bool legacyLoginAnchors = (Math.Abs(Anchors.UserNameY - 0.66) < 0.0001 && Math.Abs(Anchors.PasswordY - 0.685) < 0.0001)
+                || (Math.Abs(Anchors.UserNameY - 0.635) < 0.0001 && Math.Abs(Anchors.PasswordY - 0.660) < 0.0001);
+            if (legacyLoginAnchors) { Anchors.UserNameY = 0.677; Anchors.PasswordY = 0.697; }
         }
 
         private static bool IsSyntheticDefault(VanillaReconnectAccount account)

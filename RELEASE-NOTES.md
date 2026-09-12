@@ -14,8 +14,8 @@ CI validates compilation, tests and portable packaging. Real Vanilla/Gepard inte
 
 Release version: 0.6.0. SHA256:
 
-- `4RTools-Vanilla-v0.6.0-portable.zip`: `5b1891f932eae5f3f8844fb0c90375623e84fee195c8c1f909dacb993538d913`
-- `4RTools-Vanilla.exe`: `0814f665c311232553a9ad25e624d900a3ccbcc59426e5231d4280eaef31d2f4`
+- `4RTools-Vanilla-v0.6.0-portable.zip`: `fd095222a92f119cc213923b3fad94a713dd1ca1dbf4f28ac3d19f3e225e1d80`
+- `4RTools-Vanilla.exe`: `0d86cda483d9bf674996fff216c7b3480ce5a425d8b166c708adc85e1a7a03d3`
 
 These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
 <!-- END GENERATED RELEASE CHECKSUMS -->
