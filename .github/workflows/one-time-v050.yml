@@ -22,6 +22,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Repair migration script syntax
+        shell: powershell
+        run: |
+          $path = 'scripts/one-time-v050.ps1'
+          $text = [IO.File]::ReadAllText($path)
+          $text = $text.Replace('in $Path: $Old', 'in ${Path}: $Old')
+          $text = $text.Replace('in $Path, found', 'in ${Path}, found')
+          [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false)))
+
       - name: Apply 0.5.0 migration
         shell: powershell
         run: '& .\scripts\one-time-v050.ps1'
