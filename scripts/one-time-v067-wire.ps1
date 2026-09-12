@@ -174,4 +174,25 @@ if(-not $text.Contains($old)){ throw 'Diagnostic proxy-selection anchor missing.
 $text=$text.Replace($old,$new)
 WriteText $path $text
 
+$path='Tests/Vanilla.Diagnostics.Tests.csproj'
+$text=ReadText $path
+if(-not $text.Contains('<Reference Include="System.Drawing" />')){
+    $text=$text.Replace('    <Reference Include="System.Core" />','    <Reference Include="System.Core" />'+[Environment]::NewLine+'    <Reference Include="System.Drawing" />')
+}
+$testAnchor='    <Compile Include="VanillaPatcherLauncherTests.cs" />'
+if(-not $text.Contains($testAnchor)){ throw 'Tests project patcher include missing.' }
+if(-not $text.Contains('VanillaProxyPatternTests.cs')){
+    $text=$text.Replace($testAnchor,$testAnchor+[Environment]::NewLine+'    <Compile Include="VanillaProxyPatternTests.cs" />'+[Environment]::NewLine+'    <Compile Include="VanillaSessionLogTests.cs" />')
+}
+WriteText $path $text
+
+$path='Tests/Program.cs'
+$text=ReadText $path
+$programAnchor='            failed += VanillaPatcherLauncherTests.Run();'
+if(-not $text.Contains($programAnchor)){ throw 'Tests Program patcher suite anchor missing.' }
+if(-not $text.Contains('VanillaProxyPatternTests.Run()')){
+    $text=$text.Replace($programAnchor,$programAnchor+[Environment]::NewLine+'            failed += VanillaProxyPatternTests.Run();'+[Environment]::NewLine+'            failed += VanillaSessionLogTests.Run();')
+}
+WriteText $path $text
+
 Write-Host '0.6.7 wiring applied.'
