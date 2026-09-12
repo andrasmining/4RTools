@@ -117,10 +117,10 @@ namespace _4RTools.Model.Vanilla
                                 }
 
                                 using (var input = new VanillaForegroundInput(patcherPid.Value))
-                                    input.ClickNormalized(clickX, clickY);
+                                    input.ClickNormalized(clickX, clickY, requireForeground: false);
 
                                 log?.Invoke(string.Format(
-                                    "GAME START click sent to launcher PID {0} at normalized ({1:0.000}, {2:0.000}) [{3}]; waiting for Vanilla/Gepard startup before any retry.",
+                                    "GAME START click sent to launcher PID {0} at normalized ({1:0.000}, {2:0.000}) [{3}]; foreground focus is best-effort for launcher mouse clicks; waiting for Vanilla/Gepard startup before any retry.",
                                     patcherPid.Value, clickX, clickY, evidence));
                             }
                             catch (Exception ex)
