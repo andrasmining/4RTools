@@ -32,4 +32,40 @@ $t=$t.Replace($old,'            Process.Start(VanillaAppData.RootDirectory);')
 if ($t -match 'UseShellExecute') { throw 'UseShellExecute remained in VanillaIntegratedShell.cs after compatibility patch.' }
 Write $p $t
 
-Write-Host '0.6.1 compatibility patch applied.'
+# Be deliberately explicit about sibling version discovery. Directory.GetParent on a
+# normalized directory string proved brittle in the Windows CI migration regression.
+# The release folders are siblings, so inspect the current DirectoryInfo.Parent and
+# filter names case-insensitively instead of relying on a wildcard implementation.
+$p='Model/Vanilla/VanillaAppData.cs'
+$t=Read $p
+$old=@'
+            DirectoryInfo parent;
+            try { parent = Directory.GetParent(current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)); }
+            catch { yield break; }
+            if (parent == null || !parent.Exists) yield break;
+            DirectoryInfo[] siblings;
+            try { siblings = parent.GetDirectories("4RTools-Vanilla-v*"); }
+            catch { yield break; }
+            foreach (var sibling in siblings.OrderByDescending(d => d.LastWriteTimeUtc))
+'@
+$new=@'
+            DirectoryInfo parent;
+            try { parent = new DirectoryInfo(current).Parent; }
+            catch { yield break; }
+            if (parent == null || !parent.Exists) yield break;
+            DirectoryInfo[] siblings;
+            try
+            {
+                siblings = parent.GetDirectories()
+                    .Where(d => d.Name.StartsWith("4RTools-Vanilla-v", StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(d => d.LastWriteTimeUtc)
+                    .ToArray();
+            }
+            catch { yield break; }
+            foreach (var sibling in siblings)
+'@
+if(-not $t.Contains($old)){throw 'LegacyInstallCandidates sibling-discovery anchor missing.'}
+$t=$t.Replace($old,$new)
+Write $p $t
+
+Write-Host '0.6.1 compatibility and migration patches applied.'
