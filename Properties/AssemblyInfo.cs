@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 // Assembly metadata for the independent Vanilla-focused 4RTools fork.
 [assembly: AssemblyTitle("4RTools Vanilla Companion")]
-[assembly: AssemblyDescription("Vanilla companion with guarded reconnect/relogin, read-only state and ordinary client input")]
+[assembly: AssemblyDescription("Vanilla companion with patcher startup, guarded reconnect/relogin, read-only state and ordinary client input")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("4RTools Vanilla Companion")]
