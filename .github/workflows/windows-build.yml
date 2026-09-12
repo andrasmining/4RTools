@@ -1,0 +1,43 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Restore NuGet packages
+        shell: powershell
+        run: nuget restore 4RTools.sln -NonInteractive
+
+      - name: Build release
+        shell: powershell
+        run: msbuild 4RTools.sln /m /p:Configuration=Release /p:VanillaRelease=true /p:RestorePackages=false
+
+      - name: Run diagnostics and automation tests
+        shell: powershell
+        run: '& .\Tests\bin\Release\Vanilla.Diagnostics.Tests.exe'
+
+      - name: Build portable release
+        shell: powershell
+        run: '& .\scripts\build-release.ps1'
+
+      - name: Upload portable release
+        uses: actions/upload-artifact@v4
+        with:
+          name: 4RTools-Vanilla-portable
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
