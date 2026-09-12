@@ -1,12 +1,17 @@
-# 4RTools Vanilla 0.6.6
+# 4RTools Vanilla 0.6.7
 
-This patch fixes the concrete launcher-window bug exposed by the 0.6.5 diagnostic log.
+This patch fixes proxy-route selection and makes reconnect logging bounded and session-oriented.
 
-- Fixed GAME START input being routed to the wrong top-level window. The Vanilla launcher process exposes a tiny Delphi `TApplication` helper window as `Process.MainWindowHandle`, while the real visible launcher is a separate `TThorForm` titled `Vanilla MMO Launcher`. 0.6.5 was therefore calculating its coordinates against a 1x1 client area and physically clicking the wrong screen point even though Windows reported `SendInput` success.
-- Launcher window resolution now enumerates every visible top-level window owned by the launcher PID and deliberately prefers the real `TThorForm` / `Vanilla MMO Launcher` surface, with usable client area taking precedence over tiny helper windows.
-- Visual GAME START capture, physical `SendInput`, targeted mouse-message fallback, native child-control inspection, and launcher diagnostics now all operate on the same resolved visible launcher HWND instead of falling back to `Process.MainWindowHandle`.
-- Foreground mouse input can now be given an explicit resolved HWND, so the click geometry is calculated from the real launcher window while ordinary Vanilla game input keeps its existing behavior.
-- Existing selected-account two-client behavior from 0.6.5 remains: with `Clients = 2`, one client may stay running while the selected second account launches a new client.
-- Unique PID ownership, `STOP TEST`, automatic test cancellation on window closure, persistent configuration, encrypted passwords, and the GitHub updater remain unchanged.
+- Replaced the old blind proxy click (`50% / 60%` plus `Home`/`Down`) with visual recognition of the actual four-row proxy list before any selection input is sent. The previous implementation could land on Singapore and then fail to reset the selection to Global.
+- Proxy recognition is based on the current Vanilla client bitmap, proportional search regions, row spacing and dark-text structure rather than fixed desktop pixels. It is therefore designed to tolerate different client resolutions, Windows DPI/scaling, and moderate font/image softening.
+- Selection fails closed: if four plausible, evenly spaced proxy rows cannot be identified confidently, 4RTools sends no proxy-selection input and reports the detector evidence instead of guessing.
+- The configured route remains `Global / Singapore / Tokyo / Los Angeles` from top to bottom. 4RTools computes a conservative safe interior rectangle common to the detected row content, chooses the actual click point only inside the configured row's central interior, then clamps keyboard selection to the first row with repeated Up presses and advances exactly to the configured route before Enter.
+- The same recognition path is used by normal unattended relog recovery and by `2 PROXY`, so diagnostics exercise the production logic rather than a separate approximation.
+- The most recent proxy recognition capture is written to `Logs/proxy-screen-last.png` to make a live failure diagnosable without exposing credentials.
+- Added offline regression tests for proxy-row recognition at 800x600, 1280x720, 1920x1080 and 2560x1440 plus softened gray text, as well as fail-closed behavior on a blank screen.
+- Reconnect logs now start a fresh timestamped session file on every 4RTools process startup instead of appending forever to one `reconnect.log`.
+- Each session log part is capped at 10 MB and automatically rotates to another part. The reconnect-log directory is also pruned to a bounded history (up to 20 reconnect log files / approximately 100 MB).
+- An existing legacy `reconnect.log` is archived once rather than discarded. `OPEN LOG` and `COPY LOG` now target the current session log part.
+- Persistent recovery/account configuration, DPAPI-protected passwords, the two-client limit, the working `TThorForm` GAME START fix from 0.6.6, and the GitHub self-updater remain unchanged.
 
-The exact source fix was built, tested, packaged and portable-smoke-tested on Windows in GitHub Actions before being committed. The real Vanilla launcher still requires local validation, but the previous log now gives a definitive root cause rather than an unknown input failure.
+The source wiring, Release/Debug builds, automated tests, packaging and portable launch smoke test were validated in Windows GitHub Actions before the implementation commit was pushed. Live proxy recognition still needs validation against the user's actual Vanilla login screen; when recognition is uncertain, the new behavior is deliberately to stop rather than select an unverified route.
