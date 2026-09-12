@@ -57,20 +57,20 @@ jobs:
 
           $anchor = '            // tabDebuffRecovery'
           if (-not $designer.Contains($anchor)) { throw 'Vanilla tab initialization anchor missing.' }
-          $vanillaBlock = @'
-            // 
-            // tabPageVanilla
-            // 
-            this.tabPageVanilla.Location = new System.Drawing.Point(4, 22);
-            this.tabPageVanilla.Name = "tabPageVanilla";
-            this.tabPageVanilla.Padding = new System.Windows.Forms.Padding(3);
-            this.tabPageVanilla.Size = new System.Drawing.Size(865, 274);
-            this.tabPageVanilla.TabIndex = 0;
-            this.tabPageVanilla.Text = "Vanilla";
-            this.tabPageVanilla.UseVisualStyleBackColor = true;
-            // 
-'@
-          $designer = $designer.Replace($anchor, $vanillaBlock.TrimStart("`r", "`n") + $nl + $anchor)
+          $vanillaBlock = @(
+            '            // ',
+            '            // tabPageVanilla',
+            '            // ',
+            '            this.tabPageVanilla.Location = new System.Drawing.Point(4, 22);',
+            '            this.tabPageVanilla.Name = "tabPageVanilla";',
+            '            this.tabPageVanilla.Padding = new System.Windows.Forms.Padding(3);',
+            '            this.tabPageVanilla.Size = new System.Drawing.Size(865, 274);',
+            '            this.tabPageVanilla.TabIndex = 0;',
+            '            this.tabPageVanilla.Text = "Vanilla";',
+            '            this.tabPageVanilla.UseVisualStyleBackColor = true;',
+            '            // '
+          ) -join $nl
+          $designer = $designer.Replace($anchor, $vanillaBlock + $nl + $anchor)
 
           $anchor = '        private TabControl atkDefMode;'
           if (-not $designer.Contains($anchor)) { throw 'atkDefMode field anchor missing.' }
