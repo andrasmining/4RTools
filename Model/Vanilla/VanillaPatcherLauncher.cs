@@ -21,16 +21,21 @@ namespace _4RTools.Model.Vanilla
         internal const double DefaultGameStartX = 0.50;
         internal const double DefaultGameStartY = 0.765;
         internal const int DefaultStartTimeoutMs = 120000;
-        internal const int DefaultRetryMs = 8000;
+        internal const int DefaultRetryMs = 10000;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT { public int X, Y; }
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool ClientToScreen(IntPtr hwnd, ref POINT point);
 
         internal static bool IsPatcher(string executablePath)
         {
@@ -81,7 +86,10 @@ namespace _4RTools.Model.Vanilla
                 string launcherName = Path.GetFileNameWithoutExtension(executablePath);
                 string launcherDirectory = Path.GetDirectoryName(executablePath);
                 int fallbackAttempt = 0;
+                int clickAttempt = 0;
                 double[] fallbackY = { gameStartY, 0.795, 0.825, 0.745 };
+                bool sawLauncherWindow = false;
+                DateTime? launcherWindowLostAt = null;
 
                 while (DateTime.UtcNow < deadline)
                 {
@@ -103,6 +111,8 @@ namespace _4RTools.Model.Vanilla
                         int? patcherPid = FindLauncherWindowProcessId(launched, launcherName, launcherDirectory);
                         if (patcherPid.HasValue)
                         {
+                            sawLauncherWindow = true;
+                            launcherWindowLostAt = null;
                             try
                             {
                                 double clickX = gameStartX;
@@ -116,12 +126,26 @@ namespace _4RTools.Model.Vanilla
                                     evidence = "visual detector unavailable; lower-center fallback sweep";
                                 }
 
-                                using (var input = new VanillaForegroundInput(patcherPid.Value))
-                                    input.ClickNormalized(clickX, clickY, requireForeground: false);
+                                string strategy;
+                                if ((clickAttempt++ & 1) == 0)
+                                {
+                                    using (var input = new VanillaForegroundInput(patcherPid.Value))
+                                        input.ClickNormalized(clickX, clickY, requireForeground: false);
+                                    strategy = "screen-coordinate SendInput";
+                                }
+                                else
+                                {
+                                    using (var input = new VanillaTargetedInput(patcherPid.Value))
+                                    {
+                                        input.Activate();
+                                        input.ClickNormalized(clickX, clickY);
+                                    }
+                                    strategy = "targeted launcher window message";
+                                }
 
                                 log?.Invoke(string.Format(
-                                    "GAME START click sent to launcher PID {0} at normalized ({1:0.000}, {2:0.000}) [{3}]; foreground focus is best-effort for launcher mouse clicks; waiting for Vanilla/Gepard startup before any retry.",
-                                    patcherPid.Value, clickX, clickY, evidence));
+                                    "GAME START click sent to launcher PID {0} at normalized ({1:0.000}, {2:0.000}) using {3} [{4}]; waiting for Vanilla/Gepard startup before retry.",
+                                    patcherPid.Value, clickX, clickY, strategy, evidence));
                             }
                             catch (Exception ex)
                             {
@@ -131,6 +155,15 @@ namespace _4RTools.Model.Vanilla
                         }
                         else
                         {
+                            if (sawLauncherWindow)
+                            {
+                                if (!launcherWindowLostAt.HasValue) launcherWindowLostAt = DateTime.UtcNow;
+                                else if ((DateTime.UtcNow - launcherWindowLostAt.Value).TotalMilliseconds >= 2500)
+                                {
+                                    log?.Invoke("Launcher window was closed before Vanilla started; stopping this test/recovery launch attempt.");
+                                    throw new OperationCanceledException("Vanilla launcher window was closed.");
+                                }
+                            }
                             log?.Invoke("Launcher process exists but no usable launcher window is visible yet.");
                             nextClick = DateTime.UtcNow.AddMilliseconds(1000);
                         }
@@ -226,14 +259,23 @@ namespace _4RTools.Model.Vanilla
                     if (width < 200 || height < 120) return false;
 
                     using (var bitmap = new Bitmap(width, height, PixelFormat.Format24bppRgb))
-                    using (var graphics = Graphics.FromImage(bitmap))
                     {
-                        IntPtr hdc = graphics.GetHdc();
-                        bool captured;
-                        try { captured = PrintWindow(hwnd, hdc, 1); }
-                        finally { graphics.ReleaseHdc(hdc); }
-                        if (!captured) return false;
-                        return TryFindGameStart(bitmap, out x, out y, out evidence);
+                        using (var graphics = Graphics.FromImage(bitmap))
+                        {
+                            IntPtr hdc = graphics.GetHdc();
+                            bool captured;
+                            try { captured = PrintWindow(hwnd, hdc, 1); }
+                            finally { graphics.ReleaseHdc(hdc); }
+                            if (captured && TryFindGameStart(bitmap, out x, out y, out evidence)) return true;
+                        }
+
+                        var origin = new POINT { X = 0, Y = 0 };
+                        if (!ClientToScreen(hwnd, ref origin)) return false;
+                        using (var graphics = Graphics.FromImage(bitmap))
+                            graphics.CopyFromScreen(origin.X, origin.Y, 0, 0, new Size(width, height));
+                        if (!TryFindGameStart(bitmap, out x, out y, out evidence)) return false;
+                        evidence = "visible-screen capture; " + evidence;
+                        return true;
                     }
                 }
             }

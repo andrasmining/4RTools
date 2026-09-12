@@ -20,6 +20,29 @@ namespace _4RTools.Model.Vanilla
 
     public sealed partial class VanillaReconnectSupervisor
     {
+        private int diagnosticGeneration;
+
+        public void CancelDiagnosticTest()
+        {
+            Interlocked.Increment(ref diagnosticGeneration);
+            lock (gate)
+            {
+                foreach (var runtime in runtimes.Values)
+                {
+                    if (runtime.Detail != null && runtime.Detail.StartsWith("Diagnostic", StringComparison.Ordinal))
+                    {
+                        runtime.ScriptRunning = false;
+                        SetStage(runtime, VanillaReconnectStage.Stopped, "Diagnostic test stopped by user");
+                    }
+                }
+            }
+            RaiseUpdated();
+        }
+
+        private bool DiagnosticCancelled(int generation)
+        {
+            return disposed || generation != Volatile.Read(ref diagnosticGeneration);
+        }
         public void AssignSingleDiagnosticClient(string accountId)
         {
             lock (gate)
@@ -56,6 +79,7 @@ namespace _4RTools.Model.Vanilla
             VanillaReconnectAccount account;
             VanillaReconnectSettings config;
             int? pid = null;
+            int generation = Interlocked.Increment(ref diagnosticGeneration);
             lock (gate)
             {
                 Runtime runtime;
@@ -71,13 +95,14 @@ namespace _4RTools.Model.Vanilla
                 config = settings.Clone();
                 SetStage(runtime, VanillaReconnectStage.LoggingIn, "Diagnostic step running: " + step);
             }
-            ThreadPool.QueueUserWorkItem(_ => DiagnosticStepWorker(accountId, account, config, pid, step));
+            ThreadPool.QueueUserWorkItem(_ => DiagnosticStepWorker(accountId, account, config, pid, step, generation));
             RaiseUpdated();
         }
 
-        private void DiagnosticStepWorker(string accountId, VanillaReconnectAccount account, VanillaReconnectSettings config, int? pid, VanillaReconnectTestStep step)
+        private void DiagnosticStepWorker(string accountId, VanillaReconnectAccount account, VanillaReconnectSettings config, int? pid, VanillaReconnectTestStep step, int generation)
         {
             string error = null;
+            string stopped = null;
             int? discoveredPid = pid;
             try
             {
@@ -85,7 +110,7 @@ namespace _4RTools.Model.Vanilla
                 if (step == VanillaReconnectTestStep.LauncherGameStart)
                 {
                     discoveredPid = VanillaPatcherLauncher.Launch(config.LaunchExecutable, config.LaunchArguments,
-                        message => Log("TEST " + account.Label + ": " + message), () => disposed);
+                        message => Log("TEST " + account.Label + ": " + message), () => DiagnosticCancelled(generation));
                     if (!discoveredPid.HasValue) throw new InvalidOperationException("Launcher test did not produce a Vanilla process ID.");
                 }
                 else
@@ -134,23 +159,39 @@ namespace _4RTools.Model.Vanilla
                     }
                 }
             }
-            catch (Exception ex) { error = ex.Message; }
+            catch (OperationCanceledException ex) { stopped = ex.Message; }
+            catch (Exception ex)
+            {
+                bool closed = false;
+                if (discoveredPid.HasValue)
+                {
+                    try { using (var process = Process.GetProcessById(discoveredPid.Value)) closed = process.HasExited; }
+                    catch { closed = true; }
+                }
+                if (closed) stopped = "Vanilla window/process was closed.";
+                else error = ex.Message;
+            }
             finally
             {
-                lock (gate)
+                if (generation == Volatile.Read(ref diagnosticGeneration))
                 {
-                    Runtime runtime;
-                    if (runtimes.TryGetValue(accountId, out runtime))
+                    lock (gate)
                     {
-                        if (discoveredPid.HasValue) runtime.ProcessId = discoveredPid;
-                        runtime.ScriptRunning = false;
-                        SetStage(runtime, error == null ? VanillaReconnectStage.WaitingForGameplay : VanillaReconnectStage.Error,
-                            error == null ? "Diagnostic step completed: " + step : "Diagnostic step failed: " + error);
+                        Runtime runtime;
+                        if (runtimes.TryGetValue(accountId, out runtime))
+                        {
+                            if (discoveredPid.HasValue) runtime.ProcessId = discoveredPid;
+                            runtime.ScriptRunning = false;
+                            if (stopped != null) SetStage(runtime, VanillaReconnectStage.Stopped, "Diagnostic test stopped: " + stopped);
+                            else SetStage(runtime, error == null ? VanillaReconnectStage.WaitingForGameplay : VanillaReconnectStage.Error,
+                                error == null ? "Diagnostic step completed: " + step : "Diagnostic step failed: " + error);
+                        }
                     }
+                    if (stopped != null) Log("TEST " + account.Label + ": STOPPED: " + stopped);
+                    else if (error == null) Log("TEST " + account.Label + ": step " + step + " completed.");
+                    else Log("TEST " + account.Label + ": step " + step + " FAILED: " + error);
+                    RaiseUpdated();
                 }
-                if (error == null) Log("TEST " + account.Label + ": step " + step + " completed.");
-                else Log("TEST " + account.Label + ": step " + step + " FAILED: " + error);
-                RaiseUpdated();
             }
         }
     }
@@ -181,6 +222,7 @@ namespace _4RTools.Model.Vanilla
             AddButton(row, "5 SERVER", () => RunStepTest(VanillaReconnectTestStep.SelectGameServer));
             AddButton(row, "6 CHARACTER", () => RunStepTest(VanillaReconnectTestStep.SelectCharacter));
             AddButton(row, "7 RESUME HOTKEY", () => RunStepTest(VanillaReconnectTestStep.ResumeHotkey));
+            AddButton(row, "STOP TEST", StopCurrentTest);
             box.Controls.Add(row);
             return box;
         }
@@ -194,8 +236,28 @@ namespace _4RTools.Model.Vanilla
             TipByText(this, "5 SERVER", "Existing client: server step only. No client: automatically run all earlier numbered steps first.");
             TipByText(this, "6 CHARACTER", "Existing client: character step only. No client: automatically run all earlier numbered steps first.");
             TipByText(this, "7 RESUME HOTKEY", "Existing client: resume hotkey only. No client: automatically run the complete numbered sequence first.");
+            TipByText(this, "STOP TEST", "Cancel the current diagnostic/recovery test immediately. Closing the launcher or the one diagnostic Vanilla client also stops the test automatically.");
         }
 
+        private void StopCurrentTest()
+        {
+            supervisor.CancelDiagnosticTest();
+            if (supervisor.IsRunning) supervisor.Stop();
+            testGeneration++;
+            testRunning = false;
+            testState.Text = "TEST STOPPED";
+            testState.ForeColor = Color.DarkOrange;
+        }
+
+        private void CompleteTestStopped(int generation, string message)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { BeginInvoke((MethodInvoker)(() => CompleteTestStopped(generation, message))); return; }
+            if (generation != testGeneration) return;
+            testRunning = false;
+            testState.Text = "TEST STOPPED";
+            testState.ForeColor = Color.DarkOrange;
+        }
         private void RunStepTest(VanillaReconnectTestStep step)
         {
             var selected = SelectedAccount();
@@ -207,6 +269,7 @@ namespace _4RTools.Model.Vanilla
                 // still waiting for the launcher result.
                 if (testRunning)
                 {
+                    supervisor.CancelDiagnosticTest();
                     testRunning = false;
                     testGeneration++;
                 }
@@ -264,7 +327,8 @@ namespace _4RTools.Model.Vanilla
                         string failure;
                         if (!WaitForDiagnosticCompletion(accountId, step, step == VanillaReconnectTestStep.LauncherGameStart ? 150000 : 45000, out failure))
                         {
-                            CompleteTest(generation, false, failure);
+                            if (failure != null && failure.StartsWith("STOPPED:", StringComparison.Ordinal)) CompleteTestStopped(generation, failure.Substring(8).Trim());
+                            else CompleteTest(generation, false, failure);
                             return;
                         }
                         if (step == targetStep)
@@ -290,7 +354,9 @@ namespace _4RTools.Model.Vanilla
                 }
                 catch (Exception ex)
                 {
-                    CompleteTest(generation, false, "Chain test stopped: " + ex.Message);
+                    if (ex.Message.IndexOf("No running Vanilla client", StringComparison.OrdinalIgnoreCase) >= 0 || ex.Message.IndexOf("Vanilla client exited", StringComparison.OrdinalIgnoreCase) >= 0)
+                        CompleteTestStopped(generation, "Vanilla window/process was closed; test stopped.");
+                    else CompleteTest(generation, false, "Chain test failed: " + ex.Message);
                 }
             });
         }
@@ -300,6 +366,7 @@ namespace _4RTools.Model.Vanilla
             DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
             string successDetail = "Diagnostic step completed: " + step;
             string failurePrefix = "Diagnostic step failed:";
+            string stoppedPrefix = "Diagnostic test stopped:";
             while (DateTime.UtcNow < deadline)
             {
                 var current = supervisor.Statuses().FirstOrDefault(s => string.Equals(s.AccountId, accountId, StringComparison.OrdinalIgnoreCase));
@@ -309,6 +376,11 @@ namespace _4RTools.Model.Vanilla
                     {
                         failure = null;
                         return true;
+                    }
+                    if (current.Detail != null && current.Detail.StartsWith(stoppedPrefix, StringComparison.Ordinal))
+                    {
+                        failure = "STOPPED: " + current.Detail;
+                        return false;
                     }
                     if (current.Detail != null && current.Detail.StartsWith(failurePrefix, StringComparison.Ordinal))
                     {
@@ -328,6 +400,7 @@ namespace _4RTools.Model.Vanilla
                 DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
                 string successDetail = "Diagnostic step completed: " + step;
                 string failurePrefix = "Diagnostic step failed:";
+                string stoppedPrefix = "Diagnostic test stopped:";
                 while (DateTime.UtcNow < deadline)
                 {
                     var current = supervisor.Statuses().FirstOrDefault(s => string.Equals(s.AccountId, accountId, StringComparison.OrdinalIgnoreCase));
@@ -336,6 +409,11 @@ namespace _4RTools.Model.Vanilla
                         if (string.Equals(current.Detail, successDetail, StringComparison.Ordinal))
                         {
                             CompleteTest(generation, true, "Step " + step + " passed. Continue with the next numbered step when the Vanilla screen is ready.");
+                            return;
+                        }
+                        if (current.Detail != null && current.Detail.StartsWith(stoppedPrefix, StringComparison.Ordinal))
+                        {
+                            CompleteTestStopped(generation, current.Detail);
                             return;
                         }
                         if (current.Detail != null && current.Detail.StartsWith(failurePrefix, StringComparison.Ordinal))
