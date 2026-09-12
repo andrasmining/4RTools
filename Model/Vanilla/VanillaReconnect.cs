@@ -407,10 +407,10 @@ namespace _4RTools.Model.Vanilla
                             top++;
                             if (lum < 165) topDark++;
                         }
-                        if (nx >= .30 && nx <= .70 && ny >= .43 && ny <= .70)
+                        if (nx >= .30 && nx <= .70 && ny >= .40 && ny <= .68)
                         {
                             center++;
-                            if (lum >= 175 && lum <= 248 && max - min <= 38) centerNeutralLight++;
+                            if (lum >= 175 && max - min <= 50) centerNeutralLight++;
                         }
                     }
                 }
@@ -418,7 +418,7 @@ namespace _4RTools.Model.Vanilla
                 double hudDark = top == 0 ? 0 : (double)topDark / top;
                 double modal = center == 0 ? 0 : (double)centerNeutralLight / center;
 
-                if (modal >= .42 && brightRatio < .55 && hudDark >= .16) return VanillaVisualState.ModalDialog;
+                if (modal >= .25 && brightRatio < .55 && hudDark >= .16) return VanillaVisualState.ModalDialog;
                 if (hudDark >= .20 && brightRatio < .72) return VanillaVisualState.Gameplay;
                 if (brightRatio >= .50 && hudDark < .16) return VanillaVisualState.LoginShell;
                 return VanillaVisualState.Unknown;
@@ -661,7 +661,7 @@ namespace _4RTools.Model.Vanilla
                         && (now - runtime.LoginLikeSince.Value).TotalMilliseconds >= settings.LoginStableMs
                         && (!runtime.LastRecovery.HasValue || (now - runtime.LastRecovery.Value).TotalMilliseconds >= settings.RetryBackoffMs))
                     {
-                        QueueLogin(runtime, false, "Login shell detected after disconnect");
+                        QueueLogin(runtime, runtime.LastLaunch.HasValue && (!runtime.LastRecovery.HasValue || runtime.LastLaunch.Value > runtime.LastRecovery.Value), "Login shell detected after disconnect");
                     }
                     else SetStage(runtime, VanillaReconnectStage.WaitingForGameplay, "Vanilla login/service screen detected");
                     return;
@@ -733,7 +733,9 @@ namespace _4RTools.Model.Vanilla
         private void Bind(Runtime runtime, int pid, bool freshLaunch, string detail)
         {
             runtime.ProcessId = pid;
-            runtime.ResumeSent = false;
+            // Never toggle Autobattle merely because 4RTools adopted an already-running client.
+            // A fresh launch or a relog sequence explicitly arms the one-shot resume hotkey.
+            runtime.ResumeSent = !freshLaunch;
             runtime.LoginLikeSince = runtime.GameplaySince = null;
             SetStage(runtime, freshLaunch ? VanillaReconnectStage.Launching : VanillaReconnectStage.WaitingForGameplay, detail + " (PID " + pid + ")");
         }
