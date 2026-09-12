@@ -924,6 +924,7 @@ namespace _4RTools.Model.Vanilla
             }
             if (string.IsNullOrWhiteSpace(runtime.Account.UserName) || string.IsNullOrWhiteSpace(runtime.Account.ProtectedPassword))
             {
+                runtime.RecoveryOwned = false;
                 SetStage(runtime, VanillaReconnectStage.NeedsConfiguration, "Username/password missing");
                 return;
             }
