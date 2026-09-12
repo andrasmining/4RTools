@@ -1,19 +1,16 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace _4RTools.Model.Vanilla
 {
     /// <summary>
-    /// Starts the user-configured Vanilla launcher. When that launcher is patcher.exe
-    /// or Vanilla Launcher.exe, it drives only the launcher's visible GAME START button
-    /// and waits for a new Vanilla MMO process. It never inspects or modifies Gepard
-    /// or game memory.
+    /// Starts the user-configured Vanilla launcher. For patcher.exe / Vanilla Launcher.exe
+    /// it performs a normal foreground mouse click on the visible GAME START button and
+    /// waits for a new Vanilla MMO process. It never inspects/modifies Gepard or game memory.
     /// </summary>
     internal static class VanillaPatcherLauncher
     {
@@ -21,20 +18,6 @@ namespace _4RTools.Model.Vanilla
         internal const double DefaultGameStartY = 0.765;
         internal const int DefaultStartTimeoutMs = 120000;
         internal const int DefaultRetryMs = 3000;
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct RECT { public int Left, Top, Right, Bottom; }
-        [StructLayout(LayoutKind.Sequential)]
-        private struct POINT { public int X, Y; }
-
-        [DllImport("user32.dll", SetLastError = true)] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
-        [DllImport("user32.dll", SetLastError = true)] private static extern bool ClientToScreen(IntPtr hwnd, ref POINT point);
-        [DllImport("user32.dll", SetLastError = true)] private static extern bool ScreenToClient(IntPtr hwnd, ref POINT point);
-        [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT point);
-        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
-        [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hwnd);
-        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
-        [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
 
         internal static bool IsPatcher(string executablePath)
         {
@@ -106,14 +89,9 @@ namespace _4RTools.Model.Vanilla
                         {
                             try
                             {
-                                using (var process = Process.GetProcessById(patcherPid.Value))
-                                {
-                                    process.Refresh();
-                                    IntPtr hwnd = process.MainWindowHandle;
-                                    if (hwnd == IntPtr.Zero) throw new InvalidOperationException("Launcher main window is not ready.");
-                                    ClickVisibleChild(hwnd, gameStartX, gameStartY);
-                                }
-                                log?.Invoke("Clicked launcher GAME START on the child control under the visible button; waiting for Vanilla/Gepard startup.");
+                                using (var input = new VanillaForegroundInput(patcherPid.Value))
+                                    input.ClickNormalized(gameStartX, gameStartY);
+                                log?.Invoke("Clicked launcher GAME START with normal foreground mouse input; waiting for Vanilla/Gepard startup.");
                             }
                             catch (Exception ex)
                             {
@@ -132,47 +110,6 @@ namespace _4RTools.Model.Vanilla
             {
                 if (launched != null) launched.Dispose();
             }
-        }
-
-        private static void ClickVisibleChild(IntPtr launcherWindow, double x, double y)
-        {
-            ShowWindow(launcherWindow, 9);
-            BringWindowToTop(launcherWindow);
-            SetForegroundWindow(launcherWindow);
-            Thread.Sleep(120);
-
-            RECT rect;
-            if (!GetClientRect(launcherWindow, out rect))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot read launcher client area.");
-            int width = Math.Max(1, rect.Right - rect.Left);
-            int height = Math.Max(1, rect.Bottom - rect.Top);
-            var screen = new POINT
-            {
-                X = Math.Max(0, Math.Min(width - 1, (int)Math.Round(x * width))),
-                Y = Math.Max(0, Math.Min(height - 1, (int)Math.Round(y * height)))
-            };
-            if (!ClientToScreen(launcherWindow, ref screen))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot map launcher GAME START coordinate.");
-
-            IntPtr target = WindowFromPoint(screen);
-            if (target == IntPtr.Zero) target = launcherWindow;
-            var local = screen;
-            if (!ScreenToClient(target, ref local))
-            {
-                target = launcherWindow;
-                local.X = Math.Max(0, Math.Min(width - 1, (int)Math.Round(x * width)));
-                local.Y = Math.Max(0, Math.Min(height - 1, (int)Math.Round(y * height)));
-            }
-            IntPtr point = new IntPtr((local.Y << 16) | (local.X & 0xFFFF));
-            Post(target, 0x0200, IntPtr.Zero, point);
-            Post(target, 0x0201, new IntPtr(1), point);
-            Post(target, 0x0202, IntPtr.Zero, point);
-        }
-
-        private static void Post(IntPtr hwnd, uint msg, IntPtr w, IntPtr l)
-        {
-            if (!PostMessage(hwnd, msg, w, l))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Launcher rejected mouse input message 0x" + msg.ToString("X") + ".");
         }
 
         internal static string PreferPatcherBesideClient(string clientExecutablePath)
