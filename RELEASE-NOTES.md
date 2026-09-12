@@ -1,17 +1,16 @@
-# 4RTools Vanilla 0.6.7
+# 4RTools Vanilla 0.6.8
 
-This patch fixes proxy-route selection and makes reconnect logging bounded and session-oriented.
+This patch fixes the two remaining live relog stages exposed by the 0.6.7 step-by-step test: username/password field targeting and the one-entry game-server selection dialog.
 
-- Replaced the old blind proxy click (`50% / 60%` plus `Home`/`Down`) with visual recognition of the actual four-row proxy list before any selection input is sent. The previous implementation could land on Singapore and then fail to reset the selection to Global.
-- Proxy recognition is based on the current Vanilla client bitmap, proportional search regions, row spacing and dark-text structure rather than fixed desktop pixels. It is therefore designed to tolerate different client resolutions, Windows DPI/scaling, and moderate font/image softening.
-- Selection fails closed: if four plausible, evenly spaced proxy rows cannot be identified confidently, 4RTools sends no proxy-selection input and reports the detector evidence instead of guessing.
-- The configured route remains `Global / Singapore / Tokyo / Los Angeles` from top to bottom. 4RTools computes a conservative safe interior rectangle common to the detected row content, chooses the actual click point only inside the configured row's central interior, then clamps keyboard selection to the first row with repeated Up presses and advances exactly to the configured route before Enter.
-- The same recognition path is used by normal unattended relog recovery and by `2 PROXY`, so diagnostics exercise the production logic rather than a separate approximation.
-- The most recent proxy recognition capture is written to `Logs/proxy-screen-last.png` to make a live failure diagnosable without exposing credentials.
-- Added offline regression tests for proxy-row recognition at 800x600, 1280x720, 1920x1080 and 2560x1440 plus softened gray text, as well as fail-closed behavior on a blank screen.
-- Reconnect logs now start a fresh timestamped session file on every 4RTools process startup instead of appending forever to one `reconnect.log`.
-- Each session log part is capped at 10 MB and automatically rotates to another part. The reconnect-log directory is also pruned to a bounded history (up to 20 reconnect log files / approximately 100 MB).
-- An existing legacy `reconnect.log` is archived once rather than discarded. `OPEN LOG` and `COPY LOG` now target the current session log part.
-- Persistent recovery/account configuration, DPAPI-protected passwords, the two-client limit, the working `TThorForm` GAME START fix from 0.6.6, and the GitHub self-updater remain unchanged.
+- Credential filling no longer assumes a fixed login coordinate and no longer relies on `Tab` to move from username to password. That was the concrete cause of the observed username/password swap.
+- 4RTools now captures the current Vanilla client and identifies the login controls as three separately bordered stacked UI controls. The second detected control is the username field and the third is the password field. It then clicks each field independently before replacing its contents.
+- Username and password clicks are chosen from conservative interior rectangles of the detected controls. The password itself is never logged. If the two fields cannot be identified confidently, no credentials are typed.
+- Game-server selection no longer reuses the proxy/service coordinate. It now identifies the central Vanilla server-selection dialog and its bordered first/only server row, clicks only inside that detected row, clamps the list to its first item and confirms with Enter.
+- The server step verifies that the dialog actually disappears. If it remains, it retries once using a newly captured/detected row and then fails closed instead of blindly continuing to character selection.
+- The same visual recognition and verification code is used by unattended recovery and by the numbered `3 FILL USER/PW` and `5 SERVER` diagnostics.
+- Diagnostic captures are saved as `login-screen-last.png`, `server-screen-last.png`, and failure-specific server/login captures under the persistent Logs directory when useful.
+- Recognition uses current client pixels, relative search regions, detected borders/spacing and normalized input coordinates rather than absolute desktop coordinates. It is designed for different client sizes, Windows DPI/scaling and moderately softened/blurry rendering.
+- New offline tests cover distinct username/password recognition and one-server dialog recognition at 800x600, 1280x720, 1920x1080 and 2560x1440, including softened login rendering and blank-screen fail-closed behavior.
+- Existing working stages remain unchanged: launcher/GAME START, proxy selection, character selection, resume hotkey, two-client assignment, STOP TEST behavior, persistent account configuration, bounded per-startup logging, and the GitHub self-updater.
 
-The source wiring, Release/Debug builds, automated tests, packaging and portable launch smoke test were validated in Windows GitHub Actions before the implementation commit was pushed. Live proxy recognition still needs validation against the user's actual Vanilla login screen; when recognition is uncertain, the new behavior is deliberately to stop rather than select an unverified route.
+The final implementation was built and tested on Windows through the release pipeline before publication. Real Vanilla/Gepard interaction still requires local validation, but the changed stages now fail closed when their target UI cannot be recognized instead of typing/clicking into an unverified location. No Gepard bypass, code injection, packet manipulation or game-memory writes are used.
