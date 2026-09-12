@@ -58,6 +58,8 @@ namespace Vanilla.Diagnostics.Tests
             failed += ProfileStoreTests.Run();
             failed += LegacyProfileTests.Run();
             failed += VanillaPatcherLauncherTests.Run();
+            failed += VanillaProxyPatternTests.Run();
+            failed += VanillaSessionLogTests.Run();
             failed += VanillaReconnectRegressionTests.Run();
 
             Console.WriteLine("Core diagnostics: {0} passed. Total failures across all suites: {1}. All tests used offline data.", passed, failed);

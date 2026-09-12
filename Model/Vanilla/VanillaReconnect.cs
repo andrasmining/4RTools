@@ -492,6 +492,7 @@ namespace _4RTools.Model.Vanilla
         private readonly object gate = new object();
         private readonly string baseDirectory;
         private readonly VanillaReconnectStore store;
+        private readonly VanillaSessionLog sessionLog;
         private readonly Dictionary<string, Runtime> runtimes = new Dictionary<string, Runtime>(StringComparer.OrdinalIgnoreCase);
         private System.Threading.Timer timer;
         private VanillaReconnectSettings settings;
@@ -502,6 +503,7 @@ namespace _4RTools.Model.Vanilla
         public VanillaReconnectSupervisor(string baseDirectory)
         {
             this.baseDirectory = Path.GetFullPath(baseDirectory);
+            sessionLog = new VanillaSessionLog(this.baseDirectory);
             store = new VanillaReconnectStore(this.baseDirectory);
             settings = store.Load();
             RebuildRuntimes();
@@ -510,7 +512,7 @@ namespace _4RTools.Model.Vanilla
         public VanillaReconnectSettings Settings { get { lock (gate) return settings.Clone(); } }
         public bool IsRunning { get { lock (gate) return running; } }
         public string SettingsPath { get { return store.FilePath; } }
-        public string LogPath { get { return Path.Combine(baseDirectory, "Logs", "reconnect.log"); } }
+        public string LogPath { get { return sessionLog.CurrentPath; } }
 
         public IReadOnlyList<VanillaReconnectStatus> Statuses()
         {
@@ -861,10 +863,28 @@ namespace _4RTools.Model.Vanilla
                     {
                         Thread.Sleep(config.GepardWaitMs);
                         input.Activate();
-                        input.ClickNormalized(config.Anchors.ServiceListX, config.Anchors.ServiceListY);
-                        input.Press(Keys.Home);
-                        for (int i = 0; i < (int)config.Proxy; i++) input.Press(Keys.Down);
-                        input.Press(Keys.Enter);
+                        using (Bitmap proxyImage = input.CaptureClientBitmap())
+                        {
+                            VanillaProxyLayout proxyLayout;
+                            string proxyDetection;
+                            if (!VanillaProxyPattern.TryDetect(proxyImage, out proxyLayout, out proxyDetection))
+                                throw new InvalidOperationException("Proxy list was not detected confidently; no proxy input was sent. " + proxyDetection);
+                            string proxyCapture = Path.Combine(baseDirectory, "Logs", "proxy-screen-last.png");
+                            try { Directory.CreateDirectory(Path.GetDirectoryName(proxyCapture)); proxyImage.Save(proxyCapture, ImageFormat.Png); } catch { }
+                            int routeIndex = (int)config.Proxy;
+                            Rectangle safe = proxyLayout.Rows[routeIndex];
+                            var random = new Random(unchecked(Environment.TickCount ^ pid ^ (routeIndex * 7919)));
+                            int marginX = Math.Max(1, safe.Width / 4), marginY = Math.Max(1, safe.Height / 4);
+                            int px = random.Next(safe.Left + marginX, Math.Max(safe.Left + marginX + 1, safe.Right - marginX));
+                            int py = random.Next(safe.Top + marginY, Math.Max(safe.Top + marginY + 1, safe.Bottom - marginY));
+                            double x = (px + 0.5) / proxyImage.Width;
+                            double y = (py + 0.5) / proxyImage.Height;
+                            input.ClickNormalized(x, y);
+                            for (int i = 0; i < 8; i++) { input.Press(Keys.Up); Thread.Sleep(55); }
+                            for (int i = 0; i < routeIndex; i++) { input.Press(Keys.Down); Thread.Sleep(70); }
+                            input.Press(Keys.Enter);
+                            Log(account.Label + ": proxy " + config.Proxy + " selected from detected safe row " + safe + " at verified-inside point (" + px + "," + py + "); " + proxyDetection);
+                        }
                         Thread.Sleep(config.StageDelayMs);
                     }
 
@@ -1016,13 +1036,7 @@ namespace _4RTools.Model.Vanilla
         private void Log(string text)
         {
             string line = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + text;
-            try
-            {
-                string dir = Path.Combine(baseDirectory, "Logs");
-                Directory.CreateDirectory(dir);
-                File.AppendAllText(Path.Combine(dir, "reconnect.log"), line + Environment.NewLine);
-            }
-            catch { }
+            try { sessionLog.WriteLine(line); } catch { }
             var handler = Logged;
             if (handler != null) handler(line);
         }
@@ -1289,8 +1303,8 @@ namespace _4RTools.Model.Vanilla
             TipByText(this, "TEST STARTUP (clients closed)", "Full cold-start test: launcher -> GAME START -> proxy -> login -> server -> character -> resume hotkey.");
             TipByText(this, "TEST RESTART RECOVERY", "Close detected Vanilla windows normally and verify the full relaunch/relogin recovery path.");
             TipByText(this, "ARM MANUAL NETWORK-DROP TEST", "Arm a five-minute recovery test while you briefly disconnect/reconnect internet yourself.");
-            TipByText(this, "OPEN LOG", "Open Logs\\reconnect.log in your default text editor.");
-            TipByText(this, "COPY LOG", "Copy the complete reconnect log to the clipboard for pasting into ChatGPT.");
+            TipByText(this, "OPEN LOG", "Open the current startup session log. A fresh log is created on every 4RTools startup and each part is capped at 10 MB.");
+            TipByText(this, "COPY LOG", "Copy the current startup session log part to the clipboard for diagnostics.");
             ConfigureStepTestHoverHelp();
         }
 

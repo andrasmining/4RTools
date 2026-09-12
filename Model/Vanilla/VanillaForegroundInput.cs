@@ -2,6 +2,8 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -159,6 +161,19 @@ namespace _4RTools.Model.Vanilla
             return diagnostics;
         }
 
+        internal Bitmap CaptureClientBitmap()
+        {
+            Activate();
+            RECT rect;
+            if (!GetClientRect(window, out rect)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot read Vanilla client area for visual recognition.");
+            int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
+            if (width < 200 || height < 120) throw new InvalidOperationException("Vanilla client area is too small for visual recognition: " + width + "x" + height);
+            var origin = new POINT { X = 0, Y = 0 };
+            if (!ClientToScreen(window, ref origin)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot map Vanilla client for visual recognition.");
+            var bitmap = new Bitmap(width, height, PixelFormat.Format24bppRgb);
+            using (Graphics graphics = Graphics.FromImage(bitmap)) graphics.CopyFromScreen(origin.X, origin.Y, 0, 0, new Size(width, height));
+            return bitmap;
+        }
         public void Press(Keys key)
         {
             Activate();

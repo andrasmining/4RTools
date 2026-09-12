@@ -141,10 +141,28 @@ namespace _4RTools.Model.Vanilla
                         switch (step)
                         {
                             case VanillaReconnectTestStep.ProxySelection:
-                                input.ClickNormalized(config.Anchors.ServiceListX, config.Anchors.ServiceListY);
-                                input.Press(Keys.Home);
-                                for (int i = 0; i < (int)config.Proxy; i++) input.Press(Keys.Down);
-                                input.Press(Keys.Enter);
+                                using (Bitmap proxyImage = input.CaptureClientBitmap())
+                                {
+                                    VanillaProxyLayout proxyLayout;
+                                    string proxyDetection;
+                                    if (!VanillaProxyPattern.TryDetect(proxyImage, out proxyLayout, out proxyDetection))
+                                        throw new InvalidOperationException("Proxy list was not detected confidently; no proxy input was sent. " + proxyDetection);
+                                    string proxyCapture = Path.Combine(baseDirectory, "Logs", "proxy-screen-last.png");
+                                    try { Directory.CreateDirectory(Path.GetDirectoryName(proxyCapture)); proxyImage.Save(proxyCapture); } catch { }
+                                    int routeIndex = (int)config.Proxy;
+                                    Rectangle safe = proxyLayout.Rows[routeIndex];
+                                    var random = new Random(unchecked(Environment.TickCount ^ discoveredPid.Value ^ (routeIndex * 7919)));
+                                    int marginX = Math.Max(1, safe.Width / 4), marginY = Math.Max(1, safe.Height / 4);
+                                    int px = random.Next(safe.Left + marginX, Math.Max(safe.Left + marginX + 1, safe.Right - marginX));
+                                    int py = random.Next(safe.Top + marginY, Math.Max(safe.Top + marginY + 1, safe.Bottom - marginY));
+                                    double x = (px + 0.5) / proxyImage.Width;
+                                    double y = (py + 0.5) / proxyImage.Height;
+                                    input.ClickNormalized(x, y);
+                                    for (int i = 0; i < 8; i++) { input.Press(Keys.Up); Thread.Sleep(55); }
+                                    for (int i = 0; i < routeIndex; i++) { input.Press(Keys.Down); Thread.Sleep(70); }
+                                    input.Press(Keys.Enter);
+                                    Log("TEST " + account.Label + ": proxy " + config.Proxy + " selected from detected safe row " + safe + " at verified-inside point (" + px + "," + py + "); " + proxyDetection);
+                                }
                                 break;
                             case VanillaReconnectTestStep.FillCredentials:
                                 string password = store.UnprotectPassword(account.ProtectedPassword);
