@@ -1,4 +1,5 @@
 name: One-time 0.6.2 Vanilla UI integration
+# Validation attempt 2 after fixing the PowerShell source patch encoding.
 
 on:
   push:
