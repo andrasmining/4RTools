@@ -1,5 +1,5 @@
 name: One-time 0.6.1 professionalization validation
-# Validation attempt 7: remove PowerShell's built-in `write` alias so the migration script's Write helper actually writes files.
+# Validation attempt 8: persistent production data with isolated profile-store tests.
 
 on:
   push:
