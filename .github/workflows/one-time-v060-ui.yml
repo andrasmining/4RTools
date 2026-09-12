@@ -1,5 +1,5 @@
 name: One-time 0.6.0 reconnect UX migration
-# One-time migration rerun after fixing the PowerShell write helper.
+# One-time migration rerun after restoring the foreground-input helper.
 
 on:
   push:
