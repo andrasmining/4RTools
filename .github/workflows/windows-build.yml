@@ -26,14 +26,14 @@ jobs:
 
       - name: Build portable release
         shell: powershell
-        run: '& .\scripts\build-release.ps1'
+        run: '& .\scripts\build-release.ps1 -Version 0.3.0'
 
       - name: Upload portable release
         uses: actions/upload-artifact@v4
         with:
-          name: 4RTools-Vanilla-portable
+          name: 4RTools-Vanilla-0.3.0-portable
           path: |
-            dist/*.zip
-            dist/*.sha256
+            dist/4RTools-Vanilla-v0.3.0-portable.zip
+            dist/4RTools-Vanilla-v0.3.0-portable.zip.sha256
           if-no-files-found: error
           retention-days: 14
