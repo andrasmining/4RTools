@@ -599,6 +599,7 @@ namespace _4RTools.Model.Vanilla
                 foreach (var runtime in runtimes.Values)
                 {
                     runtime.ScriptRunning = false;
+                    runtime.RecoveryOwned = false;
                     SetStage(runtime, VanillaReconnectStage.Stopped, "Supervisor stopped");
                 }
             }
@@ -877,6 +878,7 @@ namespace _4RTools.Model.Vanilla
                     current.ScriptRunning = false;
                     if (aborted || disposed || !running)
                     {
+                        current.RecoveryOwned = false;
                         SetStage(current, VanillaReconnectStage.Stopped, "Supervisor stopped");
                     }
                     else if (error == null)
