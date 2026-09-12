@@ -388,20 +388,21 @@ namespace _4RTools.Model.Vanilla
 
         private static bool TryFindNativeGameStart(IntPtr root, out IntPtr control, out string inventory)
         {
-            control = IntPtr.Zero;
+            IntPtr found = IntPtr.Zero;
             var rows = new List<string>();
-            if (root == IntPtr.Zero) { inventory = "root=none"; return false; }
+            if (root == IntPtr.Zero) { control = IntPtr.Zero; inventory = "root=none"; return false; }
             EnumChildWindows(root, (hwnd, state) =>
             {
                 string title = WindowTitle(hwnd);
                 string cls = WindowClass(hwnd);
                 if (rows.Count < 16) rows.Add("0x" + hwnd.ToInt64().ToString("X") + ":" + cls + ":'" + Clean(title) + "'");
-                if (control == IntPtr.Zero && title.IndexOf("GAME START", StringComparison.OrdinalIgnoreCase) >= 0)
-                    control = hwnd;
+                if (found == IntPtr.Zero && title.IndexOf("GAME START", StringComparison.OrdinalIgnoreCase) >= 0)
+                    found = hwnd;
                 return true;
             }, IntPtr.Zero);
+            control = found;
             inventory = rows.Count == 0 ? "none" : string.Join(" | ", rows);
-            return control != IntPtr.Zero;
+            return found != IntPtr.Zero;
         }
 
         private static IntPtr GetMainWindow(int processId)
