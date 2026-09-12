@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-// Assembly metadata for the independent Vanilla-focused 4RTools fork; version changes publish verified GitHub Releases.
+// Assembly metadata for the independent Vanilla-focused 4RTools fork. The 0.6.1 source passed the full Windows release gate before publication.
 [assembly: AssemblyTitle("4RTools Vanilla Companion")]
 [assembly: AssemblyDescription("Vanilla-focused 4RTools companion with reliable launcher startup, step-tested relog recovery and guarded read-only automation")]
 [assembly: AssemblyConfiguration("")]
