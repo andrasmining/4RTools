@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -20,13 +20,9 @@ jobs:
         shell: powershell
         run: nuget restore 4RTools.sln -NonInteractive
 
-      - name: Build release
+      - name: Build and test release
         shell: powershell
-        run: msbuild 4RTools.sln /m /p:Configuration=Release /p:VanillaRelease=true /p:RestorePackages=false
-
-      - name: Run diagnostics and automation tests
-        shell: powershell
-        run: '& .\Tests\bin\Release\Vanilla.Diagnostics.Tests.exe'
+        run: '& .\scripts\build.ps1 -Configuration Release -VanillaRelease'
 
       - name: Build portable release
         shell: powershell
