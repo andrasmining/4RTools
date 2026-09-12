@@ -36,6 +36,29 @@ jobs:
         shell: powershell
         run: '& .\scripts\one-time-v050.ps1'
 
+      - name: Fix primary-tab smoke selector
+        shell: powershell
+        run: |
+          $path = 'Program.cs'
+          $text = [IO.File]::ReadAllText($path)
+          $old = @'
+                    var mainTabs = Descendants(form).OfType<System.Windows.Forms.TabControl>()
+                        .OrderByDescending(tabs => tabs.TabPages.Count).FirstOrDefault();
+'@
+          $new = @'
+                    var mainTabs = Descendants(form).OfType<System.Windows.Forms.TabControl>()
+                        .FirstOrDefault(tabs => tabs.Name == "atkDefMode");
+'@
+          if (-not $text.Contains($old.TrimStart("`r", "`n"))) {
+            $old = $old.Replace("`r`n", "`n")
+            $new = $new.Replace("`r`n", "`n")
+          }
+          $old = $old.TrimStart("`r", "`n")
+          $new = $new.TrimStart("`r", "`n")
+          if (-not $text.Contains($old)) { throw 'Generated primary-tab smoke selector was not found.' }
+          $text = $text.Replace($old, $new)
+          [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false)))
+
       - name: Restore NuGet packages
         shell: powershell
         run: nuget restore 4RTools.sln -NonInteractive
