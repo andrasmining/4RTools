@@ -1,5 +1,5 @@
 name: One-time 0.6.1 professionalization validation
-# Validation attempt 5: hardened sibling-version migration discovery.
+# Validation attempt 6: idempotent compatibility/migration patch.
 
 on:
   push:
