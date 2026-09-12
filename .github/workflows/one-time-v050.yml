@@ -44,9 +44,12 @@ jobs:
           $containerPath = 'Forms/Container.cs'
           $container = [IO.File]::ReadAllText($containerPath)
           $anchor = '        internal VanillaClientState VanillaSnapshot { get { return vanillaSession.Snapshot; } }'
-          $addition = $anchor + [Environment]::NewLine + '        internal bool VanillaTabIsFirst { get { return atkDefMode.TabPages.Count > 0 && atkDefMode.TabPages[0].Name == "tabPageVanilla"; } }'
+          $addition = $anchor + [Environment]::NewLine + '        internal bool VanillaTabIsFirst { get { return atkDefMode.TabPages.Count > 0 && atkDefMode.TabPages[0].Text == "Vanilla"; } }' + [Environment]::NewLine + '        internal string PrimaryTabOrder { get { return string.Join(" | ", atkDefMode.TabPages.Cast<TabPage>().Select(page => page.Text)); } }'
           if (-not $container.Contains($anchor)) { throw 'Container smoke-property anchor was not found.' }
           $container = $container.Replace($anchor, $addition)
+          $nameSelection = 'if (client.IsVanilla && atkDefMode.TabPages.ContainsKey("tabPageVanilla")) atkDefMode.SelectedTab = atkDefMode.TabPages["tabPageVanilla"];'
+          $textSelection = 'if (client.IsVanilla) atkDefMode.SelectedTab = atkDefMode.TabPages.Cast<TabPage>().FirstOrDefault(page => page.Text == "Vanilla") ?? atkDefMode.SelectedTab;'
+          if ($container.Contains($nameSelection)) { $container = $container.Replace($nameSelection, $textSelection) }
           [IO.File]::WriteAllText($containerPath, $container, $utf8)
 
           $programPath = 'Program.cs'
@@ -55,6 +58,7 @@ jobs:
           $new = 'if (!form.VanillaTabIsFirst)'
           if (-not $program.Contains($old)) { throw 'Generated primary-tab smoke condition was not found.' }
           $program = $program.Replace($old, $new)
+          $program = $program.Replace('throw new InvalidOperationException("Vanilla must be the first primary feature tab.");', 'throw new InvalidOperationException("Vanilla must be the first primary feature tab. Actual order: " + form.PrimaryTabOrder);')
           [IO.File]::WriteAllText($programPath, $program, $utf8)
 
       - name: Restore NuGet packages
