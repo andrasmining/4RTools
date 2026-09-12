@@ -39,7 +39,7 @@ namespace _4RTools.Forms
             this.subject.Attach(this);
 
             InitializeComponent();
-            this.Text = "4RTools - Vanilla extension v0.5.0";
+            this.Text = "4RTools - Vanilla extension v0.6.0";
             ConfigureVanillaFirstLayout();
 
             //Container Configuration

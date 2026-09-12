@@ -60,9 +60,9 @@ namespace _4RTools.Model.Vanilla
         public double ServiceListX { get; set; } = 0.50;
         public double ServiceListY { get; set; } = 0.60;
         public double UserNameX { get; set; } = 0.48;
-        public double UserNameY { get; set; } = 0.66;
+        public double UserNameY { get; set; } = 0.635;
         public double PasswordX { get; set; } = 0.48;
-        public double PasswordY { get; set; } = 0.685;
+        public double PasswordY { get; set; } = 0.660;
         public double CharacterGridX { get; set; } = 0.292;
         public double CharacterGridY { get; set; } = 0.375;
         public double CharacterStepX { get; set; } = 0.080;
@@ -127,6 +127,8 @@ namespace _4RTools.Model.Vanilla
                 unique = preferred.Take(2).ToList();
             }
             Accounts = unique;
+            if (Anchors == null) Anchors = new VanillaUiAnchors();
+            if (Math.Abs(Anchors.UserNameY - 0.66) < 0.0001 && Math.Abs(Anchors.PasswordY - 0.685) < 0.0001) { Anchors.UserNameY = 0.635; Anchors.PasswordY = 0.660; }
         }
 
         private static bool IsSyntheticDefault(VanillaReconnectAccount account)
@@ -466,7 +468,7 @@ namespace _4RTools.Model.Vanilla
         }
     }
 
-    public sealed class VanillaReconnectSupervisor : IDisposable
+    public sealed partial class VanillaReconnectSupervisor : IDisposable
     {
         private sealed class Runtime
         {
@@ -506,6 +508,7 @@ namespace _4RTools.Model.Vanilla
         public VanillaReconnectSettings Settings { get { lock (gate) return settings.Clone(); } }
         public bool IsRunning { get { lock (gate) return running; } }
         public string SettingsPath { get { return store.FilePath; } }
+        public string LogPath { get { return Path.Combine(baseDirectory, "Logs", "reconnect.log"); } }
 
         public IReadOnlyList<VanillaReconnectStatus> Statuses()
         {
@@ -738,9 +741,8 @@ namespace _4RTools.Model.Vanilla
 
         private void SendResume(Runtime runtime)
         {
-            using (var input = new VanillaTargetedInput(runtime.ProcessId.Value))
+            using (var input = new VanillaForegroundInput(runtime.ProcessId.Value))
             {
-                input.Activate();
                 input.Chord(runtime.Account.ResumeCtrl, runtime.Account.ResumeAlt, runtime.Account.ResumeShift, (Keys)runtime.Account.ResumeKey);
             }
             Log(runtime.Account.Label + ": sent resume hotkey " + runtime.Account.HotkeyText + ".");
@@ -850,7 +852,7 @@ namespace _4RTools.Model.Vanilla
                 string password = store.UnprotectPassword(account.ProtectedPassword);
                 if (string.IsNullOrEmpty(password)) throw new InvalidOperationException("Password is empty.");
                 WaitForWindow(pid, 60000);
-                using (var input = new VanillaTargetedInput(pid))
+                using (var input = new VanillaForegroundInput(pid))
                 {
                     input.Activate();
                     if (freshLaunch)
@@ -866,11 +868,12 @@ namespace _4RTools.Model.Vanilla
 
                     input.Activate();
                     input.ClickNormalized(config.Anchors.UserNameX, config.Anchors.UserNameY);
-                    input.SelectAll();
-                    input.TypeText(account.UserName);
-                    input.ClickNormalized(config.Anchors.PasswordX, config.Anchors.PasswordY);
-                    input.SelectAll();
-                    input.TypeText(password);
+                    Thread.Sleep(180);
+                    input.ReplaceFocusedText(account.UserName);
+                    input.Press(Keys.Tab);
+                    Thread.Sleep(180);
+                    input.ReplaceFocusedText(password);
+                    Thread.Sleep(220);
                     input.Press(Keys.Enter);
                     Thread.Sleep(config.StageDelayMs);
 
@@ -1090,6 +1093,8 @@ namespace _4RTools.Model.Vanilla
             menu.Items.Add("Open Vanilla reconnect manager", null, (s, e) => ShowManager());
             menu.Items.Add("Start reconnect supervisor", null, (s, e) => { supervisor?.Start(); });
             menu.Items.Add("Stop reconnect supervisor", null, (s, e) => { supervisor?.Stop(); });
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Exit 4RTools", null, (s, e) => Application.Exit());
             return menu;
         }
 
@@ -1114,7 +1119,7 @@ namespace _4RTools.Model.Vanilla
         }
     }
 
-    internal sealed class VanillaReconnectForm : Form
+    internal sealed partial class VanillaReconnectForm : Form
     {
         private readonly VanillaReconnectSupervisor supervisor;
         private VanillaReconnectSettings settings;
@@ -1135,6 +1140,8 @@ namespace _4RTools.Model.Vanilla
         private readonly TextBox log = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
         private readonly Label runState = new Label { AutoSize = true };
         private readonly Label testState = new Label { AutoSize = true, ForeColor = Color.DarkSlateBlue };
+        private readonly ToolTip help = new ToolTip { InitialDelay = 650, ReshowDelay = 200, AutoPopDelay = 30000, ShowAlways = true };
+        private bool exitRequested;
         private bool testRunning;
         private int testGeneration;
 
@@ -1147,6 +1154,7 @@ namespace _4RTools.Model.Vanilla
             Size = new Size(1180, 850);
             MinimumSize = new Size(1050, 720);
             BuildUi();
+            ConfigureHoverHelp();
             supervisor.Updated += SupervisorUpdated;
             supervisor.Logged += SupervisorLogged;
             LoadFromSupervisor();
@@ -1188,6 +1196,8 @@ namespace _4RTools.Model.Vanilla
             AddButton(commands, "START SUPERVISOR", StartSupervisor);
             AddButton(commands, "STOP", () => supervisor.Stop());
             AddButton(commands, "DETECT RUNNING CLIENTS", DetectRunningClients);
+            AddButton(commands, "OPEN LOG", OpenLog);
+            AddButton(commands, "COPY LOG", CopyLog);
             runState.Font = new Font(Font, FontStyle.Bold);
             runState.Margin = new Padding(16, 8, 0, 0);
             commands.Controls.Add(runState);
@@ -1200,6 +1210,7 @@ namespace _4RTools.Model.Vanilla
             testState.Margin = new Padding(16, 8, 0, 0);
             tests.Controls.Add(testState);
             top.Controls.Add(tests);
+            top.Controls.Add(BuildStepTests());
 
             var info = new Label
             {
@@ -1259,6 +1270,62 @@ namespace _4RTools.Model.Vanilla
             parent.Controls.Add(button);
         }
 
+        private void ConfigureHoverHelp()
+        {
+            help.SetToolTip(launchPath, "Path to Vanilla Launcher.exe / patcher.exe. Recovery starts it and presses GAME START before waiting for Vanilla/Gepard.");
+            help.SetToolTip(launchArgs, "Optional launcher command-line arguments. Leave blank unless Vanilla requires them.");
+            help.SetToolTip(proxy, "Proxy chosen on Vanilla's first Select Service screen.");
+            help.SetToolTip(maxClients, "Maximum supervised Vanilla clients on this PC. Normally leave this at 2.");
+            help.SetToolTip(startWithApp, "If checked, opening 4RTools automatically starts recovery monitoring. If unchecked, 4RTools can be open while the supervisor remains stopped.");
+            help.SetToolTip(autoRecover, "Automatically relaunch and relog clients that close or return to a login screen.");
+            help.SetToolTip(visualWatchdog, "Classifies Vanilla screenshots as gameplay/login/modal states. This does not modify the game or Gepard.");
+            help.SetToolTip(accounts, "Your one or two configured account profiles. Select a row before using selected-account actions.");
+            help.SetToolTip(status, "Runtime state only: account -> assigned PID -> recovery stage -> detected screen -> detail. These are not additional accounts.");
+            help.SetToolTip(log, "Reconnect/test log. Secret contents are never written here.");
+            TipByText(this, "Save", "Save exactly the settings and account rows currently shown.");
+            TipByText(this, "START SUPERVISOR", "Start continuous recovery monitoring now. Existing clients are adopted; missing clients can be relaunched.");
+            TipByText(this, "STOP", "Stop automatic recovery. Running Vanilla clients stay open.");
+            TipByText(this, "DETECT RUNNING CLIENTS", "Find currently running Vanilla MMO.exe processes and assign them to configured account rows.");
+            TipByText(this, "TEST STARTUP (clients closed)", "Full cold-start test: launcher -> GAME START -> proxy -> login -> server -> character -> resume hotkey.");
+            TipByText(this, "TEST RESTART RECOVERY", "Close detected Vanilla windows normally and verify the full relaunch/relogin recovery path.");
+            TipByText(this, "ARM MANUAL NETWORK-DROP TEST", "Arm a five-minute recovery test while you briefly disconnect/reconnect internet yourself.");
+            TipByText(this, "OPEN LOG", "Open Logs\\reconnect.log in your default text editor.");
+            TipByText(this, "COPY LOG", "Copy the complete reconnect log to the clipboard for pasting into ChatGPT.");
+            ConfigureStepTestHoverHelp();
+        }
+
+        private void TipByText(Control root, string textValue, string tip)
+        {
+            foreach (Control child in root.Controls)
+            {
+                if (string.Equals(child.Text, textValue, StringComparison.Ordinal)) help.SetToolTip(child, tip);
+                if (child.HasChildren) TipByText(child, textValue, tip);
+            }
+        }
+
+        private void OpenLog()
+        {
+            try
+            {
+                string path = supervisor.LogPath;
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                if (!File.Exists(path)) File.WriteAllText(path, string.Empty);
+                Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Open reconnect log", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        }
+
+        private void CopyLog()
+        {
+            try
+            {
+                string path = supervisor.LogPath;
+                string contents = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+                Clipboard.SetText(contents.Length == 0 ? "(reconnect log is empty)" : contents);
+                testState.Text = "Reconnect log copied to clipboard.";
+            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Copy reconnect log", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        }
         private void LoadFromSupervisor()
         {
             settings = supervisor.Settings;
@@ -1550,13 +1617,20 @@ namespace _4RTools.Model.Vanilla
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (e.CloseReason == CloseReason.UserClosing)
+            if (!exitRequested && e.CloseReason == CloseReason.UserClosing)
             {
+                exitRequested = true;
                 e.Cancel = true;
-                Hide();
+                BeginInvoke((MethodInvoker)Application.Exit);
                 return;
             }
             base.OnFormClosing(e);
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (WindowState == FormWindowState.Minimized) Hide();
         }
 
         protected override void Dispose(bool disposing)
