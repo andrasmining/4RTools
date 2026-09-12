@@ -1,5 +1,5 @@
 name: One-time 0.6.4 live relog validation
-# Validation rerun after simplifying the source patch.
+# Validation rerun against the current diagnostic source shape.
 
 on:
   push:
@@ -25,7 +25,13 @@ jobs:
       - name: Apply source changes
         shell: powershell
         run: |
-          & .\scripts\one-time-v064-live-test-control.ps1
+          $path = '.\scripts\one-time-v064-live-test-control.ps1'
+          $text = Get-Content $path -Raw
+          $needle = '                if (!runtimes.TryGetValue(accountId, out runtime)) throw new ArgumentException("Unknown account.");' + [Environment]::NewLine + '                if (step != VanillaReconnectTestStep.LauncherGameStart)'
+          $replacement = '                if (!runtimes.TryGetValue(accountId, out runtime)) throw new ArgumentException("Unknown account.");' + [Environment]::NewLine + '                if (runtime.ScriptRunning) throw new InvalidOperationException("Another action is already running for this account.");' + [Environment]::NewLine + '                if (step != VanillaReconnectTestStep.LauncherGameStart)'
+          $text = $text.Replace($needle, $replacement)
+          Set-Content -Path $path -Value $text -Encoding UTF8
+          & $path
       - name: Restore NuGet packages
         shell: powershell
         run: nuget restore 4RTools.sln -NonInteractive
