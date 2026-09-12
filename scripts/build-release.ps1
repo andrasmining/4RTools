@@ -141,6 +141,9 @@ function Test-PortableArchive([string] $ArchivePath, [string] $ExpectedZipHash) 
     New-Item -ItemType Directory -Path $smokeLogRoot -Force | Out-Null
     [IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $smokeRoot)
     $smokeReleasePath = Join-Path $smokeRoot $releaseName
+    foreach ($legacyDataFolder in @('Profile', 'Profiles', 'VanillaReconnect', 'Logs')) {
+        if (Test-Path -LiteralPath (Join-Path $smokeReleasePath $legacyDataFolder)) { throw "Portable release must not contain user-data folder: $legacyDataFolder" }
+    }
     $smokeOutput = Join-Path $smokeLogRoot 'portable-smoke.json'
     $smokeExecutable = Join-Path $smokeReleasePath $applicationName
     # All local executable launches stay inside the repo and use the repo cwd.
@@ -243,9 +246,6 @@ New-Item -ItemType Directory -Path (Assert-RepositoryPath $distRoot) -Force | Ou
 $stagingRoot = Assert-RepositoryPath (Join-Path $distRoot ('.staging-' + [Guid]::NewGuid().ToString('N')))
 $stagingPath = Join-Path $stagingRoot $releaseName
 New-Item -ItemType Directory -Path $stagingPath | Out-Null
-foreach ($profileDirectory in @('Profile', 'Profiles')) {
-    New-Item -ItemType Directory -Path (Join-Path $stagingPath $profileDirectory) | Out-Null
-}
 
 try {
     foreach ($name in @($applicationName, "$applicationName.config")) {
@@ -304,7 +304,7 @@ try {
     Write-Utf8 $stagedZipChecksum "$zipHash  $zipName`n"
     Test-PortableArchive $stagedZip $zipHash
 
-    # Preserve previous release data, including any profiles created by a launch.
+    # Preserve previous release artifacts when -Replace is explicitly requested.
     $existingTargets = @(@($releasePath, $zipPath, $zipChecksumPath) | Where-Object { Test-Path -LiteralPath $_ })
     if ($existingTargets.Count -gt 0) {
         if (-not $Replace) { throw 'Release outputs appeared during the build. Nothing was replaced.' }

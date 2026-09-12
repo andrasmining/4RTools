@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,13 +11,11 @@ namespace _4RTools.Model
     internal class LocalServerManager
     {
 
-        private static readonly string localServerName = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "supported_servers.json");
+        private static readonly string localServerName = Vanilla.VanillaAppData.LocalServersPath;
 
         static LocalServerManager()
         {
-            // Normal UI startup reaches this class before the main window is shown. The bootstrap
-            // deliberately ignores developer/headless -- commands, so validation tools stay isolated.
-            Vanilla.VanillaReconnectBootstrap.Initialize();
+            Vanilla.VanillaAppData.InitializeAndMigrateLegacy(AppDomain.CurrentDomain.BaseDirectory);
         }
 
         public static void AddServer(string hpAddress, string nameAddress, string processName)

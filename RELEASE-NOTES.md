@@ -1,21 +1,13 @@
-# 4RTools Vanilla 0.6.0
+# 4RTools Vanilla 0.6.1
 
-- Launcher GAME START clicks now target the child control under the visible button instead of only the top-level launcher window.
-- Login entry explicitly overwrites username first, Tabs to password, overwrites password, then submits. Legacy bad login-field anchors are migrated automatically.
-- Resume hotkeys use verified foreground ordinary Windows input so modifier combinations such as Alt+2 go to the selected Vanilla client.
-- Added seven selected-account step tests: GAME START, proxy, fill credentials without submitting, submit login, server, character, resume hotkey.
-- Added hover documentation for reconnect controls and tests.
-- Added OPEN LOG and COPY LOG.
-- X exits 4RTools; minimizing the reconnect window hides it to the tray. Tray menu includes Exit 4RTools.
+This is deliberately a patch release while the Vanilla recovery workflow is still being calibrated live.
 
-CI validates compilation, tests and portable packaging. Real Vanilla/Gepard interaction remains a local live test and is not claimed from CI.
+- Integrated the reconnect/recovery manager into the main 4RTools Vanilla tab; normal use is now one application window and the original 4RTools tray icon.
+- Added a single persistent user-data root under `%LOCALAPPDATA%\4RTools Vanilla\` so profiles, recovery accounts, local server definitions, logs, and DPAPI-protected passwords survive replacing/updating the application folder.
+- Merged the previous `Profile` / `Profiles` split into one persistent `Profiles` root with `Stock` and `Vanilla` subfolders.
+- Added first-run migration from the current folder and sibling `4RTools-Vanilla-v*` folders, preserving sibling folders as rollback backups.
+- Added startup GitHub Release checks and a checksum-verified self-updater. Updates verify both the published ZIP SHA-256 and the packaged `SHA256SUMS.txt` manifest before restart.
+- Added Data & updates UI showing exact persistent paths plus manual update/data-folder controls.
+- Portable release packages no longer contain user-data directories.
 
-<!-- BEGIN GENERATED RELEASE CHECKSUMS -->
-
-Release version: 0.6.0. SHA256:
-
-- `4RTools-Vanilla-v0.6.0-portable.zip`: `fd095222a92f119cc213923b3fad94a713dd1ca1dbf4f28ac3d19f3e225e1d80`
-- `4RTools-Vanilla.exe`: `0d86cda483d9bf674996fff216c7b3480ce5a425d8b166c708adc85e1a7a03d3`
-
-These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
-<!-- END GENERATED RELEASE CHECKSUMS -->
+CI validates Release compilation, offline regression tests, packaging, and portable smoke launch. Real Vanilla/Gepard UI interaction still requires local live validation and is not claimed from CI.

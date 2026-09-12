@@ -17,6 +17,8 @@ namespace _4RTools
         [STAThread]
         static void Main(string[] args)
         {
+            if (VanillaUpdater.TryHandleApplyCommand(args)) return;
+            VanillaAppData.InitializeAndMigrateLegacy(AppDomain.CurrentDomain.BaseDirectory);
             if (args.Length > 0 && args[0] == "--vanilla-discover")
             {
                 Discover(args);
@@ -177,7 +179,7 @@ namespace _4RTools
                     form.Close();
                     File.WriteAllText(output, JsonConvert.SerializeObject(new
                     {
-                        Success = true, Version = "0.5.0", PointerBytes = IntPtr.Size,
+                        Success = true, Version = VanillaUpdater.CurrentVersionText, PointerBytes = IntPtr.Size,
                         MainUi = "Container", OriginalFeatureForms = featureForms,
                         FeatureForms = originalForms,
                         AutomationEnabled = false,

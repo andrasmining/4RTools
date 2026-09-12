@@ -17,6 +17,8 @@ namespace Vanilla.Diagnostics.Tests
             Test("Legacy duplicated settings keep the two configured accounts", LegacyDuplicateMigration);
             Test("Runtime status contains only current configured accounts", StatusTracksCurrentSettings);
             Test("Vanilla Launcher.exe uses GAME START launcher mode", VanillaLauncherName);
+            Test("Legacy version folders migrate into one persistent Profiles root", PersistentDataMigration);
+            Test("Updater only accepts strictly newer semantic versions", UpdaterVersionComparison);
             Test("Legacy login anchors migrate to verified field centers", LoginAnchorMigration);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
@@ -86,7 +88,43 @@ namespace Vanilla.Diagnostics.Tests
             Assert(Math.Abs(migrated.Anchors.UserNameY - 0.677) < 0.0001 && Math.Abs(migrated.Anchors.PasswordY - 0.697) < 0.0001,
                 "Interim login-field coordinates were not migrated.");
         }
-        private static string Temp() { string p = Path.Combine(Path.GetTempPath(), "4rtools-reconnect-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(p); return p; }
+        private static void PersistentDataMigration()
+        {
+            string root = Temp();
+            string previous = Environment.GetEnvironmentVariable(VanillaAppData.DataRootEnvironmentVariable);
+            try
+            {
+                string oldInstall = Path.Combine(root, "4RTools-Vanilla-v0.6.0");
+                string newInstall = Path.Combine(root, "4RTools-Vanilla-v0.6.1");
+                string data = Path.Combine(root, "user-data");
+                Directory.CreateDirectory(Path.Combine(oldInstall, "Profile"));
+                Directory.CreateDirectory(Path.Combine(oldInstall, "Profiles", "Vanilla"));
+                Directory.CreateDirectory(Path.Combine(oldInstall, "VanillaReconnect"));
+                Directory.CreateDirectory(newInstall);
+                File.WriteAllText(Path.Combine(oldInstall, "Profile", "Hunter.json"), "{}");
+                File.WriteAllText(Path.Combine(oldInstall, "Profiles", "Vanilla", "Farm.json"), "{}");
+                File.WriteAllText(Path.Combine(oldInstall, "VanillaReconnect", "reconnect.json"), "{}");
+                File.WriteAllText(Path.Combine(oldInstall, "supported_servers.json"), "[]");
+                Environment.SetEnvironmentVariable(VanillaAppData.DataRootEnvironmentVariable, data);
+                VanillaAppData.InitializeAndMigrateLegacy(newInstall);
+                Assert(File.Exists(Path.Combine(data, "Profiles", "Stock", "Hunter.json")), "Stock profile did not migrate.");
+                Assert(File.Exists(Path.Combine(data, "Profiles", "Vanilla", "Farm.json")), "Vanilla profile did not migrate.");
+                Assert(File.Exists(Path.Combine(data, "VanillaReconnect", "reconnect.json")), "Reconnect settings did not migrate.");
+                Assert(File.Exists(Path.Combine(data, "supported_servers.json")), "Local server settings did not migrate.");
+                Assert(File.Exists(Path.Combine(oldInstall, "VanillaReconnect", "reconnect.json")), "Sibling release should remain a rollback backup.");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(VanillaAppData.DataRootEnvironmentVariable, previous);
+                Delete(root);
+            }
+        }
+        private static void UpdaterVersionComparison()
+        {
+            Assert(VanillaUpdater.IsNewerVersion(new Version(0, 6, 2), new Version(0, 6, 1)), "Newer patch version was rejected.");
+            Assert(!VanillaUpdater.IsNewerVersion(new Version(0, 6, 1), new Version(0, 6, 1)), "Equal version was treated as an update.");
+            Assert(!VanillaUpdater.IsNewerVersion(new Version(0, 5, 9), new Version(0, 6, 1)), "Older version was treated as an update.");
+        }        private static string Temp() { string p = Path.Combine(Path.GetTempPath(), "4rtools-reconnect-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(p); return p; }
         private static void Delete(string p) { try { Directory.Delete(p, true); } catch { } }
         private static void Test(string name, Action action) { try { action(); passed++; Console.WriteLine("PASS " + name); } catch (Exception ex) { failed++; Console.Error.WriteLine("FAIL " + name + ": " + ex); } }
         private static void Assert(bool value, string message) { if (!value) throw new Exception(message); }

@@ -18,7 +18,8 @@ namespace _4RTools.Model.Vanilla.Automation
         public AutomationProfileStore(string baseDirectory)
         {
             if (string.IsNullOrWhiteSpace(baseDirectory)) throw new ArgumentException("An application directory is required.");
-            directory = Path.Combine(Path.GetFullPath(baseDirectory), "Profiles", "Vanilla");
+            string root = Path.GetFullPath(baseDirectory);
+            directory = Path.Combine(root, "Profiles", "Vanilla");
             Directory.CreateDirectory(directory);
             if (!File.Exists(ProfilePath("Default"))) Save("Default", new VanillaAutomationSettings());
         }

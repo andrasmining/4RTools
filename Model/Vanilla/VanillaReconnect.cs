@@ -1055,15 +1055,8 @@ namespace _4RTools.Model.Vanilla
 
         public static void Initialize()
         {
-            lock (Gate)
-            {
-                if (initialized) return;
-                initialized = true;
-                string[] args = Environment.GetCommandLineArgs();
-                if (args.Skip(1).Any(a => a.StartsWith("--", StringComparison.OrdinalIgnoreCase))) return;
-                Application.Idle += OnFirstIdle;
-                Application.ApplicationExit += OnExit;
-            }
+            // Kept for compatibility with older callers. Recovery is now embedded in the
+            // main Container Vanilla tab and uses the original 4RTools tray icon.
         }
 
         private static void OnFirstIdle(object sender, EventArgs e)

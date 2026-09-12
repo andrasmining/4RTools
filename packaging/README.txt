@@ -9,76 +9,73 @@ intact: it does not disable, bypass, patch, hide from, or interfere with
 Gepard Shield. Vanilla-specific recovery uses ordinary window input and
 read-only observation where applicable.
 
-Quick start: overnight restart/relogin
---------------------------------------
-1. Unzip the entire portable folder into a writable location.
-2. Run 4RTools-Vanilla.exe and accept its Windows administrator prompt.
-3. The Vanilla Restart & Relog manager opens on first use. Set the launcher path
-   to Vanilla's patcher.exe. If a client is already running, choose "Use patcher
-   from running client"; it prefers patcher.exe beside Vanilla MMO.exe.
-4. Leave Proxy on Tokyo unless you intentionally use another route.
-5. Configure up to two account profiles on this PC. For each one enter the
-   username, password, character slot, and Autobattle resume hotkey (default
-   Ctrl+2).
-6. Save, enable "Auto relaunch/relogin", and press START SUPERVISOR.
-7. Once verified locally, enable "Start supervisor with 4RTools" for unattended
-   recovery after a 4RTools restart.
+One application window
+----------------------
+Run 4RTools-Vanilla.exe. Vanilla is the first main feature tab and contains one
+integrated workspace with Recovery & relog, Automation rules, Diagnostics, and
+Data & updates. The old separate reconnect-manager window and second tray icon
+are no longer used. Minimize the main 4RTools window to use its normal tray icon;
+closing the main window exits the application.
 
-When patcher.exe is configured, the supervisor starts it, waits for its window,
-clicks the visible GAME START button, and stops retrying as soon as a new Vanilla
-MMO process appears. Direct executable launching remains supported.
+Recovery quick start
+--------------------
+1. Set Launcher EXE to Vanilla Launcher.exe or patcher.exe.
+2. Leave Proxy on Tokyo unless you intentionally use another route.
+3. Configure one or two account profiles with username, password, character slot,
+   and the resume hotkey used by Vanilla Autobattle.
+4. Save and test the steps individually when calibrating a client/UI change.
+5. Enable Auto relaunch/relogin. Enable Start supervisor with 4RTools when you
+   want monitoring to begin automatically whenever 4RTools starts.
 
-The supervisor can relaunch a closed Vanilla client, wait for the Gepard/client
-startup path, choose the configured proxy, login, select the first Vanilla
-server entry, select the configured character slot, enter the game, and send
-the configured Autobattle hotkey once gameplay is detected. It also watches for
-the bright Vanilla login/service shell after a lag disconnect and can acknowledge
-the observed in-game logout/disconnect modal with Enter.
+Passwords are protected with Windows DPAPI and are never written to logs. DPAPI
+protection is tied to the current Windows user/machine, so passwords must still
+be entered once on each PC.
 
-Passwords are protected with Windows DPAPI and never written to the reconnect
-log. DPAPI protection is intentionally tied to the current Windows user/machine,
-so enter passwords once on each PC; copying the portable folder does not make a
-saved password usable on another machine.
+Persistent configuration
+------------------------
+User configuration is deliberately outside the versioned application folder.
+The default data root is:
 
-The UI uses normalized client coordinates rather than fixed pixels, so the same
-profile is not tied to one screen resolution. It still assumes the same Vanilla
-UI layout. If Vanilla changes that layout, stop the supervisor and update/test
-the fork rather than trying to bypass Gepard.
+  %LOCALAPPDATA%\4RTools Vanilla\
 
-Existing 4RTools/Vanilla features
----------------------------------
-The original 4RTools window, Ragnarok Client selector, profiles, Autopot/Ygg,
-AHK spammer, macro chains/songs, Auto Refresh timers, buffs, status recovery,
-and settings remain available.
+It contains one Profiles root:
 
-The Vanilla tab also provides Smart Teleport/additional rules and read-only
-diagnostics. Current HP/SP/name mappings for the known Vanilla build are still
-candidate/unverified mappings for gameplay semantics; dependent automation stays
-gated until controlled live verification proves them. The restart/relogin
-manager does not depend on those offsets.
+  Profiles\Stock\          original 4RTools profiles
+  Profiles\Vanilla\        Vanilla automation-rule profiles
+  VanillaReconnect\        recovery accounts/settings (reconnect.json)
+  Logs\                    reconnect/automation/update logs
+  supported_servers.json   locally added original-4RTools server definitions
+
+The release ZIP contains none of those user-data folders. On first run, 0.6.1
+migrates compatible data from the current application directory and from nearby
+older sibling folders named 4RTools-Vanilla-v*. Sibling version folders are kept
+as rollback backups. This means you can unzip 0.6.1 beside 0.6.0 and retain the
+same local configuration automatically on that Windows user/PC.
+
+Automatic updates
+-----------------
+Every normal startup checks the latest GitHub Release for this fork. If a newer
+release exists, 4RTools offers to download and restart into it. Before applying
+an update it verifies the release ZIP SHA-256 file and every file listed in the
+packaged SHA256SUMS.txt manifest. User data is outside the install directory, so
+updating application files does not replace profiles, recovery accounts, or
+DPAPI-protected passwords.
+
+The Data & updates page shows the exact paths in use and provides Open Data
+Folder and Check for Updates controls.
 
 Requirements
 ------------
-Windows 10 or Windows 11, with Microsoft .NET Framework 4.7.2 or a later 4.x
+Windows 10 or Windows 11 with Microsoft .NET Framework 4.7.2 or a later 4.x
 runtime. The application targets x86 and can run on x64 Windows. No Visual
 Studio, Git, NuGet, SDK, or source tree is required to use it.
-
-Profiles and local data
------------------------
-Original 4RTools settings use Profile/. Additional automation settings use
-Profiles/. Restart/relogin settings use VanillaReconnect/. Logs use Logs/.
-All paths are relative to the portable application folder.
-
-No repository release contains your usernames, passwords, personal profiles,
-or memory dumps. The password field stored under VanillaReconnect/ is DPAPI
-ciphertext for the local Windows user/machine.
 
 Release identity and integrity
 ------------------------------
 VERSION.txt records the fork version, architecture, source commit, and build
 validation. RELEASE-NOTES.md records feature and validation details.
-SHA256SUMS.txt lists original packaged payload hashes and the ZIP has an adjacent
-.sha256 file. Versioned ZIPs are published by verified GitHub Releases and are not
+SHA256SUMS.txt lists packaged payload hashes and the ZIP has an adjacent .sha256
+file. Versioned ZIPs are published by verified GitHub Releases and are not
 committed to the source tree.
 
 The MIT license for 4RTools is in LICENSE. Embedded third-party dependencies

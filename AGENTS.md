@@ -236,6 +236,26 @@ and validation, including package launch testing where possible. Retain the
 upstream MIT license and all required copyright/permission notices, including
 `Copyright (c) 2022 4RTools`, and include them with distributed artifacts.
 
+## Release/version and persistent-data policy
+
+Use conservative pre-1.0 versioning while the Vanilla integration is still being
+stabilized live. Prefer patch releases for iterative fixes and UX/reliability
+improvements, minor releases for coherent larger milestones, and do not approach
+or declare 1.0 merely because several internal changes landed. A 1.0 release
+requires explicit product readiness and substantial live validation.
+
+User configuration must survive application upgrades. Keep writable user data
+outside versioned release folders under the stable per-user application-data
+root, migrate compatible older schemas automatically, and preserve old data when
+a safe migration cannot be proven. Release ZIPs must not contain mutable user
+profile/recovery/log directories. Backwards-incompatible schema changes require
+an explicit migration or a clear, intentional reset path rather than silent
+corruption or accidental default replacement.
+
+Normal end-user operation should be one 4RTools application/window. Integrate
+Vanilla recovery, automation, diagnostics, data paths, and update status into the
+main Vanilla workspace instead of creating competing top-level manager windows
+or duplicate tray icons. The main 4RTools tray remains the application tray.
 ## Cleanliness, documentation, and final reporting
 
 Before finalizing substantial work, review for abandoned experiments, temporary

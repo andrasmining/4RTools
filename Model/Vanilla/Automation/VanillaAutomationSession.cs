@@ -29,8 +29,9 @@ namespace _4RTools.Model.Vanilla.Automation
         public VanillaAutomationSession(string baseDirectory)
         {
             this.baseDirectory = Path.GetFullPath(baseDirectory);
-            logPath = Path.Combine(this.baseDirectory, "Logs", "vanilla.log");
-            profiles = new AutomationProfileStore(this.baseDirectory);
+            VanillaAppData.InitializeAndMigrateLegacy(this.baseDirectory);
+            logPath = Path.Combine(VanillaAppData.LogsDirectory, "vanilla.log");
+            profiles = new AutomationProfileStore(VanillaAppData.RootDirectory);
             CurrentProfileName = "Default";
             try { settings = profiles.Load(CurrentProfileName); }
             catch (Exception ex)
