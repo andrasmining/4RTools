@@ -1,5 +1,5 @@
 name: One-time 0.6.2 Vanilla UI integration
-# Validation attempt 2 after fixing the PowerShell source patch encoding.
+# Validation attempt 3 with generated-source newline fixup.
 
 on:
   push:
@@ -24,7 +24,9 @@ jobs:
           fetch-depth: 0
       - name: Apply changes
         shell: powershell
-        run: '& .\scripts\one-time-v062-ui.ps1'
+        run: |
+          & .\scripts\one-time-v062-ui.ps1
+          & .\scripts\one-time-v062-fix.ps1
       - name: Restore NuGet packages
         shell: powershell
         run: nuget restore 4RTools.sln -NonInteractive
