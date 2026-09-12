@@ -1,7 +1,18 @@
-# 4RTools Vanilla 0.4.0
+# 4RTools Vanilla 0.5.0
 
 4RTools Vanilla is an independent MIT-licensed fork of 4RTools focused on Vanilla MMO. Vanilla's own documentation lists **4R Tools Supported**, **Gepard 3.0 Protection**, and its 24/7 Auto-Attack system. This fork does not disable, patch, hide from, bypass, or otherwise interfere with Gepard. Vanilla-specific automation uses ordinary targeted window input and, for existing diagnostic features, read-only client observation.
 
+## New in 0.5.0: recovery UX and repeatable end-to-end tests
+
+The original 4RTools window is now large/resizable and **Vanilla is the first primary tab**, so the feature strip fits without the old horizontal tab scrolling. The reconnect manager is larger as well.
+
+The account duplication bug is fixed at serialization level. A PC now has one or two reconnect profiles only; Save persists exactly the edited rows. Existing files containing duplicated blank `Client 1` / `Client 2` rows are normalized on load, preferring the configured credential-bearing rows. Live recovery status is an exact view of the current configured list, so deleted accounts disappear immediately. Its title explains that it shows account -> assigned PID -> detected screen -> current recovery stage.
+
+Running Vanilla clients are detected automatically when the manager opens and when the supervisor starts; **DETECT RUNNING CLIENTS** provides an explicit refresh. Already-running clients are adopted without sending the Autobattle resume hotkey. With two anonymous existing processes, account-list order is the deterministic assignment order.
+
+The launcher driver now recognizes the actual `Vanilla Launcher.exe` as well as `patcher.exe`, clicks the visible GAME START button, and then continues through the normal Gepard/client and login path. The obsolete `Use patcher from running client` shortcut was removed.
+
+Testing is now built into the manager: **TEST STARTUP (clients closed)** validates the complete launcher/login/character/Autobattle path; **TEST RESTART RECOVERY** closes the detected game windows normally and validates full automatic relaunch/relogin; **ARM MANUAL NETWORK-DROP TEST** watches a real user-triggered connection interruption and reports PASS only after it observes a disruption and all configured clients return Online. 4RTools does not modify the PC network configuration for that test.
 ## New in 0.4.0: patcher startup and GitHub Releases
 
 Vanilla recovery now launches the configured executable exactly as selected. When that path is `patcher.exe`, 4RTools waits for the patcher window, clicks its visible **GAME START** button at normalized window coordinates, and retries while patching is still in progress. The retry loop stops immediately when a new `Vanilla MMO.exe` process appears. Launches are serialized so two managed accounts do not race the same patcher. The existing path picker now prefers `patcher.exe` beside a running Vanilla client when available; direct-client launching remains supported.
@@ -76,11 +87,11 @@ If Gepard blocks the custom executable or an input path, that is a hard boundary
 
 ## Portable release
 
-The intended 0.4.0 output is:
+The intended 0.5.0 output is:
 
-- `dist/4RTools-Vanilla-v0.4.0/`
-- `dist/4RTools-Vanilla-v0.4.0-portable.zip`
-- `dist/4RTools-Vanilla-v0.4.0-portable.zip.sha256`
+- `dist/4RTools-Vanilla-v0.5.0/`
+- `dist/4RTools-Vanilla-v0.5.0-portable.zip`
+- `dist/4RTools-Vanilla-v0.5.0-portable.zip.sha256`
 
 The portable package targets x86 and .NET Framework 4.7.2 or later 4.x. It does not require Visual Studio, Git, NuGet, source code, or manual offset entry to run. The upstream administrator manifest is retained.
 
@@ -88,10 +99,10 @@ The original 4RTools MIT license and attribution remain included. This fork is n
 
 <!-- BEGIN GENERATED RELEASE CHECKSUMS -->
 
-Release version: 0.4.0. SHA256:
+Release version: 0.5.0. SHA256:
 
-- `4RTools-Vanilla-v0.4.0-portable.zip`: `dd4f66de42e0acb7f3bf361cda46bbdff679c9f2c3962f792615922eaf335d08`
-- `4RTools-Vanilla.exe`: `09228b647fc6109c14cb6b3177ad3a1b9f83942486610b067edcee4dd5be7fb4`
+- `4RTools-Vanilla-v0.5.0-portable.zip`: `113841108cb827fc665912fdceb6a1d9a558e94b5b5351ee71f380d2f6636d4b`
+- `4RTools-Vanilla.exe`: `c9df9bb8b7a686823d051bb6efc44b4eee24a4b682bf8522441e574045cacbf4`
 
 These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
 <!-- END GENERATED RELEASE CHECKSUMS -->

@@ -25,6 +25,7 @@ namespace Vanilla.Diagnostics.Tests
             Assert(method != null, "IsPatcher helper is missing.");
             Assert((bool)method.Invoke(null, new object[] { @"C:\Games\Vanilla RO\patcher.exe" }), "patcher.exe must use launcher mode.");
             Assert((bool)method.Invoke(null, new object[] { @"C:\Games\Vanilla RO\PATCHER.EXE" }), "Patcher detection must ignore case.");
+            Assert((bool)method.Invoke(null, new object[] { @"C:\Games\Vanilla RO\Vanilla Launcher.exe" }), "Vanilla Launcher.exe must use GAME START launcher mode.");
             Assert(!(bool)method.Invoke(null, new object[] { @"C:\Games\Vanilla RO\Vanilla MMO.exe" }), "Direct game executable must not be treated as patcher.exe.");
         }
 

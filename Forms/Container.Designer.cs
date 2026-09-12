@@ -1,4 +1,4 @@
-﻿using System.Windows.Forms;
+using System.Windows.Forms;
 
 namespace _4RTools.Forms
 {
@@ -59,6 +59,7 @@ namespace _4RTools.Forms
             this.tabPageAutobuffSkill = new System.Windows.Forms.TabPage();
             this.tabSkillTimer = new System.Windows.Forms.TabPage();
             this.atkDefMode = new System.Windows.Forms.TabControl();
+            this.tabPageVanilla = new System.Windows.Forms.TabPage();
             this.tabDebuffRecovery = new System.Windows.Forms.TabPage();
             this.characterName = new System.Windows.Forms.Label();
             this.lblCharacterName = new System.Windows.Forms.Label();
@@ -313,6 +314,7 @@ namespace _4RTools.Forms
             // 
             // atkDefMode
             // 
+            this.atkDefMode.Controls.Add(this.tabPageVanilla);
             this.atkDefMode.Controls.Add(this.tabPageSpammer);
             this.atkDefMode.Controls.Add(this.tabDebuffRecovery);
             this.atkDefMode.Controls.Add(this.tabPageAutobuffSkill);
@@ -328,6 +330,17 @@ namespace _4RTools.Forms
             this.atkDefMode.SelectedIndex = 0;
             this.atkDefMode.Size = new System.Drawing.Size(571, 300);
             this.atkDefMode.TabIndex = 4;
+            // 
+            // 
+            // tabPageVanilla
+            // 
+            this.tabPageVanilla.Location = new System.Drawing.Point(4, 22);
+            this.tabPageVanilla.Name = "tabPageVanilla";
+            this.tabPageVanilla.Padding = new System.Windows.Forms.Padding(3);
+            this.tabPageVanilla.Size = new System.Drawing.Size(865, 274);
+            this.tabPageVanilla.TabIndex = 0;
+            this.tabPageVanilla.Text = "Vanilla";
+            this.tabPageVanilla.UseVisualStyleBackColor = true;
             // 
             // tabDebuffRecovery
             // 
@@ -432,6 +445,7 @@ namespace _4RTools.Forms
         private TabPage tabPageAutobuffSkill;
         private TabPage tabPageSpammer;
         private TabControl atkDefMode;
+        private TabPage tabPageVanilla;
         private Label characterName;
         private Label lblCharacterName;
         private TabPage tabDebuffRecovery;

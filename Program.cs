@@ -125,6 +125,12 @@ namespace _4RTools
                     System.Windows.Forms.Application.DoEvents();
                     if (form.AutomationEnabled || form.GameplayAttached || IntPtr.Size != 4)
                         throw new InvalidOperationException("Unexpected startup automation, game attachment, or process architecture.");
+                    var mainTabs = Descendants(form).OfType<System.Windows.Forms.TabControl>()
+                        .OrderByDescending(tabs => tabs.TabPages.Count).FirstOrDefault();
+                    if (!form.VanillaTabIsFirst)
+                        throw new InvalidOperationException("Vanilla must be the first primary feature tab. Actual order: " + form.PrimaryTabOrder);
+                    if (form.FormBorderStyle != System.Windows.Forms.FormBorderStyle.Sizable || !form.MaximizeBox || form.MinimumSize.Width < 1000 || form.MinimumSize.Height < 650)
+                        throw new InvalidOperationException("Main window is too small for the no-scroll Vanilla layout.");
                     // Upstream reparents its child forms into tab pages, so MdiChildren
                     // does not contain them all after the window is constructed.
                     string[] originalForms = Descendants(form).OfType<System.Windows.Forms.Form>()
@@ -171,7 +177,7 @@ namespace _4RTools
                     form.Close();
                     File.WriteAllText(output, JsonConvert.SerializeObject(new
                     {
-                        Success = true, Version = "0.4.0", PointerBytes = IntPtr.Size,
+                        Success = true, Version = "0.5.0", PointerBytes = IntPtr.Size,
                         MainUi = "Container", OriginalFeatureForms = featureForms,
                         FeatureForms = originalForms,
                         AutomationEnabled = false,

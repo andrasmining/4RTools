@@ -27,6 +27,8 @@ namespace _4RTools.Forms
         internal bool AutomationEnabled { get { return toggleForm?.IsOn == true || vanillaSession.IsEnabled; } }
         internal bool GameplayAttached { get { return ClientSingleton.GetClient() != null; } }
         internal VanillaClientState VanillaSnapshot { get { return vanillaSession.Snapshot; } }
+        internal bool VanillaTabIsFirst { get { return atkDefMode.TabPages.Count > 0 && object.ReferenceEquals(atkDefMode.TabPages[0], tabPageVanilla); } }
+        internal string PrimaryTabOrder { get { return string.Join(" | ", atkDefMode.TabPages.Cast<TabPage>().Select(page => page.Text)); } }
         public Container(bool smokeTest = false)
         {
             this.smokeTest = smokeTest;
@@ -37,7 +39,8 @@ namespace _4RTools.Forms
             this.subject.Attach(this);
 
             InitializeComponent();
-            this.Text = "4RTools - Vanilla extension v0.4.0";
+            this.Text = "4RTools - Vanilla extension v0.5.0";
+            ConfigureVanillaFirstLayout();
 
             //Container Configuration
             this.IsMdiContainer = true;
@@ -76,6 +79,24 @@ namespace _4RTools.Forms
             Refresh();
         }
 
+        private void ConfigureVanillaFirstLayout()
+        {
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
+            MinimumSize = new Size(1050, 700);
+            ClientSize = new Size(1180, 760);
+            panelFooter.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            panelFooter.Location = new Point(0, ClientSize.Height - panelFooter.Height);
+            panelFooter.Width = ClientSize.Width;
+            lblLinkDiscord.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            panelDiscImage.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            lblLinkDiscord.Left = panelFooter.Width - lblLinkDiscord.Width - 16;
+            panelDiscImage.Left = lblLinkDiscord.Left - panelDiscImage.Width - 8;
+            atkDefMode.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            atkDefMode.Size = new Size(ClientSize.Width - 30, panelFooter.Top - atkDefMode.Top - 6);
+            vanillaStatus.MaximumSize = new Size(1080, 0);
+        }
+
         private void SetBackGroundColorOfMDIForm()
         {
             foreach (Control ctl in this.Controls)
@@ -101,7 +122,7 @@ namespace _4RTools.Forms
                 ClientSingleton.Instance(client);
                 reportedFailure = null;
                 subject.Notify(new Utils.Message(Utils.MessageCode.PROCESS_CHANGED, null));
-                if (client.IsVanilla) atkDefMode.SelectedTab = atkDefMode.TabPages[atkDefMode.TabPages.Count - 1];
+                if (client.IsVanilla) atkDefMode.SelectedTab = tabPageVanilla;
                 if (client.IsVanilla && vanillaExtras != null && !vanillaExtras.IsDisposed) vanillaExtras.SelectClient(client.process.Id);
                 PollVanilla();
             }
@@ -268,7 +289,8 @@ namespace _4RTools.Forms
 
         private void SetVanillaWindow()
         {
-            var page = new TabPage("Vanilla");
+            var page = tabPageVanilla;
+            page.Controls.Clear();
             var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(12) };
             panel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(500, 0), Text = "Select Vanilla in Ragnarok Client above. Existing feature tabs use its read-only mappings. Additional rules and diagnostics are available here." });
             panel.Controls.Add(vanillaStatus);
@@ -293,7 +315,6 @@ namespace _4RTools.Forms
             open.Click += (sender, args) => OpenVanillaDiagnostics();
             panel.Controls.Add(open);
             page.Controls.Add(panel);
-            atkDefMode.TabPages.Add(page);
         }
 
         private void OpenVanillaDiagnostics()
@@ -354,7 +375,7 @@ namespace _4RTools.Forms
         {
             foreach (var item in processCB.Items)
                 if (item.ToString().EndsWith(".exe - " + processId, StringComparison.Ordinal))
-                { processCB.SelectedItem = item; atkDefMode.SelectedTab = atkDefMode.TabPages[atkDefMode.TabPages.Count - 1]; return; }
+                { processCB.SelectedItem = item; atkDefMode.SelectedTab = tabPageVanilla; return; }
             throw new InvalidOperationException("Requested client is not in the Ragnarok Client list.");
         }
 

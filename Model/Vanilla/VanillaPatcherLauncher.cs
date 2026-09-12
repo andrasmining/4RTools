@@ -21,7 +21,9 @@ namespace _4RTools.Model.Vanilla
 
         internal static bool IsPatcher(string executablePath)
         {
-            return string.Equals(Path.GetFileName(executablePath), "patcher.exe", StringComparison.OrdinalIgnoreCase);
+            string name = Path.GetFileName(executablePath);
+            return string.Equals(name, "patcher.exe", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "Vanilla Launcher.exe", StringComparison.OrdinalIgnoreCase);
         }
 
         internal static int? Launch(
@@ -60,7 +62,7 @@ namespace _4RTools.Model.Vanilla
                     return launched == null ? (int?)null : launched.Id;
                 }
 
-                log?.Invoke("Started patcher.exe; waiting for GAME START to become usable.");
+                log?.Invoke("Started Vanilla launcher; waiting for GAME START to become usable.");
                 DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
                 DateTime nextClick = DateTime.MinValue;
                 string launcherName = Path.GetFileNameWithoutExtension(executablePath);
@@ -93,11 +95,11 @@ namespace _4RTools.Model.Vanilla
                                     Thread.Sleep(120);
                                     input.ClickNormalized(gameStartX, gameStartY);
                                 }
-                                log?.Invoke("Clicked patcher GAME START; waiting for Vanilla/Gepard startup.");
+                                log?.Invoke("Clicked launcher GAME START; waiting for Vanilla/Gepard startup.");
                             }
                             catch (Exception ex)
                             {
-                                log?.Invoke("Patcher window is not ready yet: " + ex.Message);
+                                log?.Invoke("Launcher window is not ready yet: " + ex.Message);
                             }
                             nextClick = DateTime.UtcNow.AddMilliseconds(retryMs);
                         }
@@ -106,7 +108,7 @@ namespace _4RTools.Model.Vanilla
                     Thread.Sleep(250);
                 }
 
-                throw new TimeoutException("patcher.exe did not start a new Vanilla MMO client within " + (timeoutMs / 1000) + " seconds.");
+                throw new TimeoutException("Vanilla launcher did not start a new Vanilla MMO client within " + (timeoutMs / 1000) + " seconds.");
             }
             finally
             {
@@ -119,6 +121,8 @@ namespace _4RTools.Model.Vanilla
             if (string.IsNullOrWhiteSpace(clientExecutablePath)) return clientExecutablePath;
             string directory = Path.GetDirectoryName(clientExecutablePath);
             if (string.IsNullOrWhiteSpace(directory)) return clientExecutablePath;
+            string vanillaLauncher = Path.Combine(directory, "Vanilla Launcher.exe");
+            if (File.Exists(vanillaLauncher)) return vanillaLauncher;
             string patcher = Path.Combine(directory, "patcher.exe");
             return File.Exists(patcher) ? patcher : clientExecutablePath;
         }

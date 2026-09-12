@@ -89,15 +89,53 @@ namespace _4RTools.Model.Vanilla
         public int RetryBackoffMs { get; set; } = 30000;
         public int PopupCooldownMs { get; set; } = 5000;
         public VanillaUiAnchors Anchors { get; set; } = new VanillaUiAnchors();
-        public List<VanillaReconnectAccount> Accounts { get; set; } = new List<VanillaReconnectAccount>
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public List<VanillaReconnectAccount> Accounts { get; set; } = new List<VanillaReconnectAccount>();
+
+        public static VanillaReconnectSettings CreateDefault()
         {
-            new VanillaReconnectAccount { Label = "Client 1" },
-            new VanillaReconnectAccount { Label = "Client 2" }
-        };
+            var value = new VanillaReconnectSettings();
+            value.Accounts.Add(new VanillaReconnectAccount { Label = "Client 1" });
+            value.Accounts.Add(new VanillaReconnectAccount { Label = "Client 2" });
+            return value;
+        }
 
         public VanillaReconnectSettings Clone()
         {
-            return JsonConvert.DeserializeObject<VanillaReconnectSettings>(JsonConvert.SerializeObject(this));
+            var value = JsonConvert.DeserializeObject<VanillaReconnectSettings>(
+                JsonConvert.SerializeObject(this), new JsonSerializerSettings { ObjectCreationHandling = ObjectCreationHandling.Replace });
+            if (value == null) throw new InvalidDataException("Reconnect settings could not be cloned.");
+            value.NormalizeAccounts();
+            return value;
+        }
+
+        public void NormalizeAccounts()
+        {
+            if (Accounts == null) Accounts = new List<VanillaReconnectAccount>();
+            var unique = Accounts.Where(a => a != null && !string.IsNullOrWhiteSpace(a.Id))
+                .GroupBy(a => a.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderByDescending(a => IsSyntheticDefault(a) ? 0 : 1).First())
+                .ToList();
+            if (unique.Count > 2)
+            {
+                var preferred = unique.Where(a => !IsSyntheticDefault(a)).ToList();
+                foreach (var account in unique)
+                {
+                    if (preferred.Count >= 2) break;
+                    if (!preferred.Contains(account)) preferred.Add(account);
+                }
+                unique = preferred.Take(2).ToList();
+            }
+            Accounts = unique;
+        }
+
+        private static bool IsSyntheticDefault(VanillaReconnectAccount account)
+        {
+            if (account == null) return true;
+            bool defaultLabel = string.Equals(account.Label, "Client 1", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(account.Label, "Client 2", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(account.Label, "Client", StringComparison.OrdinalIgnoreCase);
+            return defaultLabel && string.IsNullOrWhiteSpace(account.UserName) && string.IsNullOrWhiteSpace(account.ProtectedPassword);
         }
 
         public void Validate()
@@ -119,8 +157,8 @@ namespace _4RTools.Model.Vanilla
             Check01(Anchors.GameStartX); Check01(Anchors.GameStartY);
             if (Anchors.CharacterStepX <= 0 || Anchors.CharacterStepX > .25 || Anchors.CharacterStepY <= 0 || Anchors.CharacterStepY > .25)
                 throw new ArgumentException("Character-grid steps are invalid.");
-            if (Accounts == null || Accounts.Count == 0 || Accounts.Count > 8)
-                throw new ArgumentException("Configure between 1 and 8 account profiles.");
+            if (Accounts == null || Accounts.Count == 0 || Accounts.Count > 2)
+                throw new ArgumentException("Configure one or two account profiles on this PC.");
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var account in Accounts)
             {
@@ -169,9 +207,11 @@ namespace _4RTools.Model.Vanilla
 
         public VanillaReconnectSettings Load()
         {
-            if (!File.Exists(path)) return new VanillaReconnectSettings();
-            var value = JsonConvert.DeserializeObject<VanillaReconnectSettings>(File.ReadAllText(path));
+            if (!File.Exists(path)) return VanillaReconnectSettings.CreateDefault();
+            var value = JsonConvert.DeserializeObject<VanillaReconnectSettings>(File.ReadAllText(path),
+                new JsonSerializerSettings { ObjectCreationHandling = ObjectCreationHandling.Replace });
             if (value == null) throw new InvalidDataException("Reconnect settings are empty.");
+            value.NormalizeAccounts();
             value.Validate();
             return value;
         }
@@ -471,12 +511,18 @@ namespace _4RTools.Model.Vanilla
         {
             lock (gate)
             {
-                return runtimes.Values.OrderBy(x => x.Account.Label, StringComparer.CurrentCultureIgnoreCase)
-                    .Select(x => new VanillaReconnectStatus
+                return settings.Accounts.Select(account =>
+                {
+                    Runtime runtime;
+                    if (!runtimes.TryGetValue(account.Id, out runtime))
+                        return new VanillaReconnectStatus { AccountId = account.Id, Label = account.Label, Stage = VanillaReconnectStage.Stopped,
+                            VisualState = VanillaVisualState.Unknown, Detail = "No runtime state", UpdatedAt = DateTimeOffset.UtcNow };
+                    return new VanillaReconnectStatus
                     {
-                        AccountId = x.Account.Id, Label = x.Account.Label, ProcessId = x.ProcessId,
-                        Stage = x.Stage, VisualState = x.Visual, Detail = x.Detail, UpdatedAt = x.StageAt
-                    }).ToList();
+                        AccountId = runtime.Account.Id, Label = runtime.Account.Label, ProcessId = runtime.ProcessId,
+                        Stage = runtime.Stage, VisualState = runtime.Visual, Detail = runtime.Detail, UpdatedAt = runtime.StageAt
+                    };
+                }).ToList();
             }
         }
 
@@ -505,7 +551,7 @@ namespace _4RTools.Model.Vanilla
                 settings.Validate();
                 running = true;
                 RebuildRuntimes();
-                AdoptExistingClients();
+                AdoptExistingClients(true);
                 RecreateTimer();
             }
             Log("Reconnect supervisor ON. It uses only ordinary window input and does not alter Gepard or game memory.");
@@ -539,16 +585,23 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        public void DetectLauncherFromRunningClient()
+        public int DetectRunningClients()
         {
-            Process p = Process.GetProcessesByName("Vanilla MMO").OrderBy(x => SafeStart(x)).FirstOrDefault();
-            if (p == null) throw new InvalidOperationException("No running Vanilla MMO client was found.");
-            string path;
-            try { path = p.MainModule.FileName; }
-            finally { p.Dispose(); }
-            var copy = Settings;
-            copy.LaunchExecutable = VanillaPatcherLauncher.PreferPatcherBesideClient(path);
-            Apply(copy, true);
+            int detected;
+            lock (gate)
+            {
+                if (disposed) throw new ObjectDisposedException(nameof(VanillaReconnectSupervisor));
+                RebuildRuntimes();
+                detected = AdoptExistingClients(running);
+            }
+            if (detected > 0) Log("Detected and assigned " + detected + " running Vanilla client(s) in account-list order.");
+            RaiseUpdated();
+            return detected;
+        }
+
+        public void RecordTestLog(string text)
+        {
+            if (!string.IsNullOrWhiteSpace(text)) Log("TEST: " + text);
         }
 
         private void Tick(object ignored)
@@ -872,13 +925,37 @@ namespace _4RTools.Model.Vanilla
             throw new TimeoutException("Vanilla main window did not appear in time.");
         }
 
-        private void AdoptExistingClients()
+        private int AdoptExistingClients(bool supervise)
         {
             var existing = GetVanillaProcesses().OrderBy(p => SafeStart(p)).ToList();
-            var enabled = settings.Accounts.Where(a => a.Enabled).Take(settings.MaxClients).ToList();
-            for (int i = 0; i < enabled.Count && i < existing.Count; i++)
-                Bind(runtimes[enabled[i].Id], existing[i].Id, false, "Existing Vanilla client adopted");
-            foreach (var p in existing) p.Dispose();
+            try
+            {
+                var aliveIds = new HashSet<int>(existing.Select(p => p.Id));
+                var enabled = settings.Accounts.Where(a => a.Enabled).Take(settings.MaxClients).ToList();
+                var claimed = new HashSet<int>();
+                int assigned = 0;
+                foreach (var account in enabled)
+                {
+                    Runtime runtime = runtimes[account.Id];
+                    Process match = null;
+                    if (runtime.ProcessId.HasValue && aliveIds.Contains(runtime.ProcessId.Value))
+                        match = existing.FirstOrDefault(p => p.Id == runtime.ProcessId.Value);
+                    if (match == null) match = existing.FirstOrDefault(p => !claimed.Contains(p.Id));
+                    if (match == null) continue;
+                    claimed.Add(match.Id);
+                    assigned++;
+                    runtime.ProcessId = match.Id;
+                    runtime.ResumeSent = true;
+                    runtime.ScriptRunning = false;
+                    runtime.Visual = VanillaVisualState.Unknown;
+                    runtime.LoginLikeSince = runtime.GameplaySince = null;
+                    SetStage(runtime, supervise ? VanillaReconnectStage.WaitingForGameplay : VanillaReconnectStage.Stopped,
+                        supervise ? "Existing Vanilla client adopted (PID " + match.Id + ")"
+                            : "Running Vanilla client detected (PID " + match.Id + "); start supervisor to monitor");
+                }
+                return assigned;
+            }
+            finally { foreach (var process in existing) process.Dispose(); }
         }
 
         private List<Process> GetVanillaProcesses()
@@ -1057,6 +1134,9 @@ namespace _4RTools.Model.Vanilla
         private readonly ListView status = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true };
         private readonly TextBox log = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
         private readonly Label runState = new Label { AutoSize = true };
+        private readonly Label testState = new Label { AutoSize = true, ForeColor = Color.DarkSlateBlue };
+        private bool testRunning;
+        private int testGeneration;
 
         public VanillaReconnectForm(VanillaReconnectSupervisor supervisor)
         {
@@ -1064,12 +1144,13 @@ namespace _4RTools.Model.Vanilla
             Text = "4RTools Vanilla — Restart & Relog";
             Font = new Font("Segoe UI", 9F);
             StartPosition = FormStartPosition.CenterScreen;
-            Size = new Size(1000, 720);
-            MinimumSize = new Size(850, 600);
+            Size = new Size(1180, 850);
+            MinimumSize = new Size(1050, 720);
             BuildUi();
             supervisor.Updated += SupervisorUpdated;
             supervisor.Logged += SupervisorLogged;
             LoadFromSupervisor();
+            try { supervisor.DetectRunningClients(); } catch { }
             RefreshStatus();
         }
 
@@ -1083,10 +1164,9 @@ namespace _4RTools.Model.Vanilla
 
             var top = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
             var pathRow = Flow();
-            pathRow.Controls.Add(new Label { Text = "Launcher EXE (patcher.exe recommended)", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
+            pathRow.Controls.Add(new Label { Text = "Launcher EXE (Vanilla Launcher.exe / patcher.exe)", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
             pathRow.Controls.Add(launchPath);
             AddButton(pathRow, "Browse…", Browse);
-            AddButton(pathRow, "Use patcher from running client", DetectPath);
             top.Controls.Add(pathRow);
 
             var opts = Flow();
@@ -1107,14 +1187,23 @@ namespace _4RTools.Model.Vanilla
             AddButton(commands, "Save", Save);
             AddButton(commands, "START SUPERVISOR", StartSupervisor);
             AddButton(commands, "STOP", () => supervisor.Stop());
+            AddButton(commands, "DETECT RUNNING CLIENTS", DetectRunningClients);
             runState.Font = new Font(Font, FontStyle.Bold);
             runState.Margin = new Padding(16, 8, 0, 0);
             commands.Controls.Add(runState);
             top.Controls.Add(commands);
 
+            var tests = Flow();
+            AddButton(tests, "TEST STARTUP (clients closed)", TestStartup);
+            AddButton(tests, "TEST RESTART RECOVERY", TestRestartRecovery);
+            AddButton(tests, "ARM MANUAL NETWORK-DROP TEST", ArmManualNetworkDropTest);
+            testState.Margin = new Padding(16, 8, 0, 0);
+            tests.Controls.Add(testState);
+            top.Controls.Add(tests);
+
             var info = new Label
             {
-                AutoSize = true, MaximumSize = new Size(930, 0),
+                AutoSize = true, MaximumSize = new Size(1100, 0),
                 Text = "Passwords are encrypted with Windows DPAPI for this Windows user and are never written to logs. " +
                        "Copying the folder to another PC does not copy usable passwords; enter them once on each PC. " +
                        "The relogger uses ordinary window input only. It does not bypass or modify Gepard.",
@@ -1147,8 +1236,8 @@ namespace _4RTools.Model.Vanilla
             status.Columns.Add("PID", 80);
             status.Columns.Add("Stage", 150);
             status.Columns.Add("Screen", 120);
-            status.Columns.Add("Detail", 480);
-            var statusBox = new GroupBox { Text = "Live recovery status", Dock = DockStyle.Fill, Padding = new Padding(8) };
+            status.Columns.Add("Detail", 610);
+            var statusBox = new GroupBox { Text = "Live recovery status (configured account -> assigned PID, detected screen and recovery stage)", Dock = DockStyle.Fill, Padding = new Padding(8) };
             statusBox.Controls.Add(status);
             root.Controls.Add(statusBox, 0, 2);
 
@@ -1212,10 +1301,18 @@ namespace _4RTools.Model.Vanilla
                 if (dialog.ShowDialog(this) == DialogResult.OK) launchPath.Text = dialog.FileName;
         }
 
-        private void DetectPath()
+        private void DetectRunningClients()
         {
-            try { supervisor.DetectLauncherFromRunningClient(); LoadFromSupervisor(); }
-            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Vanilla path"); }
+            try
+            {
+                ReadTop(); supervisor.Apply(settings, true); LoadFromSupervisor();
+                int detected = supervisor.DetectRunningClients();
+                RefreshStatus();
+                MessageBox.Show(this, detected == 0 ? "No running Vanilla MMO clients were found."
+                    : detected + " running Vanilla client(s) detected and assigned in account-list order.",
+                    "Running clients", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Running clients", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
 
         private void RefreshAccounts()
@@ -1238,6 +1335,11 @@ namespace _4RTools.Model.Vanilla
 
         private void AddAccount()
         {
+            if (settings.Accounts.Count >= 2)
+            {
+                MessageBox.Show(this, "Vanilla allows two managed account profiles on this PC. Edit or remove an existing row first.");
+                return;
+            }
             var account = new VanillaReconnectAccount { Label = "Client " + (settings.Accounts.Count + 1) };
             using (var dialog = new VanillaReconnectAccountDialog(supervisor, account))
             {
@@ -1275,6 +1377,139 @@ namespace _4RTools.Model.Vanilla
             if (selected == null) return;
             try { ReadTop(); supervisor.Apply(settings, true); supervisor.RunLoginNow(selected.Id); }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Manual reconnect"); }
+        }
+
+        private VanillaReconnectAccount[] TestAccounts()
+        {
+            var configured = settings.Accounts.Where(a => a.Enabled).Take(settings.MaxClients).ToArray();
+            if (configured.Length == 0) throw new InvalidOperationException("Enable at least one account first.");
+            foreach (var account in configured)
+                if (string.IsNullOrWhiteSpace(account.UserName) || string.IsNullOrWhiteSpace(account.ProtectedPassword))
+                    throw new InvalidOperationException("Account '" + account.Label + "' needs username and password before an end-to-end test.");
+            return configured;
+        }
+
+        private void TestStartup()
+        {
+            try
+            {
+                if (testRunning) throw new InvalidOperationException("A recovery test is already running.");
+                ReadTop(); supervisor.Apply(settings, true); LoadFromSupervisor();
+                var configured = TestAccounts();
+                var live = Process.GetProcessesByName("Vanilla MMO");
+                try
+                {
+                    if (live.Length > 0)
+                    {
+                        MessageBox.Show(this, "The cold-start test requires the Vanilla clients to be closed first. Close them, then press TEST STARTUP again.",
+                            "Startup test", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                }
+                finally { foreach (var process in live) process.Dispose(); }
+                int generation = BeginTest("STARTUP TEST: launching " + configured.Length + " configured client(s)...");
+                supervisor.Start();
+                WaitForOnline(generation, "Startup test", configured.Select(a => a.Id).ToArray(), false, 300000);
+            }
+            catch (Exception ex) { FailTestImmediately("Startup test", ex); }
+        }
+
+        private void TestRestartRecovery()
+        {
+            try
+            {
+                if (testRunning) throw new InvalidOperationException("A recovery test is already running.");
+                ReadTop(); supervisor.Apply(settings, true); LoadFromSupervisor();
+                var configured = TestAccounts();
+                if (!supervisor.IsRunning) supervisor.Start();
+                supervisor.DetectRunningClients();
+                var ids = configured.Select(a => a.Id).ToArray();
+                var current = supervisor.Statuses().Where(s => ids.Contains(s.AccountId)).ToArray();
+                if (current.Length != ids.Length || current.Any(s => !s.ProcessId.HasValue))
+                    throw new InvalidOperationException("Every configured account must have a detected running Vanilla client before the restart-recovery test.");
+                if (MessageBox.Show(this, "This test closes the detected Vanilla client windows normally and verifies that the supervisor launches, logs in and restores all configured clients. Continue?",
+                    "Test restart recovery", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                int generation = BeginTest("RESTART TEST: closing clients and waiting for full relaunch...");
+                WaitForOnline(generation, "Restart recovery test", ids, true, 300000);
+                foreach (int pid in current.Select(s => s.ProcessId.Value))
+                {
+                    using (var process = Process.GetProcessById(pid))
+                    {
+                        if (!process.CloseMainWindow()) throw new InvalidOperationException("Vanilla PID " + pid + " did not accept a normal window-close request.");
+                    }
+                }
+                supervisor.RecordTestLog("Restart recovery test requested normal close for " + current.Length + " Vanilla client(s).");
+            }
+            catch (Exception ex) { FailTestImmediately("Restart recovery test", ex); }
+        }
+
+        private void ArmManualNetworkDropTest()
+        {
+            try
+            {
+                if (testRunning) throw new InvalidOperationException("A recovery test is already running.");
+                ReadTop(); supervisor.Apply(settings, true); LoadFromSupervisor();
+                var configured = TestAccounts();
+                if (!supervisor.IsRunning) supervisor.Start();
+                supervisor.DetectRunningClients();
+                var ids = configured.Select(a => a.Id).ToArray();
+                var current = supervisor.Statuses().Where(s => ids.Contains(s.AccountId)).ToArray();
+                if (current.Length != ids.Length || current.Any(s => !s.ProcessId.HasValue))
+                    throw new InvalidOperationException("Every configured account must have a detected running Vanilla client before arming the network-drop test.");
+                int generation = BeginTest("NETWORK-DROP TEST ARMED: briefly disconnect/reconnect internet now...");
+                supervisor.RecordTestLog("Manual network-drop recovery test armed; waiting for a detected disconnect and return to Online.");
+                WaitForOnline(generation, "Manual network-drop recovery test", ids, true, 300000);
+                MessageBox.Show(this, "The test is armed for five minutes. Briefly disconnect your internet connection, wait long enough for Vanilla to drop to its login/reconnect state, then reconnect. 4RTools will report PASS only after it observes the disruption and all configured clients return Online.",
+                    "Manual network-drop test armed", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { FailTestImmediately("Manual network-drop test", ex); }
+        }
+
+        private int BeginTest(string text)
+        {
+            testRunning = true; testGeneration++; testState.Text = text; testState.ForeColor = Color.DarkSlateBlue; return testGeneration;
+        }
+
+        private void WaitForOnline(int generation, string testName, string[] accountIds, bool requireTransition, int timeoutMs)
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                bool sawTransition = !requireTransition;
+                DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+                while (DateTime.UtcNow < deadline)
+                {
+                    var sample = supervisor.Statuses().Where(s => accountIds.Contains(s.AccountId)).ToArray();
+                    if (sample.Any(s => s.Stage != VanillaReconnectStage.Online)) sawTransition = true;
+                    if (sample.Any(s => s.Stage == VanillaReconnectStage.Error || s.Stage == VanillaReconnectStage.NeedsConfiguration))
+                    {
+                        CompleteTest(generation, false, testName + " stopped: " + string.Join(" | ", sample.Select(s => s.Label + ": " + s.Detail)));
+                        return;
+                    }
+                    if (sawTransition && sample.Length == accountIds.Length && sample.All(s => s.Stage == VanillaReconnectStage.Online && s.ProcessId.HasValue))
+                    {
+                        CompleteTest(generation, true, testName + " passed: all configured clients returned Online through the normal recovery path.");
+                        return;
+                    }
+                    Thread.Sleep(500);
+                }
+                CompleteTest(generation, false, testName + " timed out. Check Live recovery status and the reconnect log for the exact stage that stopped progressing.");
+            });
+        }
+
+        private void CompleteTest(int generation, bool success, string message)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { BeginInvoke((MethodInvoker)(() => CompleteTest(generation, success, message))); return; }
+            if (generation != testGeneration) return;
+            testRunning = false; testState.Text = success ? "TEST PASSED" : "TEST FAILED";
+            testState.ForeColor = success ? Color.DarkGreen : Color.DarkRed;
+            MessageBox.Show(this, message, "4RTools Vanilla test", MessageBoxButtons.OK, success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+
+        private void FailTestImmediately(string name, Exception ex)
+        {
+            testRunning = false; testState.Text = "TEST FAILED"; testState.ForeColor = Color.DarkRed;
+            MessageBox.Show(this, ex.Message, name, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
         private void SupervisorUpdated()
