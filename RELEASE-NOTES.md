@@ -1,15 +1,16 @@
-# 4RTools Vanilla 0.6.4
+# 4RTools Vanilla 0.6.5
 
-This remains a focused patch release while the live Vanilla/Gepard relog path is being verified one stage at a time.
+This remains a focused live-debug patch release. The goal is to remove ambiguity from the launcher problem and make selected-account testing behave correctly with Vanilla's supported two-client setup.
 
-- Added an explicit `STOP TEST` control beside the numbered one-client diagnostics. It cancels the active diagnostic worker and stops any supervisor test instead of leaving a background launcher attempt running until timeout.
-- Closing the Vanilla launcher manually during `1 GAME START` now ends that launch/test attempt automatically after a short disappearance grace period instead of continuing to retry for two minutes.
-- Closing the diagnostic Vanilla client is treated as a stopped test rather than a generic failure when the active step observes the process exit.
-- A newer numbered diagnostic now cancels the previous diagnostic worker as well as replacing its UI wait, so manually advancing the client and then pressing the next numbered step no longer leaves the earlier test running behind it.
-- Hardened GAME START targeting again using two independent ordinary Windows UI-input strategies: physical screen-coordinate `SendInput` and a targeted launcher-window mouse message on alternate retries.
-- Added a visible-screen capture fallback when `PrintWindow` cannot capture the skinned/web-style launcher. This lets the existing yellow GAME START detector inspect what is actually visible on screen and use the detected button center when possible.
-- Increased launcher retry spacing so each click has time to start Gepard/Vanilla before another strategy is attempted.
-- Logs now identify which GAME START click strategy and visual-detection path was used, making the next live failure unambiguous.
+- Fixed selected-account diagnostics when another Vanilla client is already running. With `Clients = 2`, selecting Client 2 and pressing `1 GAME START` is now allowed to start a second Vanilla client while Client 1 remains open. A running client only satisfies step 1 for the account to which that PID is actually assigned.
+- Fixed duplicate PID ownership in the reconnect supervisor. The same running `Vanilla MMO.exe` PID can no longer remain assigned to two configured account rows; stale duplicate ownership is cleared before unassigned clients are matched.
+- Kept diagnostics scoped to the selected account. Existing configured clients do not block a selected-account test unless the configured maximum client count is genuinely already reached.
+- Greatly expanded GAME START telemetry. Each attempt now records the launcher PID/HWND, window class/title, visibility, foreground window, launcher client size/origin, normalized and absolute click coordinates, actual cursor position, `WindowFromPoint` hit window, DPI, and the exact `SendInput` down/up return counts and Win32 errors.
+- Targeted fallback clicks now send mouse messages to the actual child/hit window under the GAME START coordinate when that child belongs to the launcher, and log the resolved target plus PostMessage results.
+- Enumerates native child controls on the launcher. If a real child control exposes `GAME START` in its text, 4RTools also attempts a normal `BM_CLICK` and logs whether Windows accepted it.
+- Visual detection no longer collapses failures into the generic `visual detector unavailable` message. Logs now preserve `PrintWindow` status/error, visible-screen capture results, bitmap size, detector pixel counts, candidate rejection details and screen origin.
+- Diagnostic step 1 writes the most recent launcher captures to the persistent Logs directory as `launcher-print-last.png` and `launcher-screen-last.png`. These are intended strictly for diagnosing the launcher UI and can be inspected alongside `reconnect.log` if the launcher still ignores input.
+- `STOP TEST` and automatic stop-on-closed-launcher / stop-on-closed-selected-client behavior remain enabled.
 - Persistent account settings, encrypted passwords, profiles and the GitHub self-updater remain unchanged.
 
-The source changes were validated by the Windows Release build/test/package/portable-smoke pipeline before being committed. GitHub Actions cannot prove the live Vanilla launcher accepts a click, so GAME START still requires the next local test on the user's PC; `COPY LOG` remains the diagnostic source if it does not.
+The implementation is built, tested, packaged and portable-smoke-tested on Windows in GitHub Actions before release. GitHub Actions cannot reproduce the real Vanilla launcher/Gepard desktop, so the enhanced telemetry and launcher captures are specifically intended to make the next local GAME START test conclusive rather than speculative.
