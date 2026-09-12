@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
@@ -43,27 +44,40 @@ namespace _4RTools.Model.Vanilla
         {
             return disposed || generation != Volatile.Read(ref diagnosticGeneration);
         }
+
         public void AssignSingleDiagnosticClient(string accountId)
         {
             lock (gate)
             {
                 Runtime runtime;
                 if (!runtimes.TryGetValue(accountId, out runtime)) throw new ArgumentException("Unknown account.");
-                if (runtime.ProcessId.HasValue)
+
+                if (runtime.ProcessId.HasValue && IsProcessAlive(runtime.ProcessId.Value))
                 {
-                    try
-                    {
-                        using (var existing = Process.GetProcessById(runtime.ProcessId.Value))
-                            if (!existing.HasExited) return;
-                    }
-                    catch { runtime.ProcessId = null; }
+                    int pid = runtime.ProcessId.Value;
+                    string firstOwner = settings.Accounts
+                        .Where(a => runtimes.ContainsKey(a.Id) && runtimes[a.Id].ProcessId == pid)
+                        .Select(a => a.Id)
+                        .FirstOrDefault();
+                    if (string.Equals(firstOwner, accountId, StringComparison.OrdinalIgnoreCase)) return;
+                    runtime.ProcessId = null;
                 }
 
-                var processes = GetVanillaProcesses().OrderBy(p => SafeStart(p)).ToList();
+                var claimedByOthers = new System.Collections.Generic.HashSet<int>(
+                    runtimes.Values
+                        .Where(r => !string.Equals(r.Account.Id, accountId, StringComparison.OrdinalIgnoreCase)
+                            && r.ProcessId.HasValue && IsProcessAlive(r.ProcessId.Value))
+                        .Select(r => r.ProcessId.Value));
+                var processes = GetVanillaProcesses()
+                    .Where(p => !claimedByOthers.Contains(p.Id))
+                    .OrderBy(p => SafeStart(p))
+                    .ToList();
                 try
                 {
-                    if (processes.Count == 0) throw new InvalidOperationException("No running Vanilla client was found for this step test.");
-                    if (processes.Count > 1) throw new InvalidOperationException("This is a one-client diagnostic. Leave only the Vanilla client you want to test running, then press the step button again.");
+                    if (processes.Count == 0)
+                        throw new InvalidOperationException("No unassigned running Vanilla client was found for the selected account.");
+                    if (processes.Count > 1)
+                        throw new InvalidOperationException("Multiple unassigned Vanilla clients are running, so the selected account cannot be identified safely. Use DETECT RUNNING CLIENTS first or leave only the intended unassigned client.");
                     runtime.ProcessId = processes[0].Id;
                     runtime.ResumeSent = true;
                     runtime.ScriptRunning = false;
@@ -72,6 +86,12 @@ namespace _4RTools.Model.Vanilla
                 finally { foreach (var process in processes) process.Dispose(); }
             }
             RaiseUpdated();
+        }
+
+        private static bool IsProcessAlive(int pid)
+        {
+            try { using (var process = Process.GetProcessById(pid)) return !process.HasExited; }
+            catch { return false; }
         }
 
         public void RunDiagnosticStep(string accountId, VanillaReconnectTestStep step)
@@ -110,7 +130,8 @@ namespace _4RTools.Model.Vanilla
                 if (step == VanillaReconnectTestStep.LauncherGameStart)
                 {
                     discoveredPid = VanillaPatcherLauncher.Launch(config.LaunchExecutable, config.LaunchArguments,
-                        message => Log("TEST " + account.Label + ": " + message), () => DiagnosticCancelled(generation));
+                        message => Log("TEST " + account.Label + ": " + message), () => DiagnosticCancelled(generation),
+                        debugDirectory: Path.Combine(baseDirectory, "Logs"));
                     if (!discoveredPid.HasValue) throw new InvalidOperationException("Launcher test did not produce a Vanilla process ID.");
                 }
                 else
@@ -202,7 +223,7 @@ namespace _4RTools.Model.Vanilla
         {
             var box = new GroupBox
             {
-                Text = "Step-by-step one-client diagnostic (select one account row first)",
+                Text = "Step-by-step selected-account diagnostic",
                 Dock = DockStyle.Top,
                 Height = 72,
                 Padding = new Padding(8),
@@ -229,14 +250,14 @@ namespace _4RTools.Model.Vanilla
 
         private void ConfigureStepTestHoverHelp()
         {
-            TipByText(this, "1 GAME START", "If no Vanilla client exists, test GAME START from the launcher. If a client already exists, step 1 is already satisfied.");
-            TipByText(this, "2 PROXY", "If one Vanilla client exists, test only Proxy. If none exists, automatically run from GAME START through Proxy.");
-            TipByText(this, "3 FILL USER/PW", "Existing client: test only credential filling. No client: automatically run all earlier numbered steps first. Credentials are filled without submitting.");
-            TipByText(this, "4 SUBMIT LOGIN", "Existing client: submit only. No client: automatically run all earlier numbered steps first, then submit.");
-            TipByText(this, "5 SERVER", "Existing client: server step only. No client: automatically run all earlier numbered steps first.");
-            TipByText(this, "6 CHARACTER", "Existing client: character step only. No client: automatically run all earlier numbered steps first.");
-            TipByText(this, "7 RESUME HOTKEY", "Existing client: resume hotkey only. No client: automatically run the complete numbered sequence first.");
-            TipByText(this, "STOP TEST", "Cancel the current diagnostic/recovery test immediately. Closing the launcher or the one diagnostic Vanilla client also stops the test automatically.");
+            TipByText(this, "1 GAME START", "Tests the selected account only. If that account already owns a running Vanilla client, step 1 is already satisfied. Otherwise a new client may be started while other configured clients remain open, up to the configured Clients limit.");
+            TipByText(this, "2 PROXY", "Selected account only. If its Vanilla client exists, test only Proxy. If it does not exist and the configured client limit has room, start a new selected-account client and run through Proxy.");
+            TipByText(this, "3 FILL USER/PW", "Selected account only. Existing selected client: fill credentials only. Missing selected client: start it first if the configured client limit has room. Credentials are filled without submitting.");
+            TipByText(this, "4 SUBMIT LOGIN", "Selected account only. Existing selected client: submit only. Missing selected client: start it and run prerequisite steps first.");
+            TipByText(this, "5 SERVER", "Selected account only. Existing selected client: server step only. Missing selected client: start it and run prerequisite steps first.");
+            TipByText(this, "6 CHARACTER", "Selected account only. Existing selected client: character step only. Missing selected client: start it and run prerequisite steps first.");
+            TipByText(this, "7 RESUME HOTKEY", "Selected account only. Existing selected client: send only the resume hotkey. Missing selected client: start it and run the complete prerequisite sequence first.");
+            TipByText(this, "STOP TEST", "Cancel the current diagnostic/recovery test immediately. Closing the launcher or the selected diagnostic Vanilla client also stops the test automatically.");
         }
 
         private void StopCurrentTest()
@@ -258,15 +279,13 @@ namespace _4RTools.Model.Vanilla
             testState.Text = "TEST STOPPED";
             testState.ForeColor = Color.DarkOrange;
         }
+
         private void RunStepTest(VanillaReconnectTestStep step)
         {
             var selected = SelectedAccount();
             if (selected == null) { MessageBox.Show(this, "Select one account row first.", "Step test"); return; }
             try
             {
-                // A newer numbered step deliberately supersedes any previous diagnostic wait.
-                // This is important when the user manually advances the game while step 1 is
-                // still waiting for the launcher result.
                 if (testRunning)
                 {
                     supervisor.CancelDiagnosticTest();
@@ -276,40 +295,51 @@ namespace _4RTools.Model.Vanilla
 
                 ReadTop();
                 supervisor.Apply(settings, true);
-                // Always reset supervisor runtime flags before a manual step, even when the
-                // continuous supervisor itself is already stopped.
                 supervisor.Stop();
+                int detected = supervisor.DetectRunningClients();
 
                 var live = Process.GetProcessesByName("Vanilla MMO");
-                int liveCount;
-                try { liveCount = live.Length; }
+                int[] livePids;
+                try { livePids = live.Where(p => !p.HasExited).OrderBy(p => p.StartTime).Select(p => p.Id).ToArray(); }
                 finally { foreach (var process in live) process.Dispose(); }
-                if (liveCount > 1)
-                    throw new InvalidOperationException("One-client diagnostics found multiple Vanilla clients. Leave only the client you want to test running.");
 
-                if (liveCount == 1)
+                var selectedStatus = supervisor.Statuses().FirstOrDefault(s => string.Equals(s.AccountId, selected.Id, StringComparison.OrdinalIgnoreCase));
+                bool selectedRunning = selectedStatus != null && selectedStatus.ProcessId.HasValue && IsRunningProcess(selectedStatus.ProcessId.Value);
+                supervisor.RecordTestLog("step=" + step + "; selected='" + selected.Label + "'; detected=" + detected
+                    + "; livePIDs=[" + string.Join(",", livePids) + "]; selectedPID="
+                    + (selectedRunning ? selectedStatus.ProcessId.Value.ToString() : "none") + "; maxClients=" + settings.MaxClients + ".");
+
+                if (selectedRunning)
                 {
-                    supervisor.AssignSingleDiagnosticClient(selected.Id);
                     if (step == VanillaReconnectTestStep.LauncherGameStart)
                     {
                         int already = BeginTest("STEP 1 already satisfied for " + selected.Label);
-                        CompleteTest(already, true, "A Vanilla client is already running. GAME START is therefore already satisfied; press the next numbered step to test only that stage.");
+                        CompleteTest(already, true, "The selected account already has a running Vanilla client (PID " + selectedStatus.ProcessId.Value
+                            + "). GAME START is already satisfied for this selected account. Other configured clients do not block testing.");
                         return;
                     }
 
-                    int generation = BeginTest("STEP TEST: " + step + " for " + selected.Label);
+                    int generation = BeginTest("STEP TEST: " + step + " for " + selected.Label + " (PID " + selectedStatus.ProcessId.Value + ")");
                     supervisor.RunDiagnosticStep(selected.Id, step);
                     WaitForDiagnosticStep(generation, selected.Id, step, 45000);
                     return;
                 }
 
-                // No Vanilla window exists: run the numbered diagnostic from the beginning.
-                // This lets every button work independently instead of requiring the user to
-                // remember which earlier test left the client on which screen.
-                int chainGeneration = BeginTest("CHAIN TEST from GAME START through " + step + " for " + selected.Label);
+                if (livePids.Length >= settings.MaxClients)
+                    throw new InvalidOperationException("The selected account has no assigned running Vanilla client and the configured client limit ("
+                        + settings.MaxClients + ") is already reached. Select the account that owns one of the running clients, or stop one before starting another.");
+
+                int chainGeneration = BeginTest("CHAIN TEST for selected " + selected.Label + " from GAME START through " + step
+                    + " (" + livePids.Length + "/" + settings.MaxClients + " other/current clients running)");
                 RunDiagnosticChainFromScratch(chainGeneration, selected.Id, step);
             }
             catch (Exception ex) { FailTestImmediately("Step test " + step, ex); }
+        }
+
+        private static bool IsRunningProcess(int pid)
+        {
+            try { using (var process = Process.GetProcessById(pid)) return !process.HasExited; }
+            catch { return false; }
         }
 
         private void RunDiagnosticChainFromScratch(int generation, string accountId, VanillaReconnectTestStep targetStep)
@@ -333,7 +363,7 @@ namespace _4RTools.Model.Vanilla
                         }
                         if (step == targetStep)
                         {
-                            CompleteTest(generation, true, "Chain test passed through " + targetStep + ". If the screen is correct, continue with the next numbered step.");
+                            CompleteTest(generation, true, "Chain test passed through " + targetStep + ". If the selected account screen is correct, continue with the next numbered step.");
                             return;
                         }
 
@@ -354,8 +384,10 @@ namespace _4RTools.Model.Vanilla
                 }
                 catch (Exception ex)
                 {
-                    if (ex.Message.IndexOf("No running Vanilla client", StringComparison.OrdinalIgnoreCase) >= 0 || ex.Message.IndexOf("Vanilla client exited", StringComparison.OrdinalIgnoreCase) >= 0)
-                        CompleteTestStopped(generation, "Vanilla window/process was closed; test stopped.");
+                    if (ex.Message.IndexOf("No unassigned running Vanilla client", StringComparison.OrdinalIgnoreCase) >= 0
+                        || ex.Message.IndexOf("No running Vanilla client", StringComparison.OrdinalIgnoreCase) >= 0
+                        || ex.Message.IndexOf("Vanilla client exited", StringComparison.OrdinalIgnoreCase) >= 0)
+                        CompleteTestStopped(generation, "Selected Vanilla window/process was closed; test stopped.");
                     else CompleteTest(generation, false, "Chain test failed: " + ex.Message);
                 }
             });
@@ -393,6 +425,7 @@ namespace _4RTools.Model.Vanilla
             failure = "Step " + step + " timed out. Press COPY LOG and paste the reconnect log for analysis.";
             return false;
         }
+
         private void WaitForDiagnosticStep(int generation, string accountId, VanillaReconnectTestStep step, int timeoutMs)
         {
             ThreadPool.QueueUserWorkItem(_ =>
@@ -408,7 +441,7 @@ namespace _4RTools.Model.Vanilla
                     {
                         if (string.Equals(current.Detail, successDetail, StringComparison.Ordinal))
                         {
-                            CompleteTest(generation, true, "Step " + step + " passed. Continue with the next numbered step when the Vanilla screen is ready.");
+                            CompleteTest(generation, true, "Step " + step + " passed for the selected account. Continue with the next numbered step when that Vanilla screen is ready.");
                             return;
                         }
                         if (current.Detail != null && current.Detail.StartsWith(stoppedPrefix, StringComparison.Ordinal))
