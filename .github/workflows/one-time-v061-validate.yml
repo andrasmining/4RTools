@@ -1,5 +1,6 @@
-name: One-time 0.6.1 professionalization validation
-# Validation attempt 8: persistent production data with isolated profile-store tests.
+name: One-time 0.6.1 professionalization integration
+# Final gate: apply the already validated 0.6.1 transformation, rerun the complete
+# build/test/package/smoke suite, then commit the exact validated source to main.
 
 on:
   push:
@@ -8,37 +9,50 @@ on:
       - '.github/workflows/one-time-v061-validate.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  validate:
+  integrate:
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - name: Apply proposed changes
         shell: powershell
         run: |
-          # PowerShell exposes `write` as an alias for Write-Output. The one-time script
-          # intentionally defines a Write helper; remove the inherited alias so the
-          # helper wins command resolution and creates the generated source files.
+          # PowerShell exposes `write` as an alias for Write-Output. The migration
+          # script intentionally defines a Write helper; remove the inherited alias
+          # so that helper creates the generated source files.
           Remove-Item Alias:write -Force -ErrorAction SilentlyContinue
           & .\scripts\one-time-v061-professionalize.ps1
           & .\scripts\one-time-v061-fix.ps1
+
       - name: Restore NuGet packages
         shell: powershell
         run: nuget restore 4RTools.sln -NonInteractive
+
       - name: Build, test, package and smoke-test
         shell: powershell
         run: '& .\scripts\build-release.ps1 -Version 0.6.1'
-      - name: Export validated source changes
+
+      - name: Commit validated 0.6.1 source
         shell: powershell
         run: |
-          git diff --binary -- . > proposed.patch
+          # build-release writes validation-only hashes into the working release notes.
+          # The actual GitHub Release build will create its own hashes from the final
+          # source commit, so do not commit hashes belonging to this pre-commit run.
+          $notesPath = 'RELEASE-NOTES.md'
+          $notes = Get-Content -LiteralPath $notesPath -Raw
+          $notes = [regex]::Replace($notes, '(?s)\r?\n?<!-- BEGIN GENERATED RELEASE CHECKSUMS -->.*?<!-- END GENERATED RELEASE CHECKSUMS -->\r?\n?', "`r`n")
+          [IO.File]::WriteAllText($notesPath, $notes.TrimEnd() + "`r`n", (New-Object Text.UTF8Encoding($false)))
+
           $files = @(
             'AGENTS.md',
             'Program.cs',
@@ -56,12 +70,22 @@ jobs:
             'packaging/README.txt',
             'RELEASE-NOTES.md'
           )
-          foreach ($file in $files) { if (-not (Test-Path -LiteralPath $file)) { throw "Missing exported source file: $file" } }
-          Compress-Archive -Path $files -DestinationPath v061-source.zip -CompressionLevel Optimal
-      - name: Upload validation outputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: v061-professionalization-validated
-          path: |
-            proposed.patch
-            v061-source.zip
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing validated source file: $file" }
+          }
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- $files
+          git rm -- '.github/workflows/one-time-v061-validate.yml' 'scripts/one-time-v061-professionalize.ps1' 'scripts/one-time-v061-fix.ps1'
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'Staged 0.6.1 source failed git diff --check.' }
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'feat: professionalize persistent Vanilla app lifecycle'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not commit validated 0.6.1 source.' }
+            git push origin HEAD:main
+            if ($LASTEXITCODE -ne 0) { throw 'Could not push validated 0.6.1 source.' }
+          }
+          else {
+            throw 'No validated 0.6.1 source changes were staged.'
+          }
