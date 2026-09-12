@@ -159,8 +159,21 @@ namespace _4RTools.Model.Vanilla
     {
         private Control BuildStepTests()
         {
-            var box = new GroupBox { Text = "One-client step tests (select one account row first)", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8) };
-            var row = Flow();
+            var box = new GroupBox
+            {
+                Text = "Step-by-step one-client diagnostic (select one account row first)",
+                Dock = DockStyle.Top,
+                Height = 72,
+                Padding = new Padding(8),
+                AutoSize = false
+            };
+            var row = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = false,
+                WrapContents = true,
+                Padding = new Padding(0, 4, 0, 0)
+            };
             AddButton(row, "1 GAME START", () => RunStepTest(VanillaReconnectTestStep.LauncherGameStart));
             AddButton(row, "2 PROXY", () => RunStepTest(VanillaReconnectTestStep.ProxySelection));
             AddButton(row, "3 FILL USER/PW", () => RunStepTest(VanillaReconnectTestStep.FillCredentials));
@@ -174,7 +187,7 @@ namespace _4RTools.Model.Vanilla
 
         private void ConfigureStepTestHoverHelp()
         {
-            TipByText(this, "1 GAME START", "Selected account only. Close Vanilla first. This opens the launcher, performs one real foreground click on GAME START, and waits for Vanilla/Gepard. It stops there.");
+            TipByText(this, "1 GAME START", "Selected account only. Close Vanilla first. This opens the launcher, visually locates the yellow GAME START button, clicks it with foreground input, and waits for Vanilla/Gepard. It stops there.");
             TipByText(this, "2 PROXY", "Selected account only. With one Vanilla client running, choose the configured proxy on Select Service.");
             TipByText(this, "3 FILL USER/PW", "Selected account only. With one client running at login, explicitly click/replace username FIRST, Tab to password, replace password, and DO NOT submit so you can visually verify both fields.");
             TipByText(this, "4 SUBMIT LOGIN", "Selected account only. Press Enter once to submit the credentials currently visible on the login screen.");

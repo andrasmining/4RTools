@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 using _4RTools.Model;
 using _4RTools.Model.Vanilla;
@@ -14,6 +15,9 @@ namespace _4RTools.Forms
         private VanillaReconnectForm integratedReconnectView;
         private TabControl vanillaWorkspace;
         private TabPage vanillaRecoveryPage, vanillaRulesPage, vanillaDiagnosticsPage, vanillaAboutPage;
+        private TabControl primaryWorkspace;
+        private TabPage primaryVanillaPage, primaryLegacyPage;
+        private Panel legacySurface;
         private readonly Label integratedUpdateStatus = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(12, 8, 0, 0) };
         private bool integratedVanillaReady, updateCheckRunning;
 
@@ -25,6 +29,7 @@ namespace _4RTools.Forms
             VanillaAppData.InitializeAndMigrateLegacy(AppDomain.CurrentDomain.BaseDirectory);
             Text = "4RTools Vanilla " + VanillaUpdater.CurrentVersionText;
             ExpandForIntegratedWorkspace();
+            BuildPrimaryWorkspaceShell();
             BuildIntegratedVanillaWorkspace();
             if (!smokeTest) BeginInvoke((MethodInvoker)(() => CheckForUpdates(true)));
         }
@@ -32,17 +37,50 @@ namespace _4RTools.Forms
         private void ExpandForIntegratedWorkspace()
         {
             Rectangle area = Screen.FromControl(this).WorkingArea;
-            int width = Math.Min(1380, Math.Max(1050, area.Width - 40));
-            int height = Math.Min(940, Math.Max(720, area.Height - 40));
-            MinimumSize = new Size(Math.Min(1080, width), Math.Min(720, height));
+            int width = Math.Min(1500, Math.Max(1180, area.Width - 30));
+            int height = Math.Min(1000, Math.Max(780, area.Height - 30));
+            MinimumSize = new Size(Math.Min(1120, width), Math.Min(740, height));
             Size = new Size(width, height);
             StartPosition = FormStartPosition.CenterScreen;
+            if (!smokeTest) WindowState = FormWindowState.Maximized;
+        }
+
+        private void BuildPrimaryWorkspaceShell()
+        {
+            if (primaryWorkspace != null) return;
+            Control[] legacyControls = Controls.Cast<Control>().Where(control => !(control is MdiClient)).ToArray();
+            legacySurface = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = Color.White,
+                AutoScrollMinSize = new Size(920, 650)
+            };
+            foreach (Control control in legacyControls)
+            {
+                Controls.Remove(control);
+                legacySurface.Controls.Add(control);
+            }
+
+            primaryWorkspace = new TabControl
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Point(18, 7),
+                Font = new Font(Font.FontFamily, 10F, FontStyle.Bold)
+            };
+            primaryVanillaPage = new TabPage("Vanilla") { Padding = new Padding(8), UseVisualStyleBackColor = true };
+            primaryLegacyPage = new TabPage("Original 4RTools") { Padding = new Padding(4), UseVisualStyleBackColor = true };
+            primaryLegacyPage.Controls.Add(legacySurface);
+            primaryWorkspace.TabPages.Add(primaryVanillaPage);
+            primaryWorkspace.TabPages.Add(primaryLegacyPage);
+            primaryWorkspace.SelectedTab = primaryVanillaPage;
+            Controls.Add(primaryWorkspace);
+            primaryWorkspace.BringToFront();
         }
 
         private void BuildIntegratedVanillaWorkspace()
         {
             integratedReconnectSupervisor = new VanillaReconnectSupervisor(VanillaAppData.RootDirectory);
-            tabPageVanilla.Controls.Clear();
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(8), RowCount = 2, ColumnCount = 1 };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -74,7 +112,7 @@ namespace _4RTools.Forms
 
             BuildAboutPage();
             root.Controls.Add(vanillaWorkspace, 0, 1);
-            tabPageVanilla.Controls.Add(root);
+            primaryVanillaPage.Controls.Add(root);
             vanillaWorkspace.SelectedTab = vanillaRecoveryPage;
 
             if (!smokeTest && integratedReconnectSupervisor.Settings.StartWith4RTools && !integratedReconnectSupervisor.IsRunning)

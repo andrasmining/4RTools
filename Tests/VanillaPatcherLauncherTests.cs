@@ -14,6 +14,7 @@ namespace Vanilla.Diagnostics.Tests
         {
             Test("Patcher executable detection is exact and case-insensitive", PatcherDetection);
             Test("Patcher beside Vanilla client is preferred when present", PreferAdjacentPatcher);
+            Test("GAME START visual detector is available", VisualDetectorAvailable);
             Console.WriteLine("Patcher launcher: {0} passed; {1} failed. No processes were started.", passed, failed);
             return failed;
         }
@@ -53,6 +54,13 @@ namespace Vanilla.Diagnostics.Tests
             }
         }
 
+        private static void VisualDetectorAvailable()
+        {
+            MethodInfo method = LauncherType().GetMethod("TryFindGameStart", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert(method != null, "TryFindGameStart helper is missing.");
+            object[] args = { null, 0d, 0d, null };
+            Assert(!(bool)method.Invoke(null, args), "A null launcher image must not produce a GAME START candidate.");
+        }
         private static Type LauncherType()
         {
             Type type = typeof(VanillaReconnectSettings).Assembly.GetType("_4RTools.Model.Vanilla.VanillaPatcherLauncher", true);

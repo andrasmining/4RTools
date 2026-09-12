@@ -94,13 +94,17 @@ namespace _4RTools.Model.Vanilla
             POINT previous;
             bool restore = GetCursorPos(out previous);
             if (!SetCursorPos(target.X, target.Y)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected the mouse position.");
-            Thread.Sleep(80);
+            Thread.Sleep(120);
             Send(new[]
             {
-                new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } } },
+                new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } } }
+            });
+            Thread.Sleep(110);
+            Send(new[]
+            {
                 new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } } }
             });
-            Thread.Sleep(80);
+            Thread.Sleep(130);
             if (restore) SetCursorPos(previous.X, previous.Y);
         }
 
