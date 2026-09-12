@@ -119,6 +119,11 @@ jobs:
           if (-not $program.Contains($oldCondition)) { throw 'Generated primary-tab smoke condition missing.' }
           $program = $program.Replace($oldCondition, 'if (!form.VanillaTabIsFirst)')
           $program = $program.Replace('throw new InvalidOperationException("Vanilla must be the first primary feature tab.");', 'throw new InvalidOperationException("Vanilla must be the first primary feature tab. Actual order: " + form.PrimaryTabOrder);')
+
+          $oldSize = 'if (form.ClientSize.Width < 1100 || form.ClientSize.Height < 700)'
+          $newSize = 'if (form.FormBorderStyle != System.Windows.Forms.FormBorderStyle.Sizable || !form.MaximizeBox || form.MinimumSize.Width < 1000 || form.MinimumSize.Height < 650)'
+          if (-not $program.Contains($oldSize)) { throw 'Generated large-window smoke condition missing.' }
+          $program = $program.Replace($oldSize, $newSize)
           [IO.File]::WriteAllText($programPath, $program, $utf8)
 
       - name: Restore NuGet packages
