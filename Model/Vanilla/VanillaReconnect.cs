@@ -658,7 +658,14 @@ namespace _4RTools.Model.Vanilla
             var desired = settings.Accounts.Where(a => a.Enabled).Take(settings.MaxClients).ToList();
             var desiredIds = new HashSet<string>(desired.Select(a => a.Id), StringComparer.OrdinalIgnoreCase);
             foreach (var runtime in runtimes.Values.Where(r => !desiredIds.Contains(r.Account.Id)))
-                if (runtime.Stage != VanillaReconnectStage.Stopped) SetStage(runtime, VanillaReconnectStage.Stopped, "Account disabled or above client limit");
+            {
+                // A profile disabled while it was recovering must immediately release the
+                // global recovery lease so another configured client cannot be starved.
+                runtime.ScriptRunning = false;
+                runtime.RecoveryOwned = false;
+                if (runtime.Stage != VanillaReconnectStage.Stopped)
+                    SetStage(runtime, VanillaReconnectStage.Stopped, "Account disabled or above client limit");
+            }
 
             var alive = GetVanillaProcesses();
             var aliveIds = new HashSet<int>(alive.Select(p => p.Id));
