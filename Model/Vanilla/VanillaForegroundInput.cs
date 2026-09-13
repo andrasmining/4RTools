@@ -75,19 +75,33 @@ namespace _4RTools.Model.Vanilla
             process = Process.GetProcessById(processId);
             this.preferredWindow = preferredWindow;
             RefreshWindow();
+            VanillaDebugLog.Write("INPUT", "Input session created for PID=" + processId + ", window=" + DescribeWindow(window)
+                + ", preferred=" + DescribeWindow(preferredWindow) + ".");
         }
 
         public void Activate()
         {
             RefreshWindow();
+            IntPtr before = GetForegroundWindow();
             for (int attempt = 0; attempt < 5; attempt++)
             {
                 ShowWindow(window, 9);
                 BringWindowToTop(window);
                 SetForegroundWindow(window);
                 Thread.Sleep(90);
-                if (GetForegroundWindow() == window) return;
+                IntPtr current = GetForegroundWindow();
+                if (current == window)
+                {
+                    VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus OK attempt=" + (attempt + 1)
+                        + ", target=" + DescribeWindow(window) + ", before=" + DescribeWindow(before) + ".");
+                    return;
+                }
+                VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus attempt=" + (attempt + 1)
+                    + " not yet target; foreground=" + DescribeWindow(current) + ", target=" + DescribeWindow(window) + ".");
             }
+            IntPtr after = GetForegroundWindow();
+            VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus FAILED; foreground=" + DescribeWindow(after)
+                + ", target=" + DescribeWindow(window) + ". No input sent.");
             throw new InvalidOperationException("Windows did not give focus to the selected Vanilla window. No input was sent.");
         }
 
@@ -106,9 +120,6 @@ namespace _4RTools.Model.Vanilla
             }
             else
             {
-                // SetForegroundWindow is intentionally best-effort for the launcher. Windows can
-                // deny focus when 4RTools was not the most recent input owner, while a normal
-                // screen-coordinate mouse click can still be delivered to the visible launcher.
                 ShowWindow(window, 9);
                 BringWindowToTop(window);
                 SetForegroundWindow(window);
@@ -149,13 +160,14 @@ namespace _4RTools.Model.Vanilla
 
             IntPtr foregroundAfter = GetForegroundWindow();
             string diagnostics = string.Format(
-                "main={0}; visible={1}; dpi={2}; client={3}x{4}; origin=({5},{6}); targetClient=({7},{8}); targetScreen=({9},{10}); cursorActual=({11},{12}); foregroundBefore={13}; foregroundAfter={14}; hitBefore={15}; hitAtClick={16}; SendInputDown={17}/1 err={18}; SendInputUp={19}/1 err={20}",
-                DescribeWindow(window), IsWindowVisible(window), SafeDpi(window), width, height,
+                "main={0}; visible={1}; dpi={2}; client={3}x{4}; normalized=({5:0.0000},{6:0.0000}); origin=({7},{8}); targetClient=({9},{10}); targetScreen=({11},{12}); cursorActual=({13},{14}); foregroundBefore={15}; foregroundAfter={16}; hitBefore={17}; hitAtClick={18}; SendInputDown={19}/1 err={20}; SendInputUp={21}/1 err={22}",
+                DescribeWindow(window), IsWindowVisible(window), SafeDpi(window), width, height, x, y,
                 origin.X, origin.Y, clientTarget.X, clientTarget.Y, target.X, target.Y, actual.X, actual.Y,
                 DescribeWindow(foregroundBefore), DescribeWindow(foregroundAfter), DescribeWindow(hitBeforeMove), DescribeWindow(hitAtClick),
                 downSent, downError, upSent, upError);
 
             if (restore) SetCursorPos(previous.X, previous.Y);
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CLICK; " + diagnostics);
             if (downSent != 1 || upSent != 1)
                 throw new Win32Exception(downError != 0 ? downError : upError, "Windows SendInput did not send the complete mouse click. " + diagnostics);
             return diagnostics;
@@ -174,9 +186,11 @@ namespace _4RTools.Model.Vanilla
             using (Graphics graphics = Graphics.FromImage(bitmap)) graphics.CopyFromScreen(origin.X, origin.Y, 0, 0, new Size(width, height));
             return bitmap;
         }
+
         public void Press(Keys key)
         {
             Activate();
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " KEY " + key + " press.");
             SendKey(key, false);
             Thread.Sleep(70);
             SendKey(key, true);
@@ -186,6 +200,7 @@ namespace _4RTools.Model.Vanilla
         public void Chord(bool ctrl, bool alt, bool shift, Keys key)
         {
             Activate();
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CHORD " + ChordText(ctrl, alt, shift, key) + " begin.");
             if (ctrl) SendKey(Keys.ControlKey, false);
             if (alt) SendKey(Keys.Menu, false);
             if (shift) SendKey(Keys.ShiftKey, false);
@@ -198,6 +213,8 @@ namespace _4RTools.Model.Vanilla
             if (alt) SendKey(Keys.Menu, true);
             if (ctrl) SendKey(Keys.ControlKey, true);
             Thread.Sleep(90);
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CHORD " + ChordText(ctrl, alt, shift, key) + " complete; foreground="
+                + DescribeWindow(GetForegroundWindow()) + ".");
         }
 
         public void SelectAll() { Chord(true, false, false, Keys.A); }
@@ -213,6 +230,7 @@ namespace _4RTools.Model.Vanilla
         {
             if (text == null) return;
             Activate();
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " typing text length=" + text.Length + " (content intentionally not logged).");
             foreach (char c in text)
             {
                 SendUnicode(c, false);
@@ -267,6 +285,16 @@ namespace _4RTools.Model.Vanilla
             if (window == IntPtr.Zero || !IsWindow(window)) throw new InvalidOperationException("Vanilla client window is not ready.");
         }
 
+        private static string ChordText(bool ctrl, bool alt, bool shift, Keys key)
+        {
+            var text = new StringBuilder();
+            if (ctrl) text.Append("Ctrl+");
+            if (alt) text.Append("Alt+");
+            if (shift) text.Append("Shift+");
+            text.Append(key);
+            return text.ToString();
+        }
+
         private static uint SafeDpi(IntPtr hwnd)
         {
             try { return hwnd == IntPtr.Zero ? 0 : GetDpiForWindow(hwnd); }
@@ -291,6 +319,10 @@ namespace _4RTools.Model.Vanilla
             return text.Replace("\r", " ").Replace("\n", " ").Trim();
         }
 
-        public void Dispose() { process.Dispose(); }
+        public void Dispose()
+        {
+            VanillaDebugLog.Write("INPUT", "Input session disposed for PID=" + process.Id + ".");
+            process.Dispose();
+        }
     }
 }
