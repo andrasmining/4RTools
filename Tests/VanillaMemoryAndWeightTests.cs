@@ -15,6 +15,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Weight fields accept UInt32 memory mappings", WeightMappings);
             failed += Test("Weight alert thresholds enforce re-arm hysteresis", WeightThresholds);
             failed += Test("Enabled weight e-mail alerts require SMTP transport", WeightMailValidation);
+            failed += VanillaUtf8MemoryDiscoveryTests.Run();
             return failed;
         }
 
