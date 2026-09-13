@@ -1,4 +1,3 @@
-using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -7,12 +6,6 @@ namespace _4RTools.Forms
     public partial class Container
     {
         private bool vanillaFleetSizingApplied;
-
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            ApplyVanillaFleetSizing();
-        }
 
         private void ApplyVanillaFleetSizing()
         {
