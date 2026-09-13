@@ -277,6 +277,15 @@ the one-shot resume hotkey; other clients remain queued until that client is
 Online or its attempt fails/backoffs. Existing healthy clients must not be
 disturbed merely because another client is recovering.
 
+While the reconnect supervisor is running, healthy managed Vanilla clients are
+minimized by default and left running. Initial startup and recovery use the same
+serialized policy: finish one client through confirmed gameplay and its one-shot
+resume hotkey, minimize it, then allow the next queued client to start. If one
+client disconnects later, keep every other healthy client minimized and untouched,
+recover only the affected client, and minimize that client again after successful
+return to gameplay. If a healthy supervised client is manually restored/on-screen,
+the supervisor should minimize it again on its next observation cycle.
+
 After gameplay has been confirmed, a detected disconnect/logged-out modal or a
 return to the login/service shell is a recovery event: close that affected
 Vanilla client and recover it through the normal launcher path. If a client exits
