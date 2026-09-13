@@ -86,29 +86,13 @@ namespace _4RTools.Model.Vanilla
                     {
                         int pid = process.ProcessId;
                         if (!enumerated.Add(pid)) continue;
-                        IClientReader existing;
-                        if (readers.TryGetValue(pid, out existing) && existing.IsStopped)
-                        {
-                            // Enumeration alone retains the failed PID. Never repeat its metadata or memory access.
-                            live.Add(pid);
-                            continue;
-                        }
-                        string operation = "Process.HasExited";
-                        try
-                        {
-                            if (process.HasExited) continue;
-                            operation = "Process.MainWindowHandle";
-                            if (process.MainWindowHandle != IntPtr.Zero) live.Add(pid);
-                        }
-                        catch (Exception ex) when (ex is InvalidOperationException || ex is Win32Exception)
-                        {
-                            string error = ex is Win32Exception native
-                                ? observerContext().DescribeNativeFailure(operation, pid, native.NativeErrorCode)
-                                : operation + " failed for PID " + pid + ": " + ex.Message + ". " + observerContext();
-                            existing?.Dispose();
-                            readers[pid] = Reader.Failed(pid, error);
-                            live.Add(pid);
-                        }
+
+                        // Process.GetProcessesByName already gave us a current PID snapshot. Do not
+                        // immediately ask System.Diagnostics for HasExited/MainWindowHandle: those
+                        // convenience properties request process-query/synchronization access and can
+                        // be denied by a protected Vanilla client before our actual VM_READ-only
+                        // observation is even attempted. Let the read-only reader be the authority.
+                        live.Add(pid);
                     }
                 }
                 live = live.Distinct().OrderBy(value => value).ToList();
@@ -132,7 +116,7 @@ namespace _4RTools.Model.Vanilla
             var processes = new List<IProcessMetadata>();
             try
             {
-                // Own every wrapper before querying metadata, including a partially failed enumeration.
+                // Own every wrapper returned by the process enumeration snapshot.
                 foreach (IProcessMetadata process in enumerateProcesses()) processes.Add(process);
                 return processes.ToArray();
             }
@@ -181,6 +165,8 @@ namespace _4RTools.Model.Vanilla
             private readonly Process process;
             public ProcessMetadata(Process process) { this.process = process; }
             public int ProcessId { get { return process.Id; } }
+            // Retained on the internal test abstraction for compatibility. Production polling no
+            // longer calls either property because they require rights unrelated to memory reading.
             public bool HasExited { get { return process.HasExited; } }
             public IntPtr MainWindowHandle { get { return process.MainWindowHandle; } }
             public void Dispose() { process.Dispose(); }
