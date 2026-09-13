@@ -25,6 +25,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Recovery ownership blocks parallel client workflows", SequentialRecoveryGate);
             Test("Supervisor minimizes only healthy gameplay clients", ManagedMinimizePolicy);
             Test("Denied initial observation is marked for fresh-client recovery", ObservationAccessRecoveryPolicy);
+            Test("Restart observation repair can temporarily cover all live configured clients", ObservationRepairAssignmentPolicy);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -142,6 +143,24 @@ namespace Vanilla.Diagnostics.Tests
             ProcessObservationAccessRegistry.RecordInitialOpenFailure(pid, "OpenProcess(read/limited-query, 0x1010)", 87, "wrong error");
             Assert(!ProcessObservationAccessRegistry.RequiresFreshClientProcess(pid, out detail), "Non-access-denied failure was incorrectly recycled.");
             ProcessObservationAccessRegistry.Forget(pid);
+        }
+
+        private static void ObservationRepairAssignmentPolicy()
+        {
+            Assert(VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(2, 2, 2),
+                "Two configured accounts and two denied live clients should be repairable in account/start-order mapping.");
+            Assert(VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(2, 2, 1),
+                "One denied client is identifiable when both configured live clients are present.");
+            Assert(VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(1, 1, 1),
+                "Single configured live client should be repairable.");
+            Assert(!VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(2, 1, 1),
+                "One surviving client among two configured accounts is ambiguous without a readable identity.");
+            Assert(!VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(1, 2, 1),
+                "Two live clients cannot be assigned to one enabled account.");
+            Assert(VanillaObservationRecoveryPolicy.TemporaryClientLimit(1, 2, 2) == 2,
+                "Repair must temporarily widen a saved one-client limit when both configured clients are already running.");
+            Assert(VanillaObservationRecoveryPolicy.TemporaryClientLimit(1, 1, 1) == 1,
+                "Single-client repair unexpectedly widened its limit.");
         }
 
         private static void PersistentDataMigration()
