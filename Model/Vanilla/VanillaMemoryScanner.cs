@@ -432,7 +432,7 @@ namespace _4RTools.Model.Vanilla
 
             private MemoryObservationException Failure(string operation, int error)
             {
-                return new MemoryObservationException(operation + " failed for PID " + ProcessId + ": Win32 " + error + " (" + new Win32Exception(error).Message + ").", error);
+                return new MemoryObservationException(ProcessObservationContext.Current.DescribeNativeFailure(operation, ProcessId, error), error);
             }
             public void Dispose() { handle?.Dispose(); }
         }

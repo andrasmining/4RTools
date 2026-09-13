@@ -190,6 +190,7 @@ namespace _4RTools
                     var report = new
                     {
                         Success = true, Version = VanillaUpdater.CurrentVersionText, PointerBytes = IntPtr.Size,
+                        ObserverContext = ProcessObservationContext.Current.ToString(),
                         MainUi = "Container", OriginalFeatureForms = featureForms,
                         FeatureForms = originalForms,
                         AutomationEnabled = form.AutomationEnabled,

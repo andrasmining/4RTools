@@ -229,6 +229,7 @@
     <Compile Include="Forms\VanillaAutomationForm.cs" />
     <Compile Include="Forms\VanillaRulesEditor.cs" />
     <Compile Include="Utils\ReadOnlyProcessMemory.cs" />
+    <Compile Include="Utils\ProcessObservationContext.cs" />
     <Compile Include="Forms\AddServerForm.Designer.cs">
       <DependentUpon>AddServerForm.cs</DependentUpon>
     </Compile>

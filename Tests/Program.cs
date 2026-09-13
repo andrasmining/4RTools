@@ -64,6 +64,8 @@ namespace Vanilla.Diagnostics.Tests
             failed += VanillaReconnectRegressionTests.Run();
             failed += VanillaTemporaryActionTests.Run();
             failed += VanillaMemoryScannerTests.Run();
+            failed += ProcessObservationContextTests.Run();
+            failed += VanillaFleetMonitorTests.Run();
 
             Console.WriteLine("Core diagnostics: {0} passed. Total failures across all suites: {1}. All tests used offline data.", passed, failed);
             return failed == 0 ? 0 : 1;

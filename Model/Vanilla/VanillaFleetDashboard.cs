@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -45,16 +46,29 @@ namespace _4RTools.Model.Vanilla
     {
         private readonly string baseDirectory;
         private readonly Stopwatch clock = Stopwatch.StartNew();
-        private readonly Dictionary<int, Reader> readers = new Dictionary<int, Reader>();
+        private readonly Dictionary<int, IClientReader> readers = new Dictionary<int, IClientReader>();
+        private readonly Func<IEnumerable<IProcessMetadata>> enumerateProcesses;
+        private readonly Func<int, IClientReader> createReader;
+        private readonly Func<ProcessObservationContext> observerContext;
         private readonly object gate = new object();
+        private MemoryObservationException enumerationFailure;
         private bool disposed;
         private int pollCount;
 
         internal int PollCount { get { lock (gate) return pollCount; } }
 
         public VanillaFleetMonitor(string baseDirectory)
+            : this(baseDirectory, EnumerateProcesses, null, () => ProcessObservationContext.Current)
+        {
+        }
+
+        internal VanillaFleetMonitor(string baseDirectory, Func<IEnumerable<IProcessMetadata>> enumerateProcesses,
+            Func<int, IClientReader> createReader, Func<ProcessObservationContext> observerContext)
         {
             this.baseDirectory = Path.GetFullPath(baseDirectory ?? throw new ArgumentNullException(nameof(baseDirectory)));
+            this.enumerateProcesses = enumerateProcesses ?? throw new ArgumentNullException(nameof(enumerateProcesses));
+            this.createReader = createReader ?? (pid => new Reader(this.baseDirectory, pid));
+            this.observerContext = observerContext ?? throw new ArgumentNullException(nameof(observerContext));
         }
 
         public IReadOnlyList<VanillaFleetClientInfo> Poll()
@@ -63,21 +77,42 @@ namespace _4RTools.Model.Vanilla
             {
                 if (disposed) return new VanillaFleetClientInfo[0];
                 pollCount++;
+                if (enumerationFailure != null) throw enumerationFailure;
                 var live = new List<int>();
-                foreach (Process process in Process.GetProcessesByName("Vanilla MMO"))
+                var enumerated = new HashSet<int>();
+                foreach (IProcessMetadata process in EnumerateOrStop())
                 {
                     using (process)
                     {
+                        int pid = process.ProcessId;
+                        if (!enumerated.Add(pid)) continue;
+                        IClientReader existing;
+                        if (readers.TryGetValue(pid, out existing) && existing.IsStopped)
+                        {
+                            // Enumeration alone retains the failed PID. Never repeat its metadata or memory access.
+                            live.Add(pid);
+                            continue;
+                        }
+                        string operation = "Process.HasExited";
                         try
                         {
-                            if (!process.HasExited && process.MainWindowHandle != IntPtr.Zero) live.Add(process.Id);
+                            if (process.HasExited) continue;
+                            operation = "Process.MainWindowHandle";
+                            if (process.MainWindowHandle != IntPtr.Zero) live.Add(pid);
                         }
-                        catch (InvalidOperationException) { }
-                        catch (System.ComponentModel.Win32Exception) { }
+                        catch (Exception ex) when (ex is InvalidOperationException || ex is Win32Exception)
+                        {
+                            string error = ex is Win32Exception native
+                                ? observerContext().DescribeNativeFailure(operation, pid, native.NativeErrorCode)
+                                : operation + " failed for PID " + pid + ": " + ex.Message + ". " + observerContext();
+                            existing?.Dispose();
+                            readers[pid] = Reader.Failed(pid, error);
+                            live.Add(pid);
+                        }
                     }
                 }
                 live = live.Distinct().OrderBy(value => value).ToList();
-                foreach (int dead in readers.Keys.Where(pid => !live.Contains(pid)).ToArray())
+                foreach (int dead in readers.Keys.Where(pid => !enumerated.Contains(pid)).ToArray())
                 {
                     readers[dead].Dispose();
                     readers.Remove(dead);
@@ -85,16 +120,70 @@ namespace _4RTools.Model.Vanilla
                 foreach (int pid in live)
                 {
                     if (readers.ContainsKey(pid)) continue;
-                    try { readers.Add(pid, new Reader(baseDirectory, pid)); }
+                    try { readers.Add(pid, createReader(pid)); }
                     catch (Exception ex) { readers.Add(pid, Reader.Failed(pid, ex.Message)); }
                 }
                 return live.Select(pid => readers[pid].Poll(clock.Elapsed)).ToArray();
             }
         }
 
+        private IProcessMetadata[] EnumerateOrStop()
+        {
+            var processes = new List<IProcessMetadata>();
+            try
+            {
+                // Own every wrapper before querying metadata, including a partially failed enumeration.
+                foreach (IProcessMetadata process in enumerateProcesses()) processes.Add(process);
+                return processes.ToArray();
+            }
+            catch (Exception ex)
+            {
+                foreach (IProcessMetadata process in processes) process.Dispose();
+                foreach (IClientReader reader in readers.Values) reader.Dispose();
+                readers.Clear();
+                const string operation = "Process.GetProcessesByName(Vanilla MMO)";
+                int? nativeCode = (ex as Win32Exception)?.NativeErrorCode
+                    ?? (ex as MemoryObservationException)?.NativeErrorCode;
+                string details = nativeCode.HasValue
+                    ? "Win32 " + nativeCode.Value + " (" + new Win32Exception(nativeCode.Value).Message + ")"
+                    : ex.Message;
+                enumerationFailure = new MemoryObservationException(operation + " failed: " + details + ". "
+                    + observerContext() + " Fleet observation stopped; no further enumeration will be attempted.", nativeCode);
+                throw enumerationFailure;
+            }
+        }
+
         public IReadOnlyList<int> LiveProcessIds()
         {
             return Poll().Select(item => item.ProcessId).ToArray();
+        }
+
+        internal interface IProcessMetadata : IDisposable
+        {
+            int ProcessId { get; }
+            bool HasExited { get; }
+            IntPtr MainWindowHandle { get; }
+        }
+
+        internal interface IClientReader : IDisposable
+        {
+            bool IsStopped { get; }
+            VanillaFleetClientInfo Poll(TimeSpan now);
+        }
+
+        private static IEnumerable<IProcessMetadata> EnumerateProcesses()
+        {
+            return Process.GetProcessesByName("Vanilla MMO").Select(process => new ProcessMetadata(process)).ToArray();
+        }
+
+        private sealed class ProcessMetadata : IProcessMetadata
+        {
+            private readonly Process process;
+            public ProcessMetadata(Process process) { this.process = process; }
+            public int ProcessId { get { return process.Id; } }
+            public bool HasExited { get { return process.HasExited; } }
+            public IntPtr MainWindowHandle { get { return process.MainWindowHandle; } }
+            public void Dispose() { process.Dispose(); }
         }
 
         public void Dispose()
@@ -109,22 +198,24 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        private sealed class Reader : IDisposable
+        private sealed class Reader : IClientReader
         {
             private readonly int processId;
             private readonly MemoryStateSource source;
             private readonly VanillaStateAdapter adapter;
             private readonly string fingerprint, build;
-            private readonly string startupError;
+            private string stoppedError;
             private bool disposed;
             private VanillaFleetClientInfo last;
+
+            public bool IsStopped { get { return disposed || stoppedError != null || source?.IsStopped == true; } }
 
             public static Reader Failed(int processId, string error) { return new Reader(processId, error); }
 
             private Reader(int processId, string error)
             {
                 this.processId = processId;
-                startupError = error;
+                stoppedError = error;
             }
 
             public Reader(string baseDirectory, int processId)
@@ -152,7 +243,7 @@ namespace _4RTools.Model.Vanilla
             public VanillaFleetClientInfo Poll(TimeSpan now)
             {
                 if (disposed) return last ?? ErrorInfo("Observation closed.");
-                if (startupError != null) return last = ErrorInfo(startupError);
+                if (stoppedError != null) return last = ErrorInfo(stoppedError);
                 try
                 {
                     var snapshot = source.Poll(DateTimeOffset.UtcNow);
@@ -160,10 +251,19 @@ namespace _4RTools.Model.Vanilla
                     snapshot.BuildProfile = build;
                     var observation = adapter.Observe(snapshot, now);
                     if (source.IsStopped || snapshot.Error != null)
-                        return last = ErrorInfo(snapshot.Error ?? source.Status);
+                    {
+                        stoppedError = snapshot.Error ?? source.Status;
+                        source.Dispose();
+                        return last = ErrorInfo(stoppedError);
+                    }
                     return last = BuildInfo(snapshot, observation);
                 }
-                catch (Exception ex) { return last = ErrorInfo(ex.Message); }
+                catch (Exception ex)
+                {
+                    stoppedError = ex.Message;
+                    source.Dispose();
+                    return last = ErrorInfo(stoppedError);
+                }
             }
 
             private VanillaFleetClientInfo BuildInfo(VanillaClientState state, RuleObservation observation)
@@ -281,11 +381,15 @@ namespace _4RTools.Model.Vanilla
             try { clients = monitor.Poll(); }
             catch (Exception ex)
             {
-                clients = new VanillaFleetClientInfo[0];
+                foreach (ClientCard card in cards) card.ShowObservationUnavailable(ex.Message);
                 extra.Text = "Live memory observation error: " + ex.Message;
+                return;
             }
             for (int i = 0; i < cards.Length; i++) cards[i].ShowClient(i < clients.Count ? clients[i] : null);
-            if (clients.Count <= 2) extra.Text = clients.Count == 0
+            int unavailable = clients.Count(client => client.Error != null);
+            if (unavailable > 0) extra.Text = clients.Count + " Vanilla processes detected; observation stopped for " + unavailable
+                + ". Hover over a client observation error for details.";
+            else if (clients.Count <= 2) extra.Text = clients.Count == 0
                 ? "No Vanilla clients running. Recovery & relog can start the configured clients."
                 : "Live values are read from the selected Vanilla build's read-only memory map. Location/activity appear automatically when those mappings are verified.";
             else extra.Text = clients.Count + " Vanilla processes detected; the dashboard shows the first two only.";
@@ -307,6 +411,7 @@ namespace _4RTools.Model.Vanilla
             private readonly ProgressBar hpBar = new ProgressBar { Height = 8, Dock = DockStyle.Top, Maximum = 100 };
             private readonly ProgressBar spBar = new ProgressBar { Height = 8, Dock = DockStyle.Top, Maximum = 100 };
             private readonly string emptyTitle;
+            private readonly ToolTip errorTip = new ToolTip { AutoPopDelay = 30000 };
 
             public ClientCard(string emptyTitle)
             {
@@ -328,6 +433,8 @@ namespace _4RTools.Model.Vanilla
 
             public void ShowClient(VanillaFleetClientInfo info)
             {
+                errorTip.SetToolTip(this, info?.Error);
+                errorTip.SetToolTip(activity, info?.Error);
                 if (info == null)
                 {
                     Text = emptyTitle;
@@ -347,6 +454,21 @@ namespace _4RTools.Model.Vanilla
                 spBar.Value = Clamp(info.SpPercent);
                 location.Text = "Location: " + info.Location;
                 activity.Text = info.Error == null ? "Activity: " + info.Activity : "Observation: " + info.Error;
+            }
+
+            public void ShowObservationUnavailable(string error)
+            {
+                ShowClient(null);
+                title.Text = "Status unavailable";
+                activity.Text = "Observation: " + error;
+                errorTip.SetToolTip(this, error);
+                errorTip.SetToolTip(activity, error);
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing) errorTip.Dispose();
+                base.Dispose(disposing);
             }
 
             private static string Vital(uint? current, uint? maximum)

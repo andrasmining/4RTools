@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -53,7 +52,7 @@ namespace _4RTools.Utils
             try
             {
                 handle = Native.OpenProcess(ProcessVmRead | ProcessQueryLimitedInformation, false, processId);
-                if (handle == null || handle.IsInvalid) throw NativeFailure("OpenProcess", Marshal.GetLastWin32Error());
+                if (handle == null || handle.IsInvalid) throw NativeFailure("OpenProcess(read/limited-query, 0x1010)", Marshal.GetLastWin32Error());
                 bool wow64;
                 if (!Native.IsWow64Process(handle, out wow64)) throw NativeFailure("IsWow64Process", Marshal.GetLastWin32Error());
                 PointerSize = Environment.Is64BitOperatingSystem && !wow64 ? 8 : 4;
@@ -145,7 +144,8 @@ namespace _4RTools.Utils
 
         private MemoryObservationException NativeFailure(string operation, int code)
         {
-            return Stop(operation + " failed for PID " + ProcessId + ": Win32 " + code + " (" + new Win32Exception(code).Message + "). Session stopped; no retry or alternate access attempted.", code);
+            return Stop(ProcessObservationContext.Current.DescribeNativeFailure(operation, ProcessId, code)
+                + " Session stopped; no retry or alternate access attempted.", code);
         }
 
         private MemoryObservationException Stop(string error, int? code = null)
