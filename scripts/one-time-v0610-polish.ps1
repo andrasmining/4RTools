@@ -30,6 +30,8 @@ $new = @'
 '@
 if (-not $text.Contains($old)) { throw 'Temporary action key selector anchor not found.' }
 $text = $text.Replace($old,$new)
+if (-not $text.Contains('private void Guard(Action action)')) { throw 'Temporary action Guard anchor not found.' }
+$text = $text.Replace('private void Guard(Action action)', 'private void Guard(System.Action action)')
 WriteText $path $text
 
 $agents = 'AGENTS.md'
@@ -58,4 +60,4 @@ if (-not $text.Contains($old)) { throw 'AGENTS product direction anchor not foun
 $text = $text.Replace($old,$new)
 WriteText $agents $text
 
-Write-Host '0.6.10 workspace compile fix and polish applied.'
+Write-Host '0.6.10 workspace compile fixes and polish applied.'
