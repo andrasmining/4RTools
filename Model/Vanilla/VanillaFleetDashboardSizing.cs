@@ -1,11 +1,13 @@
 using System.Drawing;
 using System.Windows.Forms;
+using _4RTools.Model.Vanilla;
 
 namespace _4RTools.Forms
 {
     public partial class Container
     {
         private bool vanillaFleetSizingApplied;
+        private Timer vanillaMemoryAccessDiagnosticTimer;
 
         private void ApplyVanillaFleetSizing()
         {
@@ -24,6 +26,22 @@ namespace _4RTools.Forms
             }
 
             ConfigureFleetLabels(integratedFleetDashboard);
+            StartMemoryAccessDiagnostics();
+        }
+
+        private void StartMemoryAccessDiagnostics()
+        {
+            if (smokeTest || vanillaMemoryAccessDiagnosticTimer != null) return;
+            vanillaMemoryAccessDiagnosticTimer = new Timer { Interval = 2000 };
+            vanillaMemoryAccessDiagnosticTimer.Tick += (s, e) => VanillaMemoryAccessDiagnostics.CaptureCurrentClients();
+            vanillaMemoryAccessDiagnosticTimer.Start();
+            VanillaMemoryAccessDiagnostics.CaptureCurrentClients();
+            FormClosed += (s, e) =>
+            {
+                try { vanillaMemoryAccessDiagnosticTimer?.Stop(); } catch { }
+                try { vanillaMemoryAccessDiagnosticTimer?.Dispose(); } catch { }
+                vanillaMemoryAccessDiagnosticTimer = null;
+            };
         }
 
         private static void ConfigureFleetLabels(Control root)
