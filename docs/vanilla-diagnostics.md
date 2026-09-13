@@ -1,5 +1,10 @@
 # Vanilla diagnostics engineering record
 
+For the current mapping inventory, the two-client access result, and the
+discovery/validation fixes from 2026-09-13, see the
+[latest discovery session record](vanilla-discovery-2026-09-13.md). The sections
+below retain historical results and do not imply those reads succeeded again.
+
 ## Current companion validation
 
 The companion now includes the production rule engine, UI, portable profiles,
