@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using _4RTools.Model;
-using _4RTools.Model.Vanilla;
+using _4RTools.Model.Vanilla.Automation;
 
 namespace _4RTools.Forms
 {
@@ -14,12 +14,16 @@ namespace _4RTools.Forms
         private VanillaReconnectSupervisor integratedReconnectSupervisor;
         private VanillaReconnectForm integratedReconnectView;
         private TabControl vanillaWorkspace;
-        private TabPage vanillaRecoveryPage, vanillaRulesPage, vanillaDiagnosticsPage, vanillaAboutPage;
+        private TabPage vanillaRecoveryPage, vanillaRulesPage, vanillaTemporaryPage, vanillaDiagnosticsPage, vanillaAboutPage;
         private TabControl primaryWorkspace;
         private TabPage primaryVanillaPage, primaryLegacyPage;
         private Panel legacySurface;
         private readonly Label integratedUpdateStatus = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(12, 8, 0, 0) };
         private bool integratedVanillaReady, updateCheckRunning;
+        private VanillaFleetMonitor integratedFleetMonitor;
+        private VanillaFleetDashboardPanel integratedFleetDashboard;
+        private VanillaAutomationSession integratedAutomationSession;
+        private VanillaTemporaryActionsPanel integratedTemporaryActions;
 
         protected override void OnLoad(EventArgs e)
         {
@@ -37,8 +41,8 @@ namespace _4RTools.Forms
         private void ExpandForIntegratedWorkspace()
         {
             Rectangle area = Screen.FromControl(this).WorkingArea;
-            int width = Math.Min(1500, Math.Max(1180, area.Width - 30));
-            int height = Math.Min(1000, Math.Max(780, area.Height - 30));
+            int width = Math.Min(1600, Math.Max(1180, area.Width - 30));
+            int height = Math.Min(1050, Math.Max(780, area.Height - 30));
             MinimumSize = new Size(Math.Min(1120, width), Math.Min(740, height));
             Size = new Size(width, height);
             StartPosition = FormStartPosition.CenterScreen;
@@ -81,27 +85,35 @@ namespace _4RTools.Forms
         private void BuildIntegratedVanillaWorkspace()
         {
             integratedReconnectSupervisor = new VanillaReconnectSupervisor(VanillaAppData.RootDirectory);
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(8), RowCount = 2, ColumnCount = 1 };
+            integratedFleetMonitor = new VanillaFleetMonitor(AppDomain.CurrentDomain.BaseDirectory);
+
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(8), RowCount = 3, ColumnCount = 1 };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 155));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             var header = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(0, 0, 0, 6) };
             header.Controls.Add(new Label { Text = "Vanilla workspace", Font = new Font(Font.FontFamily, 11F, FontStyle.Bold), AutoSize = true, Margin = new Padding(4, 8, 14, 0) });
             AddIntegratedButton(header, "OPEN DATA FOLDER", OpenDataFolder);
             AddIntegratedButton(header, "CHECK FOR UPDATES", () => CheckForUpdates(false));
-            integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText + " - settings persist in Windows user data.";
+            integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText + " - live state is read from Vanilla memory; settings persist in Windows user data.";
             header.Controls.Add(integratedUpdateStatus);
             root.Controls.Add(header, 0, 0);
 
+            integratedFleetDashboard = new VanillaFleetDashboardPanel(integratedFleetMonitor) { Dock = DockStyle.Fill };
+            root.Controls.Add(integratedFleetDashboard, 0, 1);
+
             vanillaWorkspace = new TabControl { Dock = DockStyle.Fill, Padding = new Point(16, 7), Font = new Font(Font.FontFamily, 9F, FontStyle.Regular) };
             vanillaRecoveryPage = new TabPage("Recovery & relog") { Padding = new Padding(6) };
-            vanillaRulesPage = new TabPage("Automation rules") { Padding = new Padding(6) };
+            vanillaRulesPage = new TabPage("Automation") { Padding = new Padding(6) };
+            vanillaTemporaryPage = new TabPage("Temporary actions") { Padding = new Padding(6) };
             vanillaDiagnosticsPage = new TabPage("Diagnostics") { Padding = new Padding(6) };
             vanillaAboutPage = new TabPage("Data & updates") { Padding = new Padding(12) };
-            vanillaWorkspace.TabPages.AddRange(new[] { vanillaRecoveryPage, vanillaRulesPage, vanillaDiagnosticsPage, vanillaAboutPage });
+            vanillaWorkspace.TabPages.AddRange(new[] { vanillaRecoveryPage, vanillaRulesPage, vanillaTemporaryPage, vanillaDiagnosticsPage, vanillaAboutPage });
             vanillaWorkspace.SelectedIndexChanged += (s, e) =>
             {
                 if (vanillaWorkspace.SelectedTab == vanillaRulesPage) EnsureAutomationEmbedded();
+                if (vanillaWorkspace.SelectedTab == vanillaTemporaryPage) EnsureTemporaryActionsEmbedded();
                 if (vanillaWorkspace.SelectedTab == vanillaDiagnosticsPage) EnsureDiagnosticsEmbedded();
             };
 
@@ -111,7 +123,7 @@ namespace _4RTools.Forms
             integratedReconnectView.Show();
 
             BuildAboutPage();
-            root.Controls.Add(vanillaWorkspace, 0, 1);
+            root.Controls.Add(vanillaWorkspace, 0, 2);
             primaryVanillaPage.Controls.Add(root);
             vanillaWorkspace.SelectedTab = vanillaRecoveryPage;
 
@@ -122,12 +134,25 @@ namespace _4RTools.Forms
         private void EnsureAutomationEmbedded()
         {
             if (vanillaExtras != null && !vanillaExtras.IsDisposed) return;
-            vanillaExtras = new VanillaAutomationForm(vanillaSession, () => { vanillaWorkspace.SelectedTab = vanillaDiagnosticsPage; EnsureDiagnosticsEmbedded(); }, hosted: true, ownsSession: false);
+            integratedAutomationSession?.Dispose();
+            integratedAutomationSession = new VanillaAutomationSession(AppDomain.CurrentDomain.BaseDirectory);
+            integratedAutomationSession.EnableGuard = () => toggleForm?.IsOn == true
+                ? "Switch the original 4RTools automation OFF before starting Vanilla automation." : null;
+            vanillaExtras = new VanillaAutomationForm(integratedAutomationSession,
+                () => { vanillaWorkspace.SelectedTab = vanillaDiagnosticsPage; EnsureDiagnosticsEmbedded(); }, hosted: true, ownsSession: true);
             vanillaExtras.EmergencyStopRequested = () => ForceOff("Emergency stop");
             vanillaExtras.EmergencyKeyAllowed = key => key != (int)(Keys)Enum.Parse(typeof(Keys), ProfileSingleton.GetCurrent().UserPreferences.toggleStateKey);
             PrepareEmbeddedForm(vanillaExtras);
             vanillaRulesPage.Controls.Add(vanillaExtras);
             vanillaExtras.Show();
+        }
+
+        private void EnsureTemporaryActionsEmbedded()
+        {
+            if (integratedTemporaryActions != null && !integratedTemporaryActions.IsDisposed) return;
+            integratedTemporaryActions = new VanillaTemporaryActionsPanel(AppDomain.CurrentDomain.BaseDirectory);
+            vanillaTemporaryPage.Controls.Add(integratedTemporaryActions);
+            integratedTemporaryActions.BringToFront();
         }
 
         private void EnsureDiagnosticsEmbedded()
@@ -161,7 +186,7 @@ namespace _4RTools.Forms
             panel.Controls.Add(new Label
             {
                 AutoSize = true, MaximumSize = new Size(1200, 0), Margin = new Padding(3, 12, 3, 10), ForeColor = Color.DimGray,
-                Text = "The application folder no longer stores user profiles or recovery credentials. Compatible data is migrated from older releases into this persistent Windows-user data location. Passwords remain Windows-DPAPI protected for this Windows user/PC."
+                Text = "The Vanilla workspace is the primary product surface. Up to two running clients are observed read-only at the top at all times. Original 4RTools remains in the secondary legacy tab. Compatible data is migrated into this persistent Windows-user data location. Passwords remain Windows-DPAPI protected for this Windows user/PC."
             });
             var buttons = new FlowLayoutPanel { AutoSize = true };
             AddIntegratedButton(buttons, "OPEN DATA FOLDER", OpenDataFolder);
@@ -229,6 +254,14 @@ namespace _4RTools.Forms
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            try { integratedTemporaryActions?.Dispose(); } catch { }
+            integratedTemporaryActions = null;
+            try { integratedFleetDashboard?.Dispose(); } catch { }
+            integratedFleetDashboard = null;
+            try { integratedFleetMonitor?.Dispose(); } catch { }
+            integratedFleetMonitor = null;
+            try { integratedAutomationSession?.Dispose(); } catch { }
+            integratedAutomationSession = null;
             try { integratedReconnectSupervisor?.Dispose(); } catch { }
             integratedReconnectSupervisor = null;
             base.OnFormClosed(e);
