@@ -22,6 +22,7 @@ namespace _4RTools.Forms
             ApplyVanillaFleetSizing();
             IntegrateMemoryDiscovery();
             IntegrateWeightAlerts();
+            InstallGlobalDebugUi();
         }
 
         private void IntegrateMemoryDiscovery()
