@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using _4RTools.Model.Vanilla;
 using _4RTools.Utils;
 
 namespace _4RTools.Utils
@@ -89,6 +90,12 @@ namespace _4RTools.Model.Vanilla
         internal static bool ShouldRecycle(bool supervisorRunning, bool autoRecover, bool scriptRunning, bool readOnlyOpenDenied)
         {
             return supervisorRunning && autoRecover && !scriptRunning && readOnlyOpenDenied;
+        }
+
+        internal static bool HasUnambiguousStartupAssignment(int managedAccountCount, int deniedProcessCount)
+        {
+            if (managedAccountCount <= 0 || deniedProcessCount <= 0 || deniedProcessCount > managedAccountCount) return false;
+            return managedAccountCount == 1 || managedAccountCount == deniedProcessCount;
         }
     }
 
@@ -214,7 +221,15 @@ namespace _4RTools.Forms
 
             VanillaReconnectSettings reconnect = integratedReconnectSupervisor.Settings;
             var enabled = reconnect.Accounts.Where(a => a.Enabled).Take(reconnect.MaxClients).ToArray();
-            bool credentialsAvailable = enabled.Any(a => !string.IsNullOrWhiteSpace(a.UserName) && !string.IsNullOrWhiteSpace(a.ProtectedPassword));
+            if (!VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(enabled.Length, deniedPids.Length))
+            {
+                integratedReconnectSupervisor.RecordSupervisorLog(
+                    "Read-only observation is unavailable for pre-existing Vanilla PID(s) " + string.Join(", ", deniedPids)
+                    + ". Verified offsets are still loaded. Automatic one-shot recycle was not started because the surviving PID-to-account assignment is ambiguous.");
+                return;
+            }
+
+            bool credentialsAvailable = enabled.All(a => !string.IsNullOrWhiteSpace(a.UserName) && !string.IsNullOrWhiteSpace(a.ProtectedPassword));
             if (!reconnect.AutoRecover || !credentialsAvailable || string.IsNullOrWhiteSpace(reconnect.LaunchExecutable)
                 || !File.Exists(reconnect.LaunchExecutable))
             {
@@ -236,6 +251,14 @@ namespace _4RTools.Forms
                 foreach (VanillaReconnectStatus status in integratedReconnectSupervisor.Statuses())
                     if (status.ProcessId.HasValue && deniedPids.Contains(status.ProcessId.Value))
                         startupObservationRepairAccounts.Add(status.AccountId);
+
+                if (startupObservationRepairAccounts.Count == 0)
+                {
+                    startupObservationRepairOwnsSupervisor = false;
+                    integratedReconnectSupervisor.RecordSupervisorLog(
+                        "One-time fresh-observation repair could not match the denied PID to a managed account. Supervisor returned to its previous stopped state.");
+                    integratedReconnectSupervisor.Stop();
+                }
             }
             finally
             {
