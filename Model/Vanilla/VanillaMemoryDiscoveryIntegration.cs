@@ -21,7 +21,6 @@ namespace _4RTools.Forms
             base.OnShown(e);
             IntegrateMemoryDiscovery();
             IntegrateWeightAlerts();
-            HookObservationRecovery();
         }
 
         private void IntegrateMemoryDiscovery()
