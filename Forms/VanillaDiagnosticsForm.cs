@@ -22,7 +22,15 @@ namespace _4RTools.Forms
         private readonly Label connection = new Label { AutoSize = true, MaximumSize = new Size(1050, 0) };
         private readonly Label identity = new Label { AutoSize = true, MaximumSize = new Size(1050, 0) };
         private readonly TextBox note = new TextBox { Width = 300 };
-        private readonly DataGridView values = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill };
+        private readonly StableDataGridView values = new StableDataGridView
+        {
+            Dock = DockStyle.Fill,
+            ReadOnly = true,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            RowHeadersVisible = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+        };
         private readonly TextBox events = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
         private IStateSource source;
         private VanillaClientState latest;
@@ -54,7 +62,7 @@ namespace _4RTools.Forms
             AddButton(controls, "Pause / resume", () =>
             {
                 if (source == null || source.IsStopped) return;
-                if (timer.Enabled) { timer.Stop(); connection.Text = "PAUSED — displayed observations are stale; no automation is attached."; Log("Polling paused."); }
+                if (timer.Enabled) { timer.Stop(); SetLabelText(connection, "PAUSED — displayed observations are stale; no automation is attached."); Log("Polling paused."); }
                 else { BeginPolling(); Log("Polling resumed."); }
             });
             controls.Controls.Add(new Label { Text = "Poll (ms)", AutoSize = true, Padding = new Padding(0, 6, 0, 0) });
@@ -112,7 +120,7 @@ namespace _4RTools.Forms
             button.Click += (s, e) =>
             {
                 try { action(); }
-                catch (Exception ex) { connection.Text = ex.Message; Log(ex.ToString()); }
+                catch (Exception ex) { SetLabelText(connection, ex.Message); Log(ex.ToString()); }
             };
             parent.Controls.Add(button);
         }
@@ -172,20 +180,13 @@ namespace _4RTools.Forms
                 latest.Fingerprint = executable?.Sha256;
                 latest.BuildProfile = buildProfile;
                 adapter?.Observe(latest, TimeSpan.Zero);
-                connection.Text = (latest.IsDemo ? "OFFLINE DEMO — simulated values. " : "LIVE READ-ONLY — see each field's validation. ") + source.Status;
-                identity.Text = string.Format(CultureInfo.InvariantCulture, "{0} | PID: {1} | module: {2} | target pointer bytes: {3} | profile: {4}",
+                SetLabelText(connection, (latest.IsDemo ? "OFFLINE DEMO — simulated values. " : "LIVE READ-ONLY — see each field's validation. ") + source.Status);
+                string identityText = string.Format(CultureInfo.InvariantCulture, "{0} | PID: {1} | module: {2} | target pointer bytes: {3} | profile: {4}",
                     latest.ProcessName, latest.ProcessId, latest.ModuleBaseAddress.HasValue ? "0x" + latest.ModuleBaseAddress.Value.ToString("X8") : "—", latest.TargetPointerSize, ProfileSingleton.GetCurrent().Name);
-                if (executable != null) identity.Text += " | SHA256: " + executable.Sha256 + " | " + executablePath;
-                if (buildProfile != null) identity.Text += " | Build: " + buildProfile;
-                values.Rows.Clear();
-                foreach (var field in latest.Fields)
-                {
-                    StateValue observed = field.Value;
-                    values.Rows.Add(field.Key, observed.IsAvailable ? FormatValue(observed.UntypedValue) : "Unavailable",
-                        observed.Validation,
-                        observed.Address.HasValue ? "0x" + observed.Address.Value.ToString("X", CultureInfo.InvariantCulture) : "—",
-                        Time(observed.LastObservedAtUtc), Time(observed.LastChangedAtUtc), observed.Error ?? observed.Evidence);
-                }
+                if (executable != null) identityText += " | SHA256: " + executable.Sha256 + " | " + executablePath;
+                if (buildProfile != null) identityText += " | Build: " + buildProfile;
+                SetLabelText(identity, identityText);
+                UpdateValuesGrid();
                 if (source.IsStopped)
                 {
                     timer.Stop();
@@ -197,6 +198,49 @@ namespace _4RTools.Forms
                 Stop("Observation stopped: " + ex.Message);
                 Log(ex.ToString());
             }
+        }
+
+        private void UpdateValuesGrid()
+        {
+            if (latest == null) return;
+            values.SuspendLayout();
+            try
+            {
+                foreach (var field in latest.Fields)
+                {
+                    StateValue observed = field.Value;
+                    object[] cells =
+                    {
+                        field.Key,
+                        observed.IsAvailable ? FormatValue(observed.UntypedValue) : "Unavailable",
+                        observed.Validation,
+                        observed.Address.HasValue ? "0x" + observed.Address.Value.ToString("X", CultureInfo.InvariantCulture) : "—",
+                        Time(observed.LastObservedAtUtc),
+                        Time(observed.LastChangedAtUtc),
+                        observed.Error ?? observed.Evidence
+                    };
+                    DataGridViewRow row = values.Rows.Cast<DataGridViewRow>()
+                        .FirstOrDefault(candidate => Equals(candidate.Cells[0].Value, field.Key));
+                    if (row == null)
+                    {
+                        int index = values.Rows.Add(cells);
+                        values.Rows[index].Tag = field.Key;
+                        continue;
+                    }
+                    for (int column = 0; column < cells.Length; column++)
+                    {
+                        object current = row.Cells[column].Value;
+                        object next = cells[column];
+                        if (!Equals(current, next)) row.Cells[column].Value = next;
+                    }
+                }
+            }
+            finally { values.ResumeLayout(false); }
+        }
+
+        private static void SetLabelText(Label label, string text)
+        {
+            if (!string.Equals(label.Text, text, StringComparison.Ordinal)) label.Text = text;
         }
 
         private static string FormatValue(object value)
@@ -218,8 +262,8 @@ namespace _4RTools.Forms
             executablePath = null;
             buildProfile = null;
             values.Rows.Clear();
-            identity.Text = "No current observation.";
-            connection.Text = status;
+            SetLabelText(identity, "No current observation.");
+            SetLabelText(connection, status);
             Log(status);
         }
 
@@ -286,6 +330,16 @@ namespace _4RTools.Forms
                 subject?.Detach(this);
             }
             base.Dispose(disposing);
+        }
+
+        private sealed class StableDataGridView : DataGridView
+        {
+            public StableDataGridView()
+            {
+                DoubleBuffered = true;
+                SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+                UpdateStyles();
+            }
         }
 
         private sealed class ProcessChoice
