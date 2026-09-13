@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using _4RTools.Model;
+using _4RTools.Model.Vanilla;
 using _4RTools.Model.Vanilla.Automation;
 
 namespace _4RTools.Forms
