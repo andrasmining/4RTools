@@ -33,16 +33,24 @@ namespace _4RTools.Forms
         {
             if (smokeTest || vanillaMemoryAccessDiagnosticTimer != null) return;
             vanillaMemoryAccessDiagnosticTimer = new System.Windows.Forms.Timer { Interval = 2000 };
-            vanillaMemoryAccessDiagnosticTimer.Tick += (s, e) =>
-                System.Threading.ThreadPool.QueueUserWorkItem(_ => VanillaMemoryAccessDiagnostics.CaptureCurrentClients());
+            vanillaMemoryAccessDiagnosticTimer.Tick += (s, e) => QueueMemoryAccessDiagnostics();
             vanillaMemoryAccessDiagnosticTimer.Start();
-            System.Threading.ThreadPool.QueueUserWorkItem(_ => VanillaMemoryAccessDiagnostics.CaptureCurrentClients());
+            QueueMemoryAccessDiagnostics();
             FormClosed += (s, e) =>
             {
                 try { vanillaMemoryAccessDiagnosticTimer?.Stop(); } catch { }
                 try { vanillaMemoryAccessDiagnosticTimer?.Dispose(); } catch { }
                 vanillaMemoryAccessDiagnosticTimer = null;
             };
+        }
+
+        private static void QueueMemoryAccessDiagnostics()
+        {
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                VanillaMemoryAccessDiagnostics.CaptureCurrentClients();
+                VanillaTargetSecurityDiagnostics.CaptureCurrentClients();
+            });
         }
 
         private static void ConfigureFleetLabels(Control root)
