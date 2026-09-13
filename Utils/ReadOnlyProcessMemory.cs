@@ -34,6 +34,7 @@ namespace _4RTools.Utils
     {
         private const uint ProcessVmRead = 0x0010;
         private const uint ProcessQueryLimitedInformation = 0x1000;
+        private const string ReadOnlyOpenOperation = "OpenProcess(read/limited-query, 0x1010)";
         private SafeProcessHandle handle;
         private readonly Dictionary<string, ulong> modules = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase);
         public int ProcessId { get; private set; }
@@ -52,7 +53,14 @@ namespace _4RTools.Utils
             try
             {
                 handle = Native.OpenProcess(ProcessVmRead | ProcessQueryLimitedInformation, false, processId);
-                if (handle == null || handle.IsInvalid) throw NativeFailure("OpenProcess(read/limited-query, 0x1010)", Marshal.GetLastWin32Error());
+                if (handle == null || handle.IsInvalid)
+                {
+                    int openError = Marshal.GetLastWin32Error();
+                    string detail = ProcessObservationContext.Current.DescribeNativeFailure(ReadOnlyOpenOperation, processId, openError);
+                    ProcessObservationAccessRegistry.RecordInitialOpenFailure(processId, ReadOnlyOpenOperation, openError, detail);
+                    throw NativeFailure(ReadOnlyOpenOperation, openError);
+                }
+                ProcessObservationAccessRegistry.RecordOpenSuccess(processId);
                 bool wow64;
                 if (!Native.IsWow64Process(handle, out wow64)) throw NativeFailure("IsWow64Process", Marshal.GetLastWin32Error());
                 PointerSize = Environment.Is64BitOperatingSystem && !wow64 ? 8 : 4;
