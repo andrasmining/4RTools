@@ -37,7 +37,7 @@ WriteText $path $text
 $path = 'Tests/Vanilla.Diagnostics.Tests.csproj'
 $text = ReadText $path
 $old = '    <Compile Include="VanillaReconnectRegressionTests.cs" />'
-$new = $old + "`r`n    <Compile Include=\"VanillaTemporaryActionTests.cs\" />"
+$new = $old + "`r`n    <Compile Include=`"VanillaTemporaryActionTests.cs`" />"
 if (-not $text.Contains($old)) { throw 'Tests csproj anchor not found.' }
 $text = $text.Replace($old,$new)
 WriteText $path $text
