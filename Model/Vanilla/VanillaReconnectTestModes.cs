@@ -35,6 +35,11 @@ namespace _4RTools.Model.Vanilla
             return stage == VanillaReconnectStage.Online || visual == VanillaVisualState.Gameplay;
         }
 
+        internal void RecordSupervisorLog(string text)
+        {
+            if (!string.IsNullOrWhiteSpace(text)) Log(text);
+        }
+
         private bool MinimizeAssignedClientCore(string accountId, bool testLog)
         {
             int pid;
@@ -97,10 +102,22 @@ namespace _4RTools.Model.Vanilla
             if (supervisedMinimizeHooked) return;
             supervisedMinimizeHooked = true;
             supervisor.Updated += KeepSupervisedClientsMinimized;
+            supervisor.Logged += KeepSupervisedClientsMinimizedBeforeNextRecovery;
             Disposed += (s, e) =>
             {
                 try { supervisor.Updated -= KeepSupervisedClientsMinimized; } catch { }
+                try { supervisor.Logged -= KeepSupervisedClientsMinimizedBeforeNextRecovery; } catch { }
             };
+            KeepSupervisedClientsMinimized();
+        }
+
+        private void KeepSupervisedClientsMinimizedBeforeNextRecovery(string line)
+        {
+            if (string.IsNullOrEmpty(line)
+                || line.IndexOf(": recovery succeeded; exponential retry state reset.", StringComparison.Ordinal) < 0) return;
+            // ResetRecoverySuccessLocked logs synchronously before it releases the global recovery lease.
+            // Minimize the just-recovered gameplay client here so the next queued client cannot begin
+            // until the successful client is already minimized and left running.
             KeepSupervisedClientsMinimized();
         }
 
@@ -108,7 +125,7 @@ namespace _4RTools.Model.Vanilla
         {
             if (IsDisposed || !supervisor.IsRunning) return;
             try { supervisor.KeepOnlineClientsMinimized(); }
-            catch (Exception ex) { supervisor.RecordTestLog("Supervisor minimize policy failed: " + ex.Message); }
+            catch (Exception ex) { supervisor.RecordSupervisorLog("Supervisor minimize policy failed: " + ex.Message); }
         }
 
         private void ConfigureScopedTestUi()
