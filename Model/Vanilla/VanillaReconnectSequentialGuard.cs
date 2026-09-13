@@ -103,9 +103,10 @@ namespace _4RTools.Model.Vanilla
             if (strictSequentialLaunchGuardHooked) return;
             strictSequentialLaunchGuardHooked = true;
             supervisor.EnableStrictSequentialLaunchGuard();
+            supervisor.EnableAccountProxyRouting();
             InstallHardenedSupervisorButtons();
             InstallHardenedAutoStartBridge();
-            InstallFullDebugLogUi();
+            InstallSimplifiedRecoveryUi();
         }
     }
 }
