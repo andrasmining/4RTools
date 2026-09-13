@@ -227,6 +227,15 @@ working directory. This is the user's established local environment requirement.
 Do not alter antivirus/security settings yourself. Keep build caches and logs
 out of source control; their storage location is separate from application launch.
 
+Run the Vanilla product with the caller's existing permissions (`asInvoker`),
+without accepting or requesting elevation for observation. Access evidence must
+identify the observer context and exact failing operation/access mask. A failed
+external helper attach does not establish that an existing product session or a
+fresh normal product launch cannot read. When authorized, test the actual product
+context separately; do not infer that retained handles, launch order, or Gepard
+caused a discrepancy without evidence. Never duplicate/steal handles or bypass a
+denied operation to compare contexts.
+
 For release-oriented tasks, done means a usable artifact as well as source code.
 When requested, produce `dist/<release-folder>/` and
 `dist/<portable-release>.zip`. The user must be able to copy/unzip the package
