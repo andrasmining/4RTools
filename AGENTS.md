@@ -264,6 +264,24 @@ Normal end-user operation should be one 4RTools application/window. Integrate
 Vanilla recovery, automation, diagnostics, data paths, and update status into the
 main Vanilla workspace instead of creating competing top-level manager windows
 or duplicate tray icons. The main 4RTools tray remains the application tray.
+
+Recovery settings are auto-save UI: do not require a separate Save button. The
+launcher path, account edits, recovery/watchdog switches, and per-account proxy
+selection must persist automatically and surface a brief success/error indication.
+Launch arguments are intentionally hidden/empty. The managed-client count is not
+an independent setting: derive it from the number of enabled account rows (up to
+two). Proxy selection is account-specific and must follow the account being
+started or recovered, not one shared global proxy control.
+
+During the current live-hardening phase, global debug logging is ON by default.
+Keep one Debug log checkbox and one COPY DEBUG LOG action in the top Vanilla
+header next to update controls. The copied bundle should aggregate application,
+startup/recovery, memory-access, update, and other available logs. Debug mode
+should record process/PID changes, stage/visual transitions, launcher evidence,
+focus attempts, clicks/keys/hotkeys, and errors with timestamps while never
+logging passwords or typed secret contents. Remove or reduce this temporary
+always-on default only when the user explicitly asks after hardening is complete.
+
 ## Multi-client reconnect and outage policy
 
 Vanilla supports up to two managed clients on this PC, but automated recovery UI
@@ -282,6 +300,21 @@ client disconnects later, keep every other healthy client minimized and untouche
 recover only the affected client, and minimize that client again after successful
 return to gameplay. If a healthy supervised client is manually restored/on-screen,
 the supervisor should minimize it again on its next observation cycle.
+
+Cold startup is stricter than merely holding a nominal recovery flag. Do not
+start the periodic multi-client supervisor until the startup orchestrator has
+finished the current enabled client through gameplay, one resume-hotkey send, and
+confirmed minimization. Only then may the next missing enabled account launch.
+If focus or visual recognition fails during cold startup, leave the current client
+running, stop/fail closed, and do not close it or advance to a later account.
+
+Before every automated click, key, credential entry, server/character action, or
+resume hotkey, bring the intended Vanilla window to the foreground and verify it
+actually owns focus. Drive startup primarily from observed expected UI states
+(proxy list, login controls, server dialog, character-ready surface, gameplay)
+with short human-like settle delays after recognition. Avoid long blind sleeps
+when the next expected screen can be detected; poll the expected state and act
+shortly after stable recognition instead.
 
 After gameplay has been confirmed, a detected disconnect/logged-out modal or a
 return to the login/service shell is a recovery event: close that affected
@@ -304,6 +337,7 @@ over absolute desktop pixels. Tests for recognized login/proxy/server surfaces
 must cover multiple resolutions and softened/resampled rendering. Do not claim
 arbitrary future UI changes are guaranteed; unknown layouts must stop safely and
 produce useful captures/logs.
+
 ## Cleanliness, documentation, and final reporting
 
 Before finalizing substantial work, review for abandoned experiments, temporary
