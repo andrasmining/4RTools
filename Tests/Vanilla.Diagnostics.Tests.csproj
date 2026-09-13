@@ -57,6 +57,7 @@
     <Compile Include="VanillaSessionLogTests.cs" />
     <Compile Include="VanillaReconnectRegressionTests.cs" />
     <Compile Include="VanillaTemporaryActionTests.cs" />
+    <Compile Include="VanillaMemoryAndWeightTests.cs" />
     <ProjectReference Include="..\4RTools.csproj">
       <Project>{A7D78B00-6CE1-4B4D-90A3-1D2E93C7F68A}</Project>
       <Name>4RTools</Name>
