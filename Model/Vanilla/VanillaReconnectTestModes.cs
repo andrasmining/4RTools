@@ -15,6 +15,28 @@ namespace _4RTools.Model.Vanilla
 
         public bool MinimizeAssignedClient(string accountId)
         {
+            return MinimizeAssignedClientCore(accountId, true);
+        }
+
+        public bool KeepAssignedClientMinimized(string accountId)
+        {
+            return MinimizeAssignedClientCore(accountId, false);
+        }
+
+        public void KeepOnlineClientsMinimized()
+        {
+            if (!IsRunning) return;
+            foreach (VanillaReconnectStatus status in Statuses().Where(s => s.ProcessId.HasValue && ShouldKeepClientMinimized(s.Stage, s.VisualState)))
+                KeepAssignedClientMinimized(status.AccountId);
+        }
+
+        internal static bool ShouldKeepClientMinimized(VanillaReconnectStage stage, VanillaVisualState visual)
+        {
+            return stage == VanillaReconnectStage.Online || visual == VanillaVisualState.Gameplay;
+        }
+
+        private bool MinimizeAssignedClientCore(string accountId, bool testLog)
+        {
             int pid;
             string label;
             lock (gate)
@@ -32,28 +54,61 @@ namespace _4RTools.Model.Vanilla
                 {
                     process.Refresh();
                     if (process.HasExited || process.MainWindowHandle == IntPtr.Zero) return false;
-                    ShowWindow(process.MainWindowHandle, SwMinimize);
-                    Log("TEST " + label + ": Vanilla client PID " + pid + " minimized and left running.");
+                    IntPtr window = process.MainWindowHandle;
+                    if (IsIconic(window)) return true;
+                    ShowWindow(window, SwMinimize);
+                    if (!IsIconic(window))
+                    {
+                        if (testLog) Log("TEST " + label + ": could not confirm that Vanilla client PID " + pid + " was minimized.");
+                        else Log(label + ": could not confirm that supervised Vanilla client PID " + pid + " was minimized.");
+                        return false;
+                    }
+                    Log((testLog ? "TEST " : string.Empty) + label + ": Vanilla client PID " + pid
+                        + (testLog ? " minimized and left running." : " minimized and left running by supervisor policy."));
                     return true;
                 }
             }
             catch (Exception ex)
             {
-                Log("TEST " + label + ": could not minimize PID " + pid + ": " + ex.Message);
+                Log((testLog ? "TEST " : string.Empty) + label + ": could not minimize PID " + pid + ": " + ex.Message);
                 return false;
             }
         }
 
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hWnd);
     }
 
     internal sealed partial class VanillaReconnectForm
     {
+        private bool supervisedMinimizeHooked;
+
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
             ConfigureScopedTestUi();
+            HookSupervisedMinimizePolicy();
+        }
+
+        private void HookSupervisedMinimizePolicy()
+        {
+            if (supervisedMinimizeHooked) return;
+            supervisedMinimizeHooked = true;
+            supervisor.Updated += KeepSupervisedClientsMinimized;
+            Disposed += (s, e) =>
+            {
+                try { supervisor.Updated -= KeepSupervisedClientsMinimized; } catch { }
+            };
+            KeepSupervisedClientsMinimized();
+        }
+
+        private void KeepSupervisedClientsMinimized()
+        {
+            if (IsDisposed || !supervisor.IsRunning) return;
+            try { supervisor.KeepOnlineClientsMinimized(); }
+            catch (Exception ex) { supervisor.RecordTestLog("Supervisor minimize policy failed: " + ex.Message); }
         }
 
         private void ConfigureScopedTestUi()
@@ -86,6 +141,8 @@ namespace _4RTools.Model.Vanilla
             AddButton(row, "STOP TEST", StopCurrentTest);
             box.Controls.Add(row);
 
+            TipByText(this, "START SUPERVISOR",
+                "Start continuous recovery monitoring. Missing clients are recovered one at a time. A healthy client is kept running and minimized; while another client recovers, healthy clients remain minimized and untouched.");
             TipByText(this, "TEST SELECTED CLIENT",
                 "Cold-start test for the selected account only. Other assigned Vanilla clients stay open and are never tested. The selected client is left running and minimized after success.");
             TipByText(this, "TEST ALL CLIENTS",
