@@ -7,8 +7,9 @@ namespace _4RTools.Forms
 {
     public partial class Container
     {
-        private TabPage vanillaMemoryDiscoveryPage, vanillaWeightAlertsPage;
+        private TabPage vanillaMemoryDiscoveryPage, vanillaTextDiscoveryPage, vanillaWeightAlertsPage;
         private VanillaMemoryDiscoveryPanel integratedMemoryDiscovery;
+        private VanillaUtf8MemoryDiscoveryPanel integratedTextDiscovery;
         private VanillaWeightAlertsPanel integratedWeightAlerts;
         private VanillaWeightAlertService integratedWeightAlertService;
         private bool memoryDiscoveryIntegrated, weightAlertsIntegrated;
@@ -26,12 +27,15 @@ namespace _4RTools.Forms
             if (memoryDiscoveryIntegrated || vanillaWorkspace == null || integratedFleetMonitor == null) return;
             memoryDiscoveryIntegrated = true;
             vanillaMemoryDiscoveryPage = new TabPage("Memory finder") { Padding = new Padding(6), UseVisualStyleBackColor = true };
+            vanillaTextDiscoveryPage = new TabPage("Text finder") { Padding = new Padding(6), UseVisualStyleBackColor = true };
             int diagnosticsIndex = vanillaWorkspace.TabPages.IndexOf(vanillaDiagnosticsPage);
             if (diagnosticsIndex < 0) diagnosticsIndex = vanillaWorkspace.TabPages.Count;
             vanillaWorkspace.TabPages.Insert(diagnosticsIndex, vanillaMemoryDiscoveryPage);
+            vanillaWorkspace.TabPages.Insert(diagnosticsIndex + 1, vanillaTextDiscoveryPage);
             vanillaWorkspace.SelectedIndexChanged += (s, e) =>
             {
                 if (vanillaWorkspace.SelectedTab == vanillaMemoryDiscoveryPage) EnsureMemoryDiscoveryEmbedded();
+                else if (vanillaWorkspace.SelectedTab == vanillaTextDiscoveryPage) EnsureTextDiscoveryEmbedded();
             };
         }
 
@@ -66,6 +70,15 @@ namespace _4RTools.Forms
             integratedMemoryDiscovery = new VanillaMemoryDiscoveryPanel(integratedFleetMonitor) { Dock = DockStyle.Fill };
             vanillaMemoryDiscoveryPage.Controls.Add(integratedMemoryDiscovery);
             integratedMemoryDiscovery.BringToFront();
+        }
+
+        private void EnsureTextDiscoveryEmbedded()
+        {
+            if (smokeTest) return;
+            if (integratedTextDiscovery != null && !integratedTextDiscovery.IsDisposed) return;
+            integratedTextDiscovery = new VanillaUtf8MemoryDiscoveryPanel(integratedFleetMonitor) { Dock = DockStyle.Fill };
+            vanillaTextDiscoveryPage.Controls.Add(integratedTextDiscovery);
+            integratedTextDiscovery.BringToFront();
         }
 
         private void EnsureWeightAlertsEmbedded()
