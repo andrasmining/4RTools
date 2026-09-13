@@ -1,0 +1,165 @@
+using System;
+using System.Drawing;
+using System.Globalization;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace _4RTools.Model.Vanilla
+{
+    public sealed class VanillaWeightAlertsPanel : UserControl
+    {
+        private readonly VanillaWeightAlertService service;
+        private readonly CheckBox enabled = new CheckBox { Text = "Enable overweight e-mail alert", AutoSize = true };
+        private readonly NumericUpDown threshold = Number(1, 100, 85, 1);
+        private readonly NumericUpDown rearm = Number(0, 99, 80, 1);
+        private readonly NumericUpDown pollSeconds = Number(2, 60, 5, 0);
+        private readonly NumericUpDown cooldownMinutes = Number(1, 1440, 30, 0);
+        private readonly TextBox smtpHost = new TextBox { Width = 260 };
+        private readonly NumericUpDown smtpPort = Number(1, 65535, 587, 0);
+        private readonly CheckBox useSsl = new CheckBox { Text = "TLS/SSL", AutoSize = true, Checked = true };
+        private readonly TextBox smtpUser = new TextBox { Width = 300 };
+        private readonly TextBox smtpPassword = new TextBox { Width = 300, UseSystemPasswordChar = true };
+        private readonly TextBox fromAddress = new TextBox { Width = 300 };
+        private readonly TextBox toAddress = new TextBox { Width = 300 };
+        private readonly TextBox subjectPrefix = new TextBox { Width = 220 };
+        private readonly Button save = new Button { Text = "SAVE ALERT SETTINGS", AutoSize = true };
+        private readonly Button test = new Button { Text = "SEND TEST E-MAIL", AutoSize = true };
+        private readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(1150, 0), ForeColor = Color.DimGray };
+        private readonly DataGridView live = new DataGridView
+        {
+            Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
+            RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+        };
+        private readonly Timer timer = new Timer { Interval = 1000 };
+        private VanillaWeightAlertSettings loaded;
+        private bool disposed;
+
+        public VanillaWeightAlertsPanel(VanillaWeightAlertService service)
+        {
+            this.service = service ?? throw new ArgumentNullException(nameof(service));
+            Dock = DockStyle.Fill; BackColor = Color.White; AutoScroll = true;
+            BuildLayout(); LoadSettings();
+            save.Click += (s, e) => Guard(SaveSettings);
+            test.Click += async (s, e) => await SendTestAsync();
+            timer.Tick += (s, e) => RefreshStatus();
+            timer.Start(); RefreshStatus();
+        }
+
+        private void BuildLayout()
+        {
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 5 };
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.Controls.Add(new Label { AutoSize = true, Font = new Font("Segoe UI", 10F, FontStyle.Bold), Text = "Weight / overweight alert" }, 0, 0);
+            root.Controls.Add(new Label
+            {
+                AutoSize = true, MaximumSize = new Size(1150, 0), ForeColor = Color.DimGray, Margin = new Padding(0, 5, 0, 10),
+                Text = "The alert is driven only by verified CurrentWeight and MaxWeight memory mappings. Set any warning percentage you want. One e-mail is sent when the character crosses the threshold; it re-arms only after weight falls below the re-arm percentage, with an additional cooldown to prevent spam. SMTP password is protected with Windows DPAPI and is never written as plaintext to the settings file."
+            }, 0, 1);
+
+            var settings = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, RowCount = 9 };
+            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
+            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            settings.Controls.Add(enabled, 0, 0); settings.SetColumnSpan(enabled, 4);
+            Add(settings, 1, 0, "Warn at weight %", threshold); Add(settings, 1, 2, "Re-arm below %", rearm);
+            Add(settings, 2, 0, "Poll every (sec)", pollSeconds); Add(settings, 2, 2, "Cooldown (min)", cooldownMinutes);
+            Add(settings, 3, 0, "SMTP host", smtpHost); Add(settings, 3, 2, "SMTP port", smtpPort);
+            settings.Controls.Add(useSsl, 3, 4); settings.SetColumnSpan(useSsl, 1);
+            Add(settings, 4, 0, "SMTP username", smtpUser); Add(settings, 4, 2, "SMTP password", smtpPassword);
+            Add(settings, 5, 0, "From e-mail", fromAddress); Add(settings, 5, 2, "Recipient e-mail", toAddress);
+            Add(settings, 6, 0, "Subject prefix", subjectPrefix);
+            var hint = new Label { AutoSize = true, ForeColor = Color.DimGray, Text = "Leave password blank to keep the already saved protected password." };
+            settings.Controls.Add(hint, 2, 6); settings.SetColumnSpan(hint, 2);
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            buttons.Controls.Add(save); buttons.Controls.Add(test); buttons.Controls.Add(status);
+            settings.Controls.Add(buttons, 0, 7); settings.SetColumnSpan(buttons, 4);
+            root.Controls.Add(settings, 0, 2);
+
+            live.Columns.Add("Client", "Client"); live.Columns.Add("Weight", "Weight"); live.Columns.Add("Percent", "%"); live.Columns.Add("Verification", "State");
+            root.Controls.Add(new Label { AutoSize = true, Font = new Font("Segoe UI", 9F, FontStyle.Bold), Margin = new Padding(0, 10, 0, 4), Text = "Live weight memory" }, 0, 3);
+            root.Controls.Add(live, 0, 4); Controls.Add(root);
+        }
+
+        private void LoadSettings()
+        {
+            loaded = service.Settings;
+            enabled.Checked = loaded.Enabled;
+            threshold.Value = Clamp(threshold, loaded.ThresholdPercent);
+            rearm.Value = Clamp(rearm, loaded.RearmPercent);
+            pollSeconds.Value = Clamp(pollSeconds, loaded.PollSeconds);
+            cooldownMinutes.Value = Clamp(cooldownMinutes, loaded.CooldownMinutes);
+            smtpHost.Text = loaded.SmtpHost ?? ""; smtpPort.Value = Clamp(smtpPort, loaded.SmtpPort);
+            useSsl.Checked = loaded.UseSsl; smtpUser.Text = loaded.SmtpUser ?? ""; smtpPassword.Clear();
+            fromAddress.Text = loaded.FromAddress ?? ""; toAddress.Text = loaded.ToAddress ?? ""; subjectPrefix.Text = loaded.SubjectPrefix ?? "";
+        }
+
+        private VanillaWeightAlertSettings ReadSettings()
+        {
+            var value = loaded == null ? new VanillaWeightAlertSettings() : loaded.Clone();
+            value.Enabled = enabled.Checked;
+            value.ThresholdPercent = threshold.Value; value.RearmPercent = rearm.Value;
+            value.PollSeconds = (int)pollSeconds.Value; value.CooldownMinutes = (int)cooldownMinutes.Value;
+            value.SmtpHost = smtpHost.Text.Trim(); value.SmtpPort = (int)smtpPort.Value; value.UseSsl = useSsl.Checked;
+            value.SmtpUser = smtpUser.Text.Trim(); value.FromAddress = fromAddress.Text.Trim(); value.ToAddress = toAddress.Text.Trim();
+            value.SubjectPrefix = subjectPrefix.Text.Trim();
+            if (!string.IsNullOrEmpty(smtpPassword.Text)) value.ProtectedSmtpPassword = service.Store.ProtectPassword(smtpPassword.Text);
+            return value;
+        }
+
+        private void SaveSettings()
+        {
+            VanillaWeightAlertSettings value = ReadSettings();
+            value.Validate(false); if (value.Enabled) value.Validate(true);
+            service.ApplySettings(value, true); loaded = service.Settings; smtpPassword.Clear();
+            status.Text = value.Enabled ? "Saved. Weight e-mail alert is active when verified weight mappings are available." : "Saved. Weight e-mail alert is disabled.";
+        }
+
+        private async Task SendTestAsync()
+        {
+            if (disposed) return;
+            test.Enabled = false; status.Text = "Sending SMTP test…";
+            try
+            {
+                VanillaWeightAlertSettings value = ReadSettings(); value.Validate(true);
+                await Task.Run(() => service.SendTest(value));
+                if (!disposed) status.Text = "Test e-mail sent successfully.";
+            }
+            catch (Exception ex) { if (!disposed) status.Text = "Test e-mail failed: " + ex.Message; }
+            finally { if (!disposed) test.Enabled = true; }
+        }
+
+        private void RefreshStatus()
+        {
+            status.Text = service.Status;
+            var observations = service.Latest;
+            live.Rows.Clear();
+            foreach (VanillaWeightObservation item in observations.Take(2))
+            {
+                string weight = item.CurrentWeight.HasValue && item.MaxWeight.HasValue ? item.CurrentWeight + " / " + item.MaxWeight : "Unavailable";
+                string percent = item.Percent.HasValue ? item.Percent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%" : "—";
+                live.Rows.Add(item.CharacterName + " (PID " + item.ProcessId + ")", weight, percent, item.Verified ? "Verified" : (item.Error ?? "Unavailable"));
+            }
+            if (observations.Count == 0) live.Rows.Add("No Vanilla clients", "—", "—", "Waiting");
+        }
+
+        private static void Add(TableLayoutPanel panel, int row, int column, string caption, Control control)
+        {
+            panel.Controls.Add(new Label { Text = caption, AutoSize = true, Margin = new Padding(3, 8, 6, 0) }, column, row);
+            panel.Controls.Add(control, column + 1, row);
+        }
+        private static NumericUpDown Number(decimal min, decimal max, decimal value, int decimals)
+        {
+            return new NumericUpDown { Minimum = min, Maximum = max, Value = value, DecimalPlaces = decimals, Width = 120 };
+        }
+        private static decimal Clamp(NumericUpDown control, decimal value) { return Math.Max(control.Minimum, Math.Min(control.Maximum, value)); }
+        private void Guard(System.Action action) { try { action(); } catch (Exception ex) { status.Text = ex.Message; } }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { disposed = true; timer.Stop(); timer.Dispose(); }
+            base.Dispose(disposing);
+        }
+    }
+}
