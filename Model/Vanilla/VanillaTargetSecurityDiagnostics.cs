@@ -6,6 +6,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
+using _4RTools.Utils;
 
 namespace _4RTools.Model.Vanilla
 {
