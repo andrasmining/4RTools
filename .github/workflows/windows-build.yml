@@ -2,7 +2,7 @@ name: Windows build
 
 on:
   push:
-    branches: [main, feat/vanilla-memory-discovery]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
-  group: windows-build-${{ github.ref }}
+  group: windows-build-main
   cancel-in-progress: true
 
 jobs:
