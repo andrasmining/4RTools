@@ -1,10 +1,10 @@
 {
   "SchemaVersion": 1,
-  "Label": "Vanilla — verified HP/SP and character name",
+  "Label": "Vanilla — verified HP/SP, character name and current weight",
   "Sha256": "7eb420579690bd2f5c81b42fa69888cb3d144486d3c275a19073f5216698b3ef",
   "Machine": 332,
   "ImageSize": 15839232,
-  "Evidence": "2026-09-07 to 2026-09-13: the main-data HP/maxHP/SP/maxSP quartet and null-terminated character-name mapping were observed read-only across live play. On 2026-09-13 the user confirmed current HP and current SP changing in 4RTools with gameplay, maxima matching the client, and CharacterName=Norder matching the live character. These five fields are promoted for this exact executable fingerprint only. X/Y/map/target/action/status/readiness/loading/autobattle remain unmapped and unavailable.",
+  "Evidence": "2026-09-07 to 2026-09-13: the main-data HP/maxHP/SP/maxSP quartet and null-terminated character-name mapping were observed read-only across live play. On 2026-09-13 the user confirmed current HP and current SP changing in 4RTools with gameplay, maxima matching the client, CharacterName=Norder matching the live character, and CurrentWeight tracking the visible carried-weight value through repeated live changes at module-relative offset 0xD352F0. These fields are promoted for this exact executable fingerprint only. MaxWeight/X/Y/map/target/action/status/readiness/loading/autobattle remain unmapped and unavailable.",
   "MemoryMap": {
     "SchemaVersion": 1,
     "ProcessName": "Vanilla MMO.exe",
@@ -14,7 +14,8 @@
       "MaxHP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE0", "Encoding": "UInt32", "Evidence": "Live max HP repeatedly matched the selected character while current HP changed on 2026-09-13." },
       "CurrentSP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE4", "Encoding": "UInt32", "Evidence": "Live current SP was observed decreasing/regenerating and matching the visible client on 2026-09-13." },
       "MaxSP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE8", "Encoding": "UInt32", "Evidence": "Live max SP repeatedly matched the selected character while current SP changed on 2026-09-13." },
-      "CharacterName": { "Module": "Vanilla MMO.exe", "Address": "0xD3B7B0", "Encoding": "Utf8", "ByteCount": 40, "Evidence": "Read-only value Norder matched the live selected character on 2026-09-13; exact-fingerprint mapping only." }
+      "CharacterName": { "Module": "Vanilla MMO.exe", "Address": "0xD3B7B0", "Encoding": "Utf8", "ByteCount": 40, "Evidence": "Read-only value Norder matched the live selected character on 2026-09-13; exact-fingerprint mapping only." },
+      "CurrentWeight": { "Module": "Vanilla MMO.exe", "Address": "0xD352F0", "Encoding": "UInt32", "Evidence": "Live current carried weight matched the visible client value and tracked repeated inventory-weight changes on Priester on 2026-09-13." }
     }
   },
   "VerifiedFields": [
@@ -22,7 +23,8 @@
     "MaxHP",
     "CurrentSP",
     "MaxSP",
-    "CharacterName"
+    "CharacterName",
+    "CurrentWeight"
   ],
   "ActionStates": [],
   "NoTargetValues": [],
