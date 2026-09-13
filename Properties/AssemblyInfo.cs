@@ -13,5 +13,5 @@ using System.Runtime.InteropServices;
 [assembly: InternalsVisibleTo("Vanilla.Diagnostics.Tests")]
 [assembly: ComVisible(false)]
 [assembly: Guid("a7d78b00-6ce1-4b4d-90a3-1d2e93c7f68a")]
-[assembly: AssemblyVersion("0.6.17.0")]
-[assembly: AssemblyFileVersion("0.6.17.0")]
+[assembly: AssemblyVersion("0.6.18.0")]
+[assembly: AssemblyFileVersion("0.6.18.0")]
