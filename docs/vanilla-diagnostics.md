@@ -1,9 +1,11 @@
 # Vanilla diagnostics engineering record
 
-For the current mapping inventory, the two-client access result, and the
-discovery/validation fixes from 2026-09-13, see the
-[latest discovery session record](vanilla-discovery-2026-09-13.md). The sections
-below retain historical results and do not imply those reads succeeded again.
+For the current mapping inventory and discovery/validation fixes from
+2026-09-13, see the [discovery session record](vanilla-discovery-2026-09-13.md).
+The [actual-product follow-up](vanilla-product-access-2026-09-13.md) corrects the
+scope of that external-host result and records the normal product launch tests.
+The sections below retain historical results and do not imply those reads
+succeeded again.
 
 ## Current companion validation
 

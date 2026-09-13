@@ -1,5 +1,10 @@
 # Vanilla discovery session, 2026-09-13
 
+**Scope correction:** this initial attempt tested an external observer host,
+not the running product's access context. Its denial did not establish that
+4RTools itself could not read. See the [actual-product follow-up](vanilla-product-access-2026-09-13.md)
+for the separately tested normal launch and product-native attach results.
+
 The live session reached a process-access boundary before any gameplay bytes
 could be read. **No new field was verified or promoted.** The existing five
 verified mappings remain unchanged. This record supersedes older statements
