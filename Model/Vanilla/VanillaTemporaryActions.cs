@@ -422,7 +422,7 @@ namespace _4RTools.Model.Vanilla
             status.Text = "Temporary-action settings saved.";
         }
 
-        private void Guard(Action action)
+        private void Guard(System.Action action)
         {
             try { action(); } catch (Exception ex) { MessageBox.Show(this, ex.Message, "Temporary actions", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
@@ -444,8 +444,10 @@ namespace _4RTools.Model.Vanilla
         private static ComboBox KeyBox()
         {
             var box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160, DisplayMember = "Label", ValueMember = "Value" };
-            box.DataSource = Enum.GetValues(typeof(Keys)).Cast<Keys>().Select(key => (int)key).Where(value => value >= 8 && value <= 254)
-                .Distinct().OrderBy(value => value).Select(value => new KeyChoice(value, ((Keys)value).ToString())).ToArray();
+            var choices = new[] { new KeyChoice(0, "None") }.Concat(
+                Enum.GetValues(typeof(Keys)).Cast<Keys>().Select(key => (int)key).Where(value => value >= 8 && value <= 254)
+                    .Distinct().OrderBy(value => value).Select(value => new KeyChoice(value, ((Keys)value).ToString()))).ToArray();
+            box.DataSource = choices;
             return box;
         }
         private static int SelectedKey(ComboBox box) { return box.SelectedItem is KeyChoice ? ((KeyChoice)box.SelectedItem).Value : 0; }

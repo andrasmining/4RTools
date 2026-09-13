@@ -134,13 +134,15 @@ production code or remove it when it is no longer needed before completion.
 
 ## Product direction
 
-The original 4RTools window is the primary application. Add Vanilla to its
-Ragnarok Client selector through the read-only adapter, reuse existing feature
-forms and verified state readers, and extend that application where needed.
-Diagnostics and discovery support address mapping; they are not a replacement
-product. Additional Vanilla controls may open as an owned window from the
-original interface. Preserve useful existing extensions while integrating them.
-Selecting a process does not prove its gameplay addresses or feature support.
+The Vanilla workspace is now the primary product surface. Keep it first and use
+it for recovery, live read-only client state, automation, temporary actions,
+diagnostics, updates, and future Vanilla-specific features. Up to two Vanilla
+clients should be visible and manageable without switching to the legacy UI.
+The original 4RTools interface remains available only as a secondary compatibility
+tab; preserve useful stock code and reuse proven memory/input components, but do
+not make new Vanilla workflows depend on the legacy single-client selector.
+Diagnostics and discovery support address mapping and verification. Selecting a
+process or reading bytes does not by itself prove gameplay semantics.
 
 If the requirement is clear, inspect, implement, test, commit, push, and continue
 without asking after each small change. Work until the requested deliverable is
