@@ -59,14 +59,17 @@ namespace _4RTools.Model.Vanilla
                 Text = "The alert is driven only by verified CurrentWeight and MaxWeight memory mappings. Set any warning percentage you want. One e-mail is sent when the character crosses the threshold; it re-arms only after weight falls below the re-arm percentage, with an additional cooldown to prevent spam. SMTP password is protected with Windows DPAPI and is never written as plaintext to the settings file."
             }, 0, 1);
 
-            var settings = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, RowCount = 9 };
+            var settings = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, RowCount = 8 };
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             settings.Controls.Add(enabled, 0, 0); settings.SetColumnSpan(enabled, 4);
             Add(settings, 1, 0, "Warn at weight %", threshold); Add(settings, 1, 2, "Re-arm below %", rearm);
             Add(settings, 2, 0, "Poll every (sec)", pollSeconds); Add(settings, 2, 2, "Cooldown (min)", cooldownMinutes);
-            Add(settings, 3, 0, "SMTP host", smtpHost); Add(settings, 3, 2, "SMTP port", smtpPort);
-            settings.Controls.Add(useSsl, 3, 4); settings.SetColumnSpan(useSsl, 1);
+            Add(settings, 3, 0, "SMTP host", smtpHost);
+            settings.Controls.Add(new Label { Text = "SMTP port", AutoSize = true, Margin = new Padding(3, 8, 6, 0) }, 2, 3);
+            var smtpTransport = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = Padding.Empty };
+            smtpTransport.Controls.Add(smtpPort); smtpTransport.Controls.Add(useSsl);
+            settings.Controls.Add(smtpTransport, 3, 3);
             Add(settings, 4, 0, "SMTP username", smtpUser); Add(settings, 4, 2, "SMTP password", smtpPassword);
             Add(settings, 5, 0, "From e-mail", fromAddress); Add(settings, 5, 2, "Recipient e-mail", toAddress);
             Add(settings, 6, 0, "Subject prefix", subjectPrefix);
