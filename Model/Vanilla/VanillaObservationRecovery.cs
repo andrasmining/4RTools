@@ -140,7 +140,6 @@ namespace _4RTools.Model.Vanilla
                             : "Existing client denied the normal read-only observation handle after this 4RTools start";
 
                         CloseForRecovery(runtime, process, now, reason, failedFreshRecovery);
-                        process = null; // CloseForRecovery owns/disposes no wrapper, but it already used this instance synchronously.
 
                         if (!runtime.ProcessId.HasValue)
                             ProcessObservationAccessRegistry.Forget(pid);
@@ -189,9 +188,8 @@ namespace _4RTools.Forms
     {
         private bool observationRecoveryHooked;
 
-        protected override void OnShown(EventArgs e)
+        private void HookObservationRecovery()
         {
-            base.OnShown(e);
             if (observationRecoveryHooked || integratedReconnectSupervisor == null) return;
             observationRecoveryHooked = true;
             integratedReconnectSupervisor.Updated += RecoverDeniedObservationAccess;
