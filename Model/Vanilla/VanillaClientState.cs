@@ -9,7 +9,7 @@ namespace _4RTools.Model.Vanilla
 {
     public enum VanillaField
     {
-        CurrentHP, MaxHP, CurrentSP, MaxSP, CharacterName, X, Y,
+        CurrentHP, MaxHP, CurrentSP, MaxSP, CurrentWeight, MaxWeight, CharacterName, X, Y,
         CurrentTargetId, ActionState, Map, AutobattleEnabled, StatusEffects, ClientReady, Loading
     }
 
@@ -78,6 +78,8 @@ namespace _4RTools.Model.Vanilla
         public StateValue<uint> MaxHP { get { return Get<uint>(VanillaField.MaxHP); } }
         public StateValue<uint> CurrentSP { get { return Get<uint>(VanillaField.CurrentSP); } }
         public StateValue<uint> MaxSP { get { return Get<uint>(VanillaField.MaxSP); } }
+        public StateValue<uint> CurrentWeight { get { return Get<uint>(VanillaField.CurrentWeight); } }
+        public StateValue<uint> MaxWeight { get { return Get<uint>(VanillaField.MaxWeight); } }
         public StateValue<string> CharacterName { get { return Get<string>(VanillaField.CharacterName); } }
         public StateValue<int> X { get { return Get<int>(VanillaField.X); } }
         public StateValue<int> Y { get { return Get<int>(VanillaField.Y); } }
