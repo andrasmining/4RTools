@@ -1,0 +1,155 @@
+using System;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+
+namespace _4RTools.Forms
+{
+    public partial class Container
+    {
+        private bool globalDebugUiInstalled;
+        private CheckBox globalDebugEnabled;
+        private Button globalCopyDebug;
+        private System.Windows.Forms.Timer globalDebugSnapshotTimer;
+        private string lastDebugSnapshot;
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            if (smokeTest || globalDebugUiInstalled) return;
+            globalDebugUiInstalled = true;
+            InstallGlobalDebugUi();
+        }
+
+        private void InstallGlobalDebugUi()
+        {
+            _4RTools.Model.Vanilla.VanillaDebugLog.Initialize();
+
+            Button updates = FindControlByText<Button>(this, "CHECK FOR UPDATES");
+            if (updates != null && updates.Parent != null)
+            {
+                Control parent = updates.Parent;
+                int index = parent.Controls.GetChildIndex(updates);
+
+                globalDebugEnabled = new CheckBox
+                {
+                    Text = "Debug log",
+                    AutoSize = true,
+                    Checked = _4RTools.Model.Vanilla.VanillaDebugLog.Enabled,
+                    Margin = new Padding(14, 9, 4, 0)
+                };
+                globalDebugEnabled.CheckedChanged += (s, e) =>
+                {
+                    _4RTools.Model.Vanilla.VanillaDebugLog.SetEnabled(globalDebugEnabled.Checked);
+                    integratedUpdateStatus.Text = globalDebugEnabled.Checked
+                        ? "Debug log ON - detailed app/recovery/startup diagnostics are being recorded."
+                        : "Debug log OFF.";
+                };
+
+                globalCopyDebug = new Button
+                {
+                    Text = "COPY DEBUG LOG",
+                    AutoSize = true,
+                    Margin = new Padding(4)
+                };
+                globalCopyDebug.Click += (s, e) => CopyGlobalDebugLog();
+
+                parent.Controls.Add(globalDebugEnabled);
+                parent.Controls.SetChildIndex(globalDebugEnabled, Math.Min(parent.Controls.Count - 1, index + 1));
+                parent.Controls.Add(globalCopyDebug);
+                parent.Controls.SetChildIndex(globalCopyDebug, Math.Min(parent.Controls.Count - 1, index + 2));
+            }
+
+            if (integratedReconnectSupervisor != null)
+            {
+                integratedReconnectSupervisor.Logged += line => _4RTools.Model.Vanilla.VanillaDebugLog.Write("RECOVERY", line);
+                integratedReconnectSupervisor.Updated += WriteRecoveryDebugSnapshot;
+            }
+
+            if (vanillaWorkspace != null)
+                vanillaWorkspace.SelectedIndexChanged += (s, e) =>
+                    _4RTools.Model.Vanilla.VanillaDebugLog.Write("UI", "Vanilla tab selected: " + (vanillaWorkspace.SelectedTab?.Text ?? "none") + ".");
+
+            Application.ThreadException += (s, e) =>
+                _4RTools.Model.Vanilla.VanillaDebugLog.Write("THREAD-EXCEPTION", e.Exception == null ? "unknown" : e.Exception.ToString());
+
+            globalDebugSnapshotTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+            globalDebugSnapshotTimer.Tick += (s, e) => WriteGlobalDebugSnapshot();
+            globalDebugSnapshotTimer.Start();
+            WriteGlobalDebugSnapshot();
+        }
+
+        private void CopyGlobalDebugLog()
+        {
+            try
+            {
+                string reconnect = integratedReconnectSupervisor == null ? null : integratedReconnectSupervisor.LogPath;
+                string contents = _4RTools.Model.Vanilla.VanillaDebugLog.BuildClipboardBundle(reconnect);
+                Clipboard.SetText(string.IsNullOrWhiteSpace(contents) ? "(debug log is empty)" : contents);
+                integratedUpdateStatus.Text = "Debug log copied to clipboard.";
+                _4RTools.Model.Vanilla.VanillaDebugLog.Write("UI", "Global debug bundle copied to clipboard.");
+            }
+            catch (Exception ex)
+            {
+                _4RTools.Model.Vanilla.VanillaDebugLog.Write("UI", "Copy debug log FAILED: " + ex);
+                MessageBox.Show(this, ex.Message, "Copy debug log", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void WriteRecoveryDebugSnapshot()
+        {
+            if (!_4RTools.Model.Vanilla.VanillaDebugLog.Enabled || integratedReconnectSupervisor == null) return;
+            try
+            {
+                string snapshot = string.Join(" | ", integratedReconnectSupervisor.Statuses().Select(s =>
+                    s.Label + ":pid=" + (s.ProcessId.HasValue ? s.ProcessId.Value.ToString() : "none")
+                    + ",stage=" + s.Stage + ",screen=" + s.VisualState + ",detail=" + (s.Detail ?? "")));
+                _4RTools.Model.Vanilla.VanillaDebugLog.Write("RECOVERY-STATE", snapshot);
+            }
+            catch (Exception ex)
+            {
+                _4RTools.Model.Vanilla.VanillaDebugLog.Write("RECOVERY-STATE", "snapshot failed: " + ex.Message);
+            }
+        }
+
+        private void WriteGlobalDebugSnapshot()
+        {
+            if (!_4RTools.Model.Vanilla.VanillaDebugLog.Enabled) return;
+            try
+            {
+                Process[] live = Process.GetProcessesByName("Vanilla MMO");
+                string pids;
+                try { pids = string.Join(",", live.Select(p => p.Id).OrderBy(id => id)); }
+                finally { foreach (Process p in live) p.Dispose(); }
+
+                string recovery = "recovery=" + (integratedReconnectSupervisor?.IsRunning == true ? "ON" : "OFF")
+                    + ", startup=" + (integratedReconnectSupervisor?.IsHardenedStartupRunning == true ? "ON" : "OFF");
+                string snapshot = "VanillaPIDs=[" + pids + "], " + recovery
+                    + ", selectedTab=" + (vanillaWorkspace?.SelectedTab?.Text ?? "none");
+                if (string.Equals(snapshot, lastDebugSnapshot, StringComparison.Ordinal)) return;
+                lastDebugSnapshot = snapshot;
+                _4RTools.Model.Vanilla.VanillaDebugLog.Write("APP-STATE", snapshot);
+            }
+            catch (Exception ex)
+            {
+                _4RTools.Model.Vanilla.VanillaDebugLog.Write("APP-STATE", "snapshot failed: " + ex.Message);
+            }
+        }
+
+        private static T FindControlByText<T>(Control root, string text) where T : Control
+        {
+            foreach (Control child in root.Controls)
+            {
+                var typed = child as T;
+                if (typed != null && string.Equals(child.Text, text, StringComparison.Ordinal)) return typed;
+                if (child.HasChildren)
+                {
+                    T nested = FindControlByText<T>(child, text);
+                    if (nested != null) return nested;
+                }
+            }
+            return null;
+        }
+    }
+}
