@@ -28,6 +28,7 @@ namespace _4RTools.Model.Vanilla
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
         };
         private readonly Timer refreshTimer = new Timer { Interval = 2000 };
+        private readonly Dictionary<int, string> stoppedClients = new Dictionary<int, string>();
         private VanillaMemoryDiscoverySession session;
         private bool busy, disposed;
 
@@ -39,7 +40,7 @@ namespace _4RTools.Model.Vanilla
             foreach (VanillaMemoryScanValueType item in Enum.GetValues(typeof(VanillaMemoryScanValueType))) valueType.Items.Add(item);
             valueType.SelectedItem = VanillaMemoryScanValueType.UInt32;
             scope.Items.Add(new Choice<VanillaMemoryScanScope>(VanillaMemoryScanScope.MainModule, "Main module — stable offsets first"));
-            scope.Items.Add(new Choice<VanillaMemoryScanScope>(VanillaMemoryScanScope.AllWritableMemory, "All writable memory — advanced / heap"));
+            scope.Items.Add(new Choice<VanillaMemoryScanScope>(VanillaMemoryScanScope.AllWritableMemory, "Writable memory below 2 GiB — heap"));
             scope.SelectedIndex = 0;
             WireEvents(); RefreshClients();
             refreshTimer.Tick += (s, e) => { if (!busy) RefreshClients(); };
@@ -56,7 +57,7 @@ namespace _4RTools.Model.Vanilla
             root.Controls.Add(new Label
             {
                 AutoSize = true, MaximumSize = new Size(1200, 0), ForeColor = Color.DimGray, Margin = new Padding(0, 5, 0, 10),
-                Text = "Unknown state: Capture baseline → perform exactly one controlled in-game change → CHANGED/INCREASED/DECREASED → repeat and refine. Use UNCHANGED only after the list is already small. EXACT accepts decimal or 0x hex and can start a scan without a baseline. Main module is the best first pass for stable offsets; All writable memory also searches heap/state allocations. This tool never writes game memory or sends input."
+                Text = "Unknown state: Capture baseline → perform exactly one controlled in-game change → CHANGED/INCREASED/DECREASED → repeat and refine. Use UNCHANGED only after the list is already small. EXACT accepts decimal or 0x hex and can start a scan without a baseline. Main module is the best first pass for stable offsets. The writable-memory scope includes heap/state allocations below a conservative 2 GiB user-address limit; higher private memory is excluded. This tool never writes game memory or sends input."
             }, 0, 1);
             var controls = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
             controls.Controls.Add(Caption("Client")); controls.Controls.Add(clients);
@@ -75,16 +76,21 @@ namespace _4RTools.Model.Vanilla
 
         private void WireEvents()
         {
-            baseline.Click += async (s, e) => await RunAsync("Capturing read-only baseline…", () =>
+            baseline.Click += async (s, e) =>
             {
-                EnsureSession().CaptureBaseline(SelectedType(), SelectedScope()); return "Baseline captured.";
-            });
+                VanillaMemoryScanValueType type = SelectedType();
+                VanillaMemoryScanScope selectedScope = SelectedScope();
+                await RunAsync("Capturing read-only baseline…", current =>
+                {
+                    current.CaptureBaseline(type, selectedScope); return "Baseline captured.";
+                });
+            };
             changed.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Changed);
             unchanged.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Unchanged);
             increased.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Increased);
             decreased.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Decreased);
             exactScan.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Exact);
-            reset.Click += (s, e) => { session?.Reset(); grid.Rows.Clear(); status.Text = "Reset. Capture a new baseline or run Exact."; };
+            reset.Click += (s, e) => Guard(() => { session?.Reset(); grid.Rows.Clear(); status.Text = "Reset. Capture a new baseline or run Exact."; });
             copy.Click += (s, e) => Guard(CopySelected);
             export.Click += (s, e) => Guard(ExportCandidates);
             clients.SelectedIndexChanged += (s, e) => ResetSession("Client changed; discovery state reset.");
@@ -102,28 +108,39 @@ namespace _4RTools.Model.Vanilla
         {
             long? value = comparison == VanillaMemoryScanComparison.Exact
                 ? (long?)VanillaMemoryDiscoverySession.ParseSearchValue(SelectedType(), exact.Text) : null;
-            await RunAsync("Reading candidates…", () =>
+            VanillaMemoryScanValueType type = SelectedType();
+            VanillaMemoryScanScope selectedScope = SelectedScope();
+            await RunAsync("Reading candidates…", current =>
             {
-                VanillaMemoryDiscoverySession current = EnsureSession();
                 if (comparison == VanillaMemoryScanComparison.Exact && !current.HasBaseline)
-                    current.StartExact(SelectedType(), SelectedScope(), value.Value);
-                else if (current.Candidates.Count == 0) current.FirstCompare(comparison, value);
+                    current.StartExact(type, selectedScope, value.Value);
+                else if (!current.HasComparison) current.FirstCompare(comparison, value);
                 else current.Refine(comparison, value);
                 return comparison + " filter complete.";
             });
         }
 
-        private async Task RunAsync(string pending, Func<string> operation)
+        private async Task RunAsync(string pending, Func<VanillaMemoryDiscoverySession, string> operation)
         {
             if (busy) return;
             busy = true; SetButtons(false); status.Text = pending;
             try
             {
-                string message = await Task.Run(operation);
+                // Capture UI selection on the UI thread; the worker only uses its frozen session/options.
+                VanillaMemoryDiscoverySession current = EnsureSession();
+                string message = await Task.Run(() => operation(current));
                 if (disposed || IsDisposed) return;
                 RefreshGrid(); status.Text = message + " " + DescribeSession();
             }
-            catch (Exception ex) { if (!disposed && !IsDisposed) status.Text = "Stopped: " + ex.Message; }
+            catch (Exception ex)
+            {
+                if (!disposed && !IsDisposed)
+                {
+                    if (session != null && session.IsStopped) stoppedClients[session.ProcessId] = session.LastError ?? ex.Message;
+                    RefreshGrid();
+                    status.Text = "Stopped: " + ex.Message;
+                }
+            }
             finally { busy = false; if (!disposed && !IsDisposed) SetButtons(true); }
         }
 
@@ -131,8 +148,13 @@ namespace _4RTools.Model.Vanilla
         {
             ClientChoice choice = clients.SelectedItem as ClientChoice;
             if (choice == null) throw new InvalidOperationException("No live Vanilla client is selected.");
+            string stopped;
+            if (stoppedClients.TryGetValue(choice.ProcessId, out stopped))
+                throw new InvalidOperationException("Discovery remains stopped for PID " + choice.ProcessId + ". " + stopped);
             if (session != null && session.ProcessId == choice.ProcessId) return session;
-            session?.Dispose(); session = new VanillaMemoryDiscoverySession(choice.ProcessId); return session;
+            session?.Dispose(); session = null;
+            try { session = new VanillaMemoryDiscoverySession(choice.ProcessId); return session; }
+            catch (Exception ex) { stoppedClients[choice.ProcessId] = ex.Message; throw; }
         }
 
         private void RefreshClients()
@@ -186,7 +208,7 @@ namespace _4RTools.Model.Vanilla
 
         private void ExportCandidates()
         {
-            if (session == null || !session.HasBaseline) throw new InvalidOperationException("No discovery session exists.");
+            if (session == null || (!session.HasBaseline && !session.IsStopped)) throw new InvalidOperationException("No discovery session exists.");
             using (var dialog = new SaveFileDialog { Filter = "JSON report (*.json)|*.json", FileName = "vanilla-memory-candidates-" + session.ProcessId + ".json" })
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
@@ -196,10 +218,22 @@ namespace _4RTools.Model.Vanilla
 
         private VanillaMemoryScanValueType SelectedType() { return valueType.SelectedItem is VanillaMemoryScanValueType ? (VanillaMemoryScanValueType)valueType.SelectedItem : VanillaMemoryScanValueType.UInt32; }
         private VanillaMemoryScanScope SelectedScope() { var choice = scope.SelectedItem as Choice<VanillaMemoryScanScope>; return choice == null ? VanillaMemoryScanScope.MainModule : choice.Value; }
-        private void ResetSession(string message) { if (busy) return; session?.Dispose(); session = null; grid.Rows.Clear(); status.Text = message; }
+        private void ResetSession(string message)
+        {
+            if (busy) return;
+            session?.Dispose(); session = null; grid.Rows.Clear();
+            ClientChoice choice = clients.SelectedItem as ClientChoice;
+            string stopped;
+            status.Text = choice != null && stoppedClients.TryGetValue(choice.ProcessId, out stopped)
+                ? "Discovery remains stopped for PID " + choice.ProcessId + ". " + stopped : message;
+            SetButtons(true);
+        }
         private void SetButtons(bool enabled)
         {
-            baseline.Enabled = changed.Enabled = unchanged.Enabled = increased.Enabled = decreased.Enabled = exactScan.Enabled = reset.Enabled = copy.Enabled = export.Enabled = enabled;
+            ClientChoice choice = clients.SelectedItem as ClientChoice;
+            bool canRead = enabled && choice != null && !stoppedClients.ContainsKey(choice.ProcessId);
+            baseline.Enabled = changed.Enabled = unchanged.Enabled = increased.Enabled = decreased.Enabled = exactScan.Enabled = reset.Enabled = copy.Enabled = canRead;
+            export.Enabled = enabled && session != null && (session.HasBaseline || session.IsStopped);
             clients.Enabled = valueType.Enabled = scope.Enabled = enabled;
         }
         private static Button MakeButton(string text) { return new Button { Text = text, AutoSize = true, Margin = new Padding(4) }; }
