@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using _4RTools.Model.Vanilla;
 
 namespace Vanilla.Diagnostics.Tests
@@ -10,6 +11,7 @@ namespace Vanilla.Diagnostics.Tests
             int failed = 0;
             failed += Test("Memory finder parses decimal and hexadecimal values", ParseValues);
             failed += Test("Memory finder rejects values outside selected width", ParseBounds);
+            failed += Test("Memory finder copies all candidates with module offsets", CandidateClipboard);
             failed += Test("Weight fields accept UInt32 memory mappings", WeightMappings);
             failed += Test("Weight alert thresholds enforce re-arm hysteresis", WeightThresholds);
             failed += Test("Enabled weight e-mail alerts require SMTP transport", WeightMailValidation);
@@ -34,6 +36,19 @@ namespace Vanilla.Diagnostics.Tests
             Throws(() => VanillaMemoryDiscoverySession.ParseSearchValue(VanillaMemoryScanValueType.Byte, "256"));
             Throws(() => VanillaMemoryDiscoverySession.ParseSearchValue(VanillaMemoryScanValueType.UInt16, "-1"));
             Throws(() => VanillaMemoryDiscoverySession.ParseSearchValue(VanillaMemoryScanValueType.Int16, "32768"));
+        }
+
+        private static void CandidateClipboard()
+        {
+            var candidates = new List<VanillaMemoryCandidate>
+            {
+                new VanillaMemoryCandidate { Address = 0x401000, MainModuleOffset = 0x1000, PreviousValue = 383, CurrentValue = 388 },
+                new VanillaMemoryCandidate { Address = 0xD362EC, MainModuleOffset = 0xD352EC, PreviousValue = 2630, CurrentValue = 2630 }
+            };
+            string text = VanillaMemoryDiscoveryPanel.FormatCandidatesForClipboard(9928, VanillaMemoryScanValueType.UInt32, VanillaMemoryScanScope.MainModule, candidates);
+            Contains(text, "PID=9928\tType=UInt32\tScope=MainModule\tCandidates=2", "clipboard metadata");
+            Contains(text, "0x00401000\t0x1000\t383\t388\t5", "first candidate");
+            Contains(text, "0x00D362EC\t0xD352EC\t2630\t2630\t0", "second candidate");
         }
 
         private static void WeightMappings()
@@ -74,6 +89,11 @@ namespace Vanilla.Diagnostics.Tests
         private static void Equal(long expected, long actual, string label)
         {
             if (expected != actual) throw new Exception(label + ": expected " + expected + ", got " + actual + ".");
+        }
+
+        private static void Contains(string text, string expected, string label)
+        {
+            if (text == null || !text.Contains(expected)) throw new Exception(label + ": missing '" + expected + "'.");
         }
 
         private static void Throws(System.Action action)
