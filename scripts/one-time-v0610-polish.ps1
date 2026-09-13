@@ -4,6 +4,18 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 function ReadText([string]$path) { [IO.File]::ReadAllText($path) }
 function WriteText([string]$path,[string]$text) { [IO.File]::WriteAllText($path,$text,$utf8) }
 
+$path = 'Model/Vanilla/VanillaIntegratedShell.cs'
+$text = ReadText $path
+$oldUsing = "using _4RTools.Model;`r`nusing _4RTools.Model.Vanilla.Automation;"
+$newUsing = "using _4RTools.Model;`r`nusing _4RTools.Model.Vanilla;`r`nusing _4RTools.Model.Vanilla.Automation;"
+if (-not $text.Contains($oldUsing)) {
+    $oldUsing = "using _4RTools.Model;`nusing _4RTools.Model.Vanilla.Automation;"
+    $newUsing = "using _4RTools.Model;`nusing _4RTools.Model.Vanilla;`nusing _4RTools.Model.Vanilla.Automation;"
+}
+if (-not $text.Contains($oldUsing)) { throw 'VanillaIntegratedShell using anchor not found.' }
+$text = $text.Replace($oldUsing,$newUsing)
+WriteText $path $text
+
 $path = 'Model/Vanilla/VanillaTemporaryActions.cs'
 $text = ReadText $path
 $old = @'
@@ -46,4 +58,4 @@ if (-not $text.Contains($old)) { throw 'AGENTS product direction anchor not foun
 $text = $text.Replace($old,$new)
 WriteText $agents $text
 
-Write-Host '0.6.10 workspace polish applied.'
+Write-Host '0.6.10 workspace compile fix and polish applied.'
