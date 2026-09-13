@@ -19,6 +19,7 @@ namespace _4RTools.Forms
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+            ApplyVanillaFleetSizing();
             IntegrateMemoryDiscovery();
             IntegrateWeightAlerts();
         }
