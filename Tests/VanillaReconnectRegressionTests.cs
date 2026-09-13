@@ -22,6 +22,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Legacy login anchors migrate to verified field centers", LoginAnchorMigration);
             Test("Reconnect backoff doubles and caps at one hour", ExponentialBackoff);
             Test("Recovery ownership blocks parallel client workflows", SequentialRecoveryGate);
+            Test("Supervisor minimizes only healthy gameplay clients", ManagedMinimizePolicy);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -107,6 +108,19 @@ namespace Vanilla.Diagnostics.Tests
             Assert(VanillaRecoveryPolicy.BlocksParallelRecovery(true, false), "Recovery owner did not block parallel recovery.");
             Assert(VanillaRecoveryPolicy.BlocksParallelRecovery(false, true), "Active script did not block parallel recovery.");
         }
+
+        private static void ManagedMinimizePolicy()
+        {
+            Assert(VanillaReconnectSupervisor.ShouldKeepClientMinimized(VanillaReconnectStage.Online, VanillaVisualState.Unknown),
+                "Online supervised clients must be minimized.");
+            Assert(VanillaReconnectSupervisor.ShouldKeepClientMinimized(VanillaReconnectStage.WaitingForGameplay, VanillaVisualState.Gameplay),
+                "Confirmed gameplay must be minimized while the Online stage settles.");
+            Assert(!VanillaReconnectSupervisor.ShouldKeepClientMinimized(VanillaReconnectStage.LoggingIn, VanillaVisualState.LoginShell),
+                "The client currently receiving recovery input must stay available to the login workflow.");
+            Assert(!VanillaReconnectSupervisor.ShouldKeepClientMinimized(VanillaReconnectStage.WaitingForClient, VanillaVisualState.Unknown),
+                "A missing/unidentified client cannot be minimized.");
+        }
+
         private static void PersistentDataMigration()
         {
             string root = Temp();
@@ -143,7 +157,8 @@ namespace Vanilla.Diagnostics.Tests
             Assert(VanillaUpdater.IsNewerVersion(new Version(0, 6, 2), new Version(0, 6, 1)), "Newer patch version was rejected.");
             Assert(!VanillaUpdater.IsNewerVersion(new Version(0, 6, 1), new Version(0, 6, 1)), "Equal version was treated as an update.");
             Assert(!VanillaUpdater.IsNewerVersion(new Version(0, 5, 9), new Version(0, 6, 1)), "Older version was treated as an update.");
-        }        private static string Temp() { string p = Path.Combine(Path.GetTempPath(), "4rtools-reconnect-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(p); return p; }
+        }
+        private static string Temp() { string p = Path.Combine(Path.GetTempPath(), "4rtools-reconnect-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(p); return p; }
         private static void Delete(string p) { try { Directory.Delete(p, true); } catch { } }
         private static void Test(string name, Action action) { try { action(); passed++; Console.WriteLine("PASS " + name); } catch (Exception ex) { failed++; Console.Error.WriteLine("FAIL " + name + ": " + ex); } }
         private static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
