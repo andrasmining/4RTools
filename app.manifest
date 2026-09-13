@@ -16,9 +16,7 @@
  Remova esse elemento se seu aplicativo requer essa virtualização para compatibilidade
             com versões anteriores.
         -->
-        <!-- Observe Vanilla using the caller's existing permissions. A denied
-             read must never cause the application to request elevation. -->
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>
