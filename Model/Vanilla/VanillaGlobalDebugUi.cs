@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
-using System.Text;
 using System.Windows.Forms;
 
 namespace _4RTools.Forms
@@ -14,16 +13,10 @@ namespace _4RTools.Forms
         private System.Windows.Forms.Timer globalDebugSnapshotTimer;
         private string lastDebugSnapshot;
 
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            if (smokeTest || globalDebugUiInstalled) return;
-            globalDebugUiInstalled = true;
-            InstallGlobalDebugUi();
-        }
-
         private void InstallGlobalDebugUi()
         {
+            if (smokeTest || globalDebugUiInstalled) return;
+            globalDebugUiInstalled = true;
             _4RTools.Model.Vanilla.VanillaDebugLog.Initialize();
 
             Button updates = FindControlByText<Button>(this, "CHECK FOR UPDATES");
@@ -77,6 +70,11 @@ namespace _4RTools.Forms
             globalDebugSnapshotTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             globalDebugSnapshotTimer.Tick += (s, e) => WriteGlobalDebugSnapshot();
             globalDebugSnapshotTimer.Start();
+            FormClosed += (s, e) =>
+            {
+                try { globalDebugSnapshotTimer?.Stop(); globalDebugSnapshotTimer?.Dispose(); } catch { }
+                globalDebugSnapshotTimer = null;
+            };
             WriteGlobalDebugSnapshot();
         }
 
