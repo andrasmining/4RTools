@@ -9,20 +9,16 @@ using System.Windows.Forms;
 namespace _4RTools.Model.Vanilla
 {
     /// <summary>
-    /// Cold-start orchestration for the normal START SUPERVISOR path.
-    ///
-    /// Initial client creation is intentionally separate from the periodic supervisor timer:
-    /// one configured account is brought all the way from launcher -> proxy -> login -> server
-    /// -> character -> confirmed gameplay -> one resume hotkey -> minimized before another
-    /// missing account is allowed to start. Transient visual-recognition failures never close
-    /// the just-created client and never advance to the next account.
+    /// Strict cold-start orchestration for START SUPERVISOR.
+    /// One client must complete launcher -> proxy -> login -> server -> character -> gameplay
+    /// -> one resume hotkey -> minimize before the next configured client may start.
     /// </summary>
     public sealed partial class VanillaReconnectSupervisor
     {
         private int hardenedStartupGeneration;
         private bool hardenedStartupRunning;
 
-        private sealed class HardenedProxyReady
+        private sealed class ProxyReady
         {
             public Bitmap Image;
             public VanillaProxyLayout Layout;
@@ -39,7 +35,7 @@ namespace _4RTools.Model.Vanilla
             return gameplayConfirmed && resumeSent && minimized && !failed;
         }
 
-        public void StartHardenedSequentialStartup(Action<bool, string> completed)
+        public void StartHardenedSequentialStartup(System.Action<bool, string> completed)
         {
             VanillaReconnectSettings config;
             VanillaReconnectAccount[] configured;
@@ -53,13 +49,15 @@ namespace _4RTools.Model.Vanilla
                 settings.Validate();
                 RebuildRuntimes();
                 config = settings.Clone();
-                configured = config.Accounts.Where(a => a.Enabled).Take(config.MaxClients).Select(a => a.Clone()).ToArray();
+                configured = config.Accounts.Where(a => a.Enabled).ToArray();
                 if (configured.Length == 0) throw new InvalidOperationException("Enable at least one account first.");
+                if (configured.Length > 2) throw new InvalidOperationException("Vanilla supports at most two enabled clients on this PC.");
                 hardenedStartupRunning = true;
                 generation = Interlocked.Increment(ref hardenedStartupGeneration);
             }
 
-            Log("Sequential startup BEGIN for " + configured.Length + " client(s). No second client may start until the current client is in gameplay, resume hotkey was sent once, and its window is minimized.");
+            Log("Sequential startup BEGIN: " + configured.Length + " enabled client(s). Client 2 is hard-blocked until client 1 has gameplay confirmed, resume sent once, and minimize confirmed.");
+            VanillaDebugLog.Write("STARTUP", "BEGIN strict sequential startup for " + configured.Length + " client(s).");
             ThreadPool.QueueUserWorkItem(_ => HardenedStartupWorker(generation, configured, config, completed));
         }
 
@@ -79,17 +77,18 @@ namespace _4RTools.Model.Vanilla
                     }
                 }
             }
-            Log("Sequential startup STOP requested. No additional client will be launched.");
+            Log("Sequential startup STOP requested. No later client will be launched.");
+            VanillaDebugLog.Write("STARTUP", "STOP requested.");
             RaiseUpdated();
         }
 
-        private bool HardenedStartupCancelled(int generation)
+        private bool StartupCancelled(int generation)
         {
             return disposed || generation != Volatile.Read(ref hardenedStartupGeneration);
         }
 
         private void HardenedStartupWorker(int generation, VanillaReconnectAccount[] accounts, VanillaReconnectSettings config,
-            Action<bool, string> completed)
+            System.Action<bool, string> completed)
         {
             bool success = false;
             string result = null;
@@ -97,62 +96,63 @@ namespace _4RTools.Model.Vanilla
             {
                 for (int index = 0; index < accounts.Length; index++)
                 {
-                    if (HardenedStartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                    if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
                     VanillaReconnectAccount account = accounts[index];
                     Runtime runtime;
                     int? existingPid;
                     lock (gate)
                     {
                         if (!runtimes.TryGetValue(account.Id, out runtime)) throw new InvalidOperationException("Runtime disappeared for " + account.Label + ".");
-                        existingPid = runtime.ProcessId.HasValue && HardenedIsAlive(runtime.ProcessId.Value) ? runtime.ProcessId : null;
+                        existingPid = runtime.ProcessId.HasValue && IsAlive(runtime.ProcessId.Value) ? runtime.ProcessId : null;
                     }
 
                     if (existingPid.HasValue)
                     {
-                        Log(account.Label + ": existing Vanilla PID " + existingPid.Value + " is already assigned; verifying gameplay before allowing the next client.");
+                        Log(account.Label + ": existing PID " + existingPid.Value + " found. Verifying gameplay before releasing the sequential gate.");
+                        VanillaDebugLog.Write("STARTUP", account.Label + ": existing PID " + existingPid.Value + " verification begin.");
                         using (var input = new VanillaForegroundInput(existingPid.Value))
-                        {
-                            WaitForGameplayStable(input, existingPid.Value, generation, 12000, account.Label + ": existing client");
-                        }
+                            WaitForGameplayStable(input, existingPid.Value, generation, 15000, account.Label + " existing client");
+
                         if (!KeepAssignedClientMinimized(account.Id))
-                            throw new InvalidOperationException(account.Label + ": existing client is running but could not be minimized; next client was NOT started.");
+                            throw new InvalidOperationException(account.Label + ": existing gameplay client could not be confirmed minimized; next client was NOT started.");
+
                         lock (gate)
                         {
-                            runtime.ResumeSent = true; // adopted existing clients must never have their toggle resent automatically.
+                            runtime.ResumeSent = true; // never toggle an adopted already-running client.
                             runtime.HasBeenOnline = true;
-                            runtime.RecoveryOwned = false;
                             runtime.ScriptRunning = false;
+                            runtime.RecoveryOwned = false;
                             SetStage(runtime, VanillaReconnectStage.Online, "Existing gameplay client verified and minimized");
                         }
-                        Log(account.Label + ": existing gameplay client verified and minimized; sequential gate released for the next configured account.");
+                        Log(account.Label + ": existing client verified/minimized. Sequential gate released for next account.");
                         RaiseUpdated();
                         continue;
                     }
 
-                    RunOneHardenedStartup(generation, account, config, index + 1, accounts.Length);
+                    RunOneColdStart(generation, account, config, index + 1, accounts.Length);
                 }
 
-                if (HardenedStartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
                 lock (gate) hardenedStartupRunning = false;
-
-                // Only now start the continuous watchdog. At this point every configured client
-                // has independently completed gameplay + resume + minimize, so adopting them is safe.
                 Start();
                 success = true;
-                result = "Sequential startup completed. Every configured client reached gameplay, received its one-shot resume hotkey, and was minimized before the next client started. Continuous supervisor is now ON.";
+                result = "Sequential startup complete. Every enabled client reached gameplay, received its one-shot resume hotkey, and was minimized before the next client started. Continuous supervisor is ON.";
                 Log(result);
+                VanillaDebugLog.Write("STARTUP", result);
             }
             catch (OperationCanceledException ex)
             {
                 result = ex.Message;
                 lock (gate) hardenedStartupRunning = false;
                 Log("Sequential startup stopped: " + result);
+                VanillaDebugLog.Write("STARTUP", "STOPPED: " + result);
             }
             catch (Exception ex)
             {
                 result = ex.Message;
                 lock (gate) hardenedStartupRunning = false;
-                Log("Sequential startup FAILED and stopped before starting any later queued client: " + result);
+                Log("Sequential startup FAILED. Later queued clients were NOT started: " + result);
+                VanillaDebugLog.Write("STARTUP", "FAILED: " + ex);
             }
             finally
             {
@@ -165,8 +165,7 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        private void RunOneHardenedStartup(int generation, VanillaReconnectAccount account, VanillaReconnectSettings config,
-            int ordinal, int total)
+        private void RunOneColdStart(int generation, VanillaReconnectAccount account, VanillaReconnectSettings config, int ordinal, int total)
         {
             if (string.IsNullOrWhiteSpace(config.LaunchExecutable) || !File.Exists(config.LaunchExecutable))
                 throw new InvalidOperationException("Set the Vanilla launch executable before starting the supervisor.");
@@ -183,20 +182,25 @@ namespace _4RTools.Model.Vanilla
                 runtime.HasBeenOnline = false;
                 runtime.NextRecoveryAt = null;
                 SetStage(runtime, VanillaReconnectStage.Launching,
-                    "Sequential startup " + ordinal + "/" + total + ": launcher; all later clients are blocked");
+                    "Sequential startup " + ordinal + "/" + total + ": current client owns startup gate");
             }
             RaiseUpdated();
-            Log(account.Label + ": sequential startup " + ordinal + "/" + total + " owns the startup lease. No later client will launch until this one is completed and minimized.");
+            Log(account.Label + ": owns sequential startup gate (" + ordinal + "/" + total + "). No later client can launch yet.");
+            VanillaDebugLog.Write("STARTUP", account.Label + ": gate acquired; launcher start.");
 
             int? pid = null;
             try
             {
-                pid = VanillaPatcherLauncher.Launch(config.LaunchExecutable, config.LaunchArguments,
-                    message => Log(account.Label + ": " + message),
-                    () => HardenedStartupCancelled(generation),
+                pid = VanillaPatcherLauncher.Launch(config.LaunchExecutable, string.Empty,
+                    message =>
+                    {
+                        Log(account.Label + ": " + message);
+                        VanillaDebugLog.Write("LAUNCHER", account.Label + ": " + message);
+                    },
+                    () => StartupCancelled(generation),
                     debugDirectory: Path.Combine(baseDirectory, "Logs"));
-                if (!pid.HasValue) throw new InvalidOperationException(account.Label + ": launcher did not produce a Vanilla MMO process ID.");
 
+                if (!pid.HasValue) throw new InvalidOperationException(account.Label + ": launcher did not produce a Vanilla MMO PID.");
                 lock (gate)
                 {
                     Bind(runtime, pid.Value, true, "Sequential startup: launcher produced Vanilla client");
@@ -204,55 +208,50 @@ namespace _4RTools.Model.Vanilla
                     runtime.RecoveryOwned = true;
                 }
                 RaiseUpdated();
+                VanillaDebugLog.Write("STARTUP", account.Label + ": bound PID " + pid.Value + ". Waiting for expected UI states, not fixed loading delays.");
 
                 WaitForWindow(pid.Value, 60000);
-                if (HardenedStartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
-
                 using (var input = new VanillaForegroundInput(pid.Value))
                 {
-                    // No fixed Gepard sleep here. Poll the actual expected proxy screen and act
-                    // shortly after it is recognized twice in succession.
                     SelectProxyWhenVisible(input, pid.Value, account, config, generation);
 
-                    // Login detector already polls the live focused window. There is no blind stage delay.
                     string password = store.UnprotectPassword(account.ProtectedPassword);
                     if (string.IsNullOrEmpty(password)) throw new InvalidOperationException(account.Label + ": decrypted password is empty.");
-                    HumanSettle(generation, 180);
-                    FillDetectedCredentials(input, account, password, pid.Value, true, account.Label + ": sequential startup: ");
+                    BriefPause(generation, 160);
+                    input.Activate();
+                    FillDetectedCredentials(input, account, password, pid.Value, true, account.Label + ": sequential: ");
+                    VanillaDebugLog.Write("STARTUP", account.Label + ": credentials submitted after login controls were detected and focus verified.");
 
-                    // Wait for the server dialog itself, then verify it actually closes.
-                    if (HardenedStartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
-                    SelectDetectedGameServer(input, pid.Value, 900, account.Label + ": sequential startup: ");
+                    if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                    input.Activate();
+                    SelectDetectedGameServer(input, pid.Value, 700, account.Label + ": sequential: ");
+                    VanillaDebugLog.Write("STARTUP", account.Label + ": server dialog handled after visual detection.");
 
-                    // Character selection has no text field to key off. Wait for the auth/server/proxy
-                    // surfaces to disappear and for the resulting interactive frame to settle instead
-                    // of sleeping a fixed multi-second interval.
-                    WaitForCharacterSurface(input, pid.Value, generation, config);
+                    WaitForCharacterSurface(input, pid.Value, generation);
                     int slot = Math.Max(1, Math.Min(15, account.CharacterSlot)) - 1;
                     int col = slot % 5, row = slot / 5;
                     input.Activate();
-                    HumanSettle(generation, 160);
+                    BriefPause(generation, 120);
                     input.ClickNormalized(config.Anchors.CharacterGridX + col * config.Anchors.CharacterStepX,
                         config.Anchors.CharacterGridY + row * config.Anchors.CharacterStepY);
-                    HumanSettle(generation, 260);
+                    BriefPause(generation, 220);
                     input.Activate();
                     input.ClickNormalized(config.Anchors.GameStartX, config.Anchors.GameStartY);
-                    Log(account.Label + ": character slot " + account.CharacterSlot + " selected; GAME START clicked with the Vanilla window foreground-verified.");
+                    Log(account.Label + ": character slot " + account.CharacterSlot + " selected; GAME START clicked with foreground verified.");
+                    VanillaDebugLog.Write("STARTUP", account.Label + ": character slot selected and GAME START clicked.");
 
-                    // Do not use a fixed GameLoadMs. The resume toggle is sent only after gameplay
-                    // has been visually observed in consecutive samples.
-                    WaitForGameplayStable(input, pid.Value, generation, 60000, account.Label + ": post-character load");
-                    HumanSettle(generation, 320);
+                    WaitForGameplayStable(input, pid.Value, generation, 60000, account.Label + " post-character");
+                    BriefPause(generation, 260);
                     input.Activate();
-                    HumanSettle(generation, 140);
+                    BriefPause(generation, 100);
                     input.Chord(account.ResumeCtrl, account.ResumeAlt, account.ResumeShift, (Keys)account.ResumeKey);
-                    Log(account.Label + ": gameplay stable; sent resume hotkey " + account.HotkeyText + " exactly once after foreground verification.");
+                    Log(account.Label + ": gameplay confirmed; resume hotkey " + account.HotkeyText + " sent once with focus verified.");
+                    VanillaDebugLog.Write("INPUT", account.Label + ": resume hotkey " + account.HotkeyText + " sent once after stable gameplay.");
                 }
 
                 bool minimized = KeepAssignedClientMinimized(account.Id);
-                bool mayAdvance = SequentialStartupMayAdvance(true, true, minimized, false);
-                if (!mayAdvance)
-                    throw new InvalidOperationException(account.Label + ": gameplay/login completed but the client could not be confirmed minimized; next client was NOT started.");
+                if (!SequentialStartupMayAdvance(true, true, minimized, false))
+                    throw new InvalidOperationException(account.Label + ": could not confirm minimization; next client was NOT started.");
 
                 lock (gate)
                 {
@@ -262,11 +261,11 @@ namespace _4RTools.Model.Vanilla
                     runtime.RecoveryOwned = false;
                     runtime.RecoveryFailures = 0;
                     runtime.NextRecoveryAt = null;
-                    SetStage(runtime, VanillaReconnectStage.Online,
-                        "Sequential startup complete: gameplay confirmed, resume sent once, minimized");
+                    SetStage(runtime, VanillaReconnectStage.Online, "Sequential startup complete: gameplay + resume + minimized");
                 }
                 RaiseUpdated();
-                Log(account.Label + ": sequential startup COMPLETE and minimized. Only now is the next configured client allowed to start.");
+                Log(account.Label + ": COMPLETE + MINIMIZED. Only now may the next account start.");
+                VanillaDebugLog.Write("STARTUP", account.Label + ": gate released after gameplay + resume + minimize.");
             }
             catch
             {
@@ -275,11 +274,11 @@ namespace _4RTools.Model.Vanilla
                     runtime.ScriptRunning = false;
                     runtime.RecoveryOwned = false;
                     SetStage(runtime, VanillaReconnectStage.Error,
-                        "Sequential startup failed; client left running if present; later clients were not started");
+                        "Sequential startup failed; current client left running; later clients blocked");
                 }
                 RaiseUpdated();
-                // Deliberately DO NOT close or kill pid here. A transient recognition/focus failure
-                // must never destroy the just-started client or cause the next account to launch.
+                // Never close a newly created client because a transient visual/focus check failed.
+                // Fail closed and keep every later account blocked.
                 throw;
             }
         }
@@ -287,43 +286,44 @@ namespace _4RTools.Model.Vanilla
         private void SelectProxyWhenVisible(VanillaForegroundInput input, int pid, VanillaReconnectAccount account,
             VanillaReconnectSettings config, int generation)
         {
-            HardenedProxyReady ready = WaitForProxyReady(input, generation, 45000);
+            ProxyReady ready = WaitForProxyReady(input, generation, 45000);
             using (ready.Image)
             {
-                int routeIndex = (int)config.Proxy;
+                VanillaProxyRoute route = VanillaAccountProxyPreferences.Get(account.Id, config.Proxy);
+                int routeIndex = (int)route;
                 if (routeIndex < 0 || routeIndex >= ready.Layout.Rows.Length)
-                    throw new InvalidOperationException("Configured proxy route is outside the detected proxy list.");
+                    throw new InvalidOperationException(account.Label + ": configured proxy route is outside detected list.");
+
                 Rectangle safe = ready.Layout.Rows[routeIndex];
                 var random = new Random(unchecked(Environment.TickCount ^ pid ^ (routeIndex * 7919)));
                 int marginX = Math.Max(1, safe.Width / 4), marginY = Math.Max(1, safe.Height / 4);
                 int px = random.Next(safe.Left + marginX, Math.Max(safe.Left + marginX + 1, safe.Right - marginX));
                 int py = random.Next(safe.Top + marginY, Math.Max(safe.Top + marginY + 1, safe.Bottom - marginY));
-                double x = (px + 0.5) / ready.Image.Width;
-                double y = (py + 0.5) / ready.Image.Height;
 
                 input.Activate();
-                HumanSettle(generation, 180);
-                input.ClickNormalized(x, y);
-                for (int i = 0; i < 8; i++) { input.Press(Keys.Up); HumanSettle(generation, 35); }
-                for (int i = 0; i < routeIndex; i++) { input.Press(Keys.Down); HumanSettle(generation, 45); }
+                BriefPause(generation, 150);
+                input.ClickNormalized((px + 0.5) / ready.Image.Width, (py + 0.5) / ready.Image.Height);
+                for (int i = 0; i < 8; i++) { input.Press(Keys.Up); BriefPause(generation, 25); }
+                for (int i = 0; i < routeIndex; i++) { input.Press(Keys.Down); BriefPause(generation, 35); }
                 input.Activate();
                 input.Press(Keys.Enter);
-                Log(account.Label + ": proxy " + config.Proxy + " selected immediately after two stable detections; " + ready.Evidence);
+                Log(account.Label + ": account proxy " + route + " selected after two stable visual detections.");
+                VanillaDebugLog.Write("STARTUP", account.Label + ": proxy=" + route + "; " + ready.Evidence);
             }
         }
 
-        private HardenedProxyReady WaitForProxyReady(VanillaForegroundInput input, int generation, int timeoutMs)
+        private ProxyReady WaitForProxyReady(VanillaForegroundInput input, int generation, int timeoutMs)
         {
             Stopwatch watch = Stopwatch.StartNew();
             int consecutive = 0;
             string last = "not sampled";
             while (watch.ElapsedMilliseconds < timeoutMs)
             {
-                if (HardenedStartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
                 Bitmap image = null;
                 try
                 {
-                    image = input.CaptureClientBitmap(); // Capture foreground-verifies the exact Vanilla window.
+                    image = input.CaptureClientBitmap();
                     VanillaProxyLayout layout;
                     string evidence;
                     if (VanillaProxyPattern.TryDetect(image, out layout, out evidence))
@@ -331,7 +331,10 @@ namespace _4RTools.Model.Vanilla
                         consecutive++;
                         last = evidence;
                         if (consecutive >= 2)
-                            return new HardenedProxyReady { Image = image, Layout = layout, Evidence = evidence };
+                        {
+                            VanillaDebugLog.Write("STARTUP", "Proxy screen stable after " + watch.ElapsedMilliseconds + " ms.");
+                            return new ProxyReady { Image = image, Layout = layout, Evidence = evidence };
+                        }
                     }
                     else
                     {
@@ -339,37 +342,35 @@ namespace _4RTools.Model.Vanilla
                         last = evidence;
                     }
                 }
-                finally
-                {
-                    if (consecutive < 2 && image != null) image.Dispose();
-                }
-                Thread.Sleep(170);
+                finally { if (consecutive < 2 && image != null) image.Dispose(); }
+                Thread.Sleep(150);
             }
-            throw new InvalidOperationException("Proxy screen did not become stably recognizable; client was left running and no later client was started. Last detector result: " + last);
+            throw new InvalidOperationException("Proxy screen was not stably detected. Client was left running; later clients were NOT started. Last detector: " + last);
         }
 
-        private void WaitForCharacterSurface(VanillaForegroundInput input, int pid, int generation, VanillaReconnectSettings config)
+        private void WaitForCharacterSurface(VanillaForegroundInput input, int pid, int generation)
         {
             Stopwatch watch = Stopwatch.StartNew();
-            int ready = 0;
-            string last = "waiting for auth/server/proxy surfaces to disappear";
+            int consecutive = 0;
+            string last = "not sampled";
             while (watch.ElapsedMilliseconds < 30000)
             {
-                if (HardenedStartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
                 using (Bitmap image = input.CaptureClientBitmap())
                 {
                     VanillaLoginLayout login;
                     VanillaServerLayout server;
                     VanillaProxyLayout proxyLayout;
                     string evidence;
-                    bool auth = VanillaAuthPattern.TryDetectLogin(image, out login, out evidence);
+                    bool loginVisible = VanillaAuthPattern.TryDetectLogin(image, out login, out evidence);
                     bool serverVisible = VanillaAuthPattern.TryDetectServerDialog(image, out server, out evidence);
                     bool proxyVisible = VanillaProxyPattern.TryDetect(image, out proxyLayout, out evidence);
-                    bool usable = IsInteractiveFrame(image);
-                    if (!auth && !serverVisible && !proxyVisible && usable && watch.ElapsedMilliseconds >= 500)
+                    bool interactive = IsInteractiveFrame(image);
+                    last = "login=" + loginVisible + ", server=" + serverVisible + ", proxy=" + proxyVisible + ", interactive=" + interactive;
+                    if (!loginVisible && !serverVisible && !proxyVisible && interactive && watch.ElapsedMilliseconds >= 450)
                     {
-                        ready++;
-                        if (ready >= 3)
+                        consecutive++;
+                        if (consecutive >= 3)
                         {
                             try
                             {
@@ -378,19 +379,15 @@ namespace _4RTools.Model.Vanilla
                                 image.Save(path);
                             }
                             catch { }
-                            Log("Sequential startup: character surface for PID " + pid + " became stable after " + watch.ElapsedMilliseconds + " ms; acting after three focused samples instead of a fixed load delay.");
+                            VanillaDebugLog.Write("STARTUP", "Character surface PID=" + pid + " stable after " + watch.ElapsedMilliseconds + " ms; " + last + ".");
                             return;
                         }
                     }
-                    else
-                    {
-                        ready = 0;
-                        last = "login=" + auth + ", server=" + serverVisible + ", proxy=" + proxyVisible + ", interactive=" + usable;
-                    }
+                    else consecutive = 0;
                 }
-                Thread.Sleep(180);
+                Thread.Sleep(160);
             }
-            throw new InvalidOperationException("Character selection surface was not observed safely; client was left running and no later client was started. Last state: " + last);
+            throw new InvalidOperationException("Character surface was not safely detected. Client was left running; later clients were NOT started. Last state: " + last);
         }
 
         private static bool IsInteractiveFrame(Bitmap image)
@@ -421,7 +418,7 @@ namespace _4RTools.Model.Vanilla
             VanillaVisualState last = VanillaVisualState.Unknown;
             while (watch.ElapsedMilliseconds < timeoutMs)
             {
-                if (HardenedStartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
                 input.Activate();
                 using (var process = Process.GetProcessById(pid))
                 {
@@ -430,42 +427,42 @@ namespace _4RTools.Model.Vanilla
                     if (process.MainWindowHandle == IntPtr.Zero)
                     {
                         consecutive = 0;
-                        Thread.Sleep(180);
+                        Thread.Sleep(150);
                         continue;
                     }
                     last = VanillaVisualProbe.Classify(process.MainWindowHandle);
                 }
 
-                if (last == VanillaVisualState.Gameplay && watch.ElapsedMilliseconds >= 700)
+                VanillaDebugLog.Write("VISUAL", context + ": PID=" + pid + ", state=" + last + ", elapsedMs=" + watch.ElapsedMilliseconds + ".");
+                if (last == VanillaVisualState.Gameplay && watch.ElapsedMilliseconds >= 600)
                 {
                     consecutive++;
                     if (consecutive >= 3)
                     {
-                        Log(context + ": gameplay confirmed in three consecutive foreground samples after " + watch.ElapsedMilliseconds + " ms.");
+                        Log(context + ": gameplay confirmed in three consecutive focused samples after " + watch.ElapsedMilliseconds + " ms.");
                         return;
                     }
                 }
                 else consecutive = 0;
-
-                Thread.Sleep(200);
+                Thread.Sleep(180);
             }
-            throw new InvalidOperationException(context + ": gameplay was not confirmed stably within " + (timeoutMs / 1000)
-                + " seconds (last visual state " + last + "); client was left running and no later client was started.");
+            throw new InvalidOperationException(context + ": gameplay not stably confirmed within " + (timeoutMs / 1000)
+                + "s (last=" + last + "). Client was left running; later clients were NOT started.");
         }
 
-        private void HumanSettle(int generation, int milliseconds)
+        private void BriefPause(int generation, int milliseconds)
         {
             int remaining = Math.Max(0, milliseconds);
             while (remaining > 0)
             {
-                if (HardenedStartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
-                int slice = Math.Min(80, remaining);
+                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                int slice = Math.Min(60, remaining);
                 Thread.Sleep(slice);
                 remaining -= slice;
             }
         }
 
-        private static bool HardenedIsAlive(int pid)
+        private static bool IsAlive(int pid)
         {
             try { using (var process = Process.GetProcessById(pid)) return !process.HasExited; }
             catch { return false; }
@@ -481,12 +478,12 @@ namespace _4RTools.Model.Vanilla
             if (hardenedSupervisorButtonsInstalled) return;
             hardenedSupervisorButtonsInstalled = true;
             ReplaceSupervisorButton(this, "START SUPERVISOR", "START SUPERVISOR", StartSupervisorHardened,
-                "Cold-start missing clients strictly one at a time. The current client must reach gameplay, receive its resume hotkey once, and be minimized before another client can start.");
+                "Cold-start enabled clients strictly one at a time. A client must reach gameplay, receive its resume hotkey once, and be minimized before another client can start.");
             ReplaceSupervisorButton(this, "STOP", "STOP", StopSupervisorHardened,
                 "Stop continuous supervision and cancel any in-progress serialized startup. Running Vanilla clients are left open.");
         }
 
-        private void ReplaceSupervisorButton(Control root, string oldText, string newText, Action action, string tooltip)
+        private void ReplaceSupervisorButton(Control root, string oldText, string newText, System.Action action, string tooltip)
         {
             foreach (Control child in root.Controls.Cast<Control>().ToArray())
             {
@@ -514,18 +511,23 @@ namespace _4RTools.Model.Vanilla
             {
                 if (testRunning) throw new InvalidOperationException("Stop the current diagnostic test before starting the supervisor.");
                 if (supervisor.IsHardenedStartupRunning) throw new InvalidOperationException("Sequential startup is already running.");
+                SynchronizeDerivedUiValues();
                 ReadTop();
+                settings.LaunchArguments = string.Empty;
+                settings.MaxClients = Math.Max(1, settings.Accounts.Count(a => a.Enabled));
                 supervisor.Apply(settings, true);
                 if (supervisor.IsRunning) supervisor.Stop();
                 supervisor.DetectRunningClients();
                 runState.Text = "STARTING";
                 runState.ForeColor = Color.DarkOrange;
-                testState.Text = "Sequential startup: one client at a time; waiting for observed UI states.";
+                testState.Text = "Sequential startup: one client at a time; acting on observed UI states.";
                 testState.ForeColor = Color.DarkSlateBlue;
+                VanillaDebugLog.Write("UI", "START SUPERVISOR clicked. enabledAccounts=" + settings.Accounts.Count(a => a.Enabled) + ".");
                 supervisor.StartHardenedSequentialStartup(HardenedSupervisorStartupCompleted);
             }
             catch (Exception ex)
             {
+                VanillaDebugLog.Write("UI", "START SUPERVISOR failed: " + ex);
                 MessageBox.Show(this, ex.Message, "Cannot start reconnect supervisor", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -534,6 +536,7 @@ namespace _4RTools.Model.Vanilla
         {
             try { supervisor.CancelHardenedSequentialStartup(); } catch { }
             try { supervisor.Stop(); } catch { }
+            VanillaDebugLog.Write("UI", "STOP supervisor clicked.");
             RefreshStatus();
         }
 
@@ -545,12 +548,10 @@ namespace _4RTools.Model.Vanilla
                 BeginInvoke((MethodInvoker)(() => HardenedSupervisorStartupCompleted(success, message)));
                 return;
             }
-
             RefreshStatus();
             testState.Text = success ? "SEQUENTIAL STARTUP COMPLETE" : "SEQUENTIAL STARTUP STOPPED";
             testState.ForeColor = success ? Color.DarkGreen : Color.DarkRed;
-            if (!success)
-                MessageBox.Show(this, message, "Sequential startup stopped", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (!success) MessageBox.Show(this, message, "Sequential startup stopped", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 }
