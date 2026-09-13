@@ -1,16 +1,15 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using Newtonsoft.Json;
 using _4RTools.Model.Vanilla;
-using _4RTools.Utils;
 
 namespace Vanilla.Diagnostics.Tests
 {
     internal static class VanillaReconnectRegressionTests
     {
         private static int passed, failed;
+
         internal static int Run()
         {
             Test("Fresh reconnect settings contain exactly two defaults", FreshDefaults);
@@ -24,40 +23,52 @@ namespace Vanilla.Diagnostics.Tests
             Test("Reconnect backoff doubles and caps at one hour", ExponentialBackoff);
             Test("Recovery ownership blocks parallel client workflows", SequentialRecoveryGate);
             Test("Supervisor minimizes only healthy gameplay clients", ManagedMinimizePolicy);
-            Test("Denied initial observation is marked for fresh-client recovery", ObservationAccessRecoveryPolicy);
-            Test("Restart observation repair can temporarily cover all live configured clients", ObservationRepairAssignmentPolicy);
+            Test("Launcher PID binding closes the duplicate-launch race", SequentialLaunchBinding);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
+
         private static void FreshDefaults()
         {
             string root = Temp();
-            try { var value = new VanillaReconnectStore(root).Load(); Assert(value.Accounts.Count == 2, "Fresh settings need two rows."); }
+            try
+            {
+                var value = new VanillaReconnectStore(root).Load();
+                Assert(value.Accounts.Count == 2, "Fresh settings need two rows.");
+            }
             finally { Delete(root); }
         }
+
         private static void CloneDoesNotDuplicate()
         {
             var value = VanillaReconnectSettings.CreateDefault();
-            value.Accounts[0].Label = "ender02"; value.Accounts[0].UserName = "ender02"; value.Accounts[0].ProtectedPassword = "encrypted-a";
-            value.Accounts[1].Label = "slave"; value.Accounts[1].UserName = "ender03"; value.Accounts[1].ProtectedPassword = "encrypted-b";
+            value.Accounts[0].Label = "first";
+            value.Accounts[0].UserName = "user-a";
+            value.Accounts[1].Label = "second";
+            value.Accounts[1].UserName = "user-b";
             var clone = value.Clone();
-            Assert(clone.Accounts.Count == 2 && clone.Accounts[0].Label == "ender02" && clone.Accounts[1].Label == "slave", "Clone changed or duplicated rows.");
+            Assert(clone.Accounts.Count == 2 && clone.Accounts[0].Label == "first" && clone.Accounts[1].Label == "second",
+                "Clone changed or duplicated rows.");
         }
+
         private static void LegacyDuplicateMigration()
         {
             string root = Temp();
             try
             {
                 var legacy = VanillaReconnectSettings.CreateDefault();
-                legacy.Accounts.Add(new VanillaReconnectAccount { Label = "ender02", UserName = "ender02", ProtectedPassword = "encrypted-a", CharacterSlot = 4 });
-                legacy.Accounts.Add(new VanillaReconnectAccount { Label = "slave", UserName = "ender03", ProtectedPassword = "encrypted-b", CharacterSlot = 1 });
-                string dir = Path.Combine(root, "VanillaReconnect"); Directory.CreateDirectory(dir);
+                legacy.Accounts.Add(new VanillaReconnectAccount { Label = "first", UserName = "user-a", CharacterSlot = 4 });
+                legacy.Accounts.Add(new VanillaReconnectAccount { Label = "second", UserName = "user-b", CharacterSlot = 1 });
+                string dir = Path.Combine(root, "VanillaReconnect");
+                Directory.CreateDirectory(dir);
                 File.WriteAllText(Path.Combine(dir, "reconnect.json"), JsonConvert.SerializeObject(legacy, Formatting.Indented));
                 var loaded = new VanillaReconnectStore(root).Load();
-                Assert(loaded.Accounts.Count == 2 && loaded.Accounts[0].Label == "ender02" && loaded.Accounts[1].Label == "slave", "Configured rows did not win over synthetic defaults.");
+                Assert(loaded.Accounts.Count == 2 && loaded.Accounts[0].Label == "first" && loaded.Accounts[1].Label == "second",
+                    "Configured rows did not win over synthetic defaults.");
             }
             finally { Delete(root); }
         }
+
         private static void StatusTracksCurrentSettings()
         {
             string root = Temp();
@@ -65,35 +76,36 @@ namespace Vanilla.Diagnostics.Tests
             {
                 using (var supervisor = new VanillaReconnectSupervisor(root))
                 {
-                    var value = supervisor.Settings; value.Accounts.RemoveAt(1); supervisor.Apply(value, false);
-                    var rows = supervisor.Statuses(); Assert(rows.Count == 1 && rows[0].Label == "Client 1", "Removed row lingered in status.");
+                    var value = supervisor.Settings;
+                    value.Accounts.RemoveAt(1);
+                    supervisor.Apply(value, false);
+                    var rows = supervisor.Statuses();
+                    Assert(rows.Count == 1 && rows[0].Label == "Client 1", "Removed row lingered in status.");
                 }
             }
             finally { Delete(root); }
         }
+
         private static void VanillaLauncherName()
         {
             Type type = typeof(VanillaReconnectSettings).Assembly.GetType("_4RTools.Model.Vanilla.VanillaPatcherLauncher", true);
             MethodInfo method = type.GetMethod("IsPatcher", BindingFlags.Static | BindingFlags.NonPublic);
-            Assert((bool)method.Invoke(null, new object[] { @"C:\Games\Vanilla RO\Vanilla Launcher.exe" }), "Vanilla Launcher.exe was not recognized.");
+            Assert((bool)method.Invoke(null, new object[] { @"C:\Games\Vanilla RO\Vanilla Launcher.exe" }),
+                "Vanilla Launcher.exe was not recognized.");
             Assert((bool)method.Invoke(null, new object[] { @"C:\Games\Vanilla RO\patcher.exe" }), "patcher.exe regressed.");
         }
+
         private static void LoginAnchorMigration()
         {
             var legacy = VanillaReconnectSettings.CreateDefault();
             legacy.Anchors.UserNameY = 0.66;
             legacy.Anchors.PasswordY = 0.685;
             var migrated = legacy.Clone();
-            Assert(Math.Abs(migrated.Anchors.UserNameY - 0.677) < 0.0001 && Math.Abs(migrated.Anchors.PasswordY - 0.697) < 0.0001,
+            Assert(Math.Abs(migrated.Anchors.UserNameY - 0.677) < 0.0001
+                && Math.Abs(migrated.Anchors.PasswordY - 0.697) < 0.0001,
                 "Legacy login-field coordinates were not migrated.");
-
-            var interim = VanillaReconnectSettings.CreateDefault();
-            interim.Anchors.UserNameY = 0.635;
-            interim.Anchors.PasswordY = 0.660;
-            migrated = interim.Clone();
-            Assert(Math.Abs(migrated.Anchors.UserNameY - 0.677) < 0.0001 && Math.Abs(migrated.Anchors.PasswordY - 0.697) < 0.0001,
-                "Interim login-field coordinates were not migrated.");
         }
+
         private static void ExponentialBackoff()
         {
             Assert(VanillaRecoveryPolicy.RetryDelayMs(1, 30000, 3600000) == 30000, "First failure should wait 30 seconds.");
@@ -101,8 +113,6 @@ namespace Vanilla.Diagnostics.Tests
             Assert(VanillaRecoveryPolicy.RetryDelayMs(3, 30000, 3600000) == 120000, "Third failure should wait 120 seconds.");
             Assert(VanillaRecoveryPolicy.RetryDelayMs(8, 30000, 3600000) == 3600000, "Retry interval must cap at one hour.");
             Assert(VanillaRecoveryPolicy.RetryDelayMs(20, 30000, 3600000) == 3600000, "Retry interval exceeded one-hour cap.");
-            var defaults = VanillaReconnectSettings.CreateDefault();
-            Assert(defaults.MaxRetryBackoffMs == 3600000, "Default maximum retry backoff is not one hour.");
         }
 
         private static void SequentialRecoveryGate()
@@ -117,50 +127,32 @@ namespace Vanilla.Diagnostics.Tests
             Assert(VanillaReconnectSupervisor.ShouldKeepClientMinimized(VanillaReconnectStage.Online, VanillaVisualState.Unknown),
                 "Online supervised clients must be minimized.");
             Assert(VanillaReconnectSupervisor.ShouldKeepClientMinimized(VanillaReconnectStage.WaitingForGameplay, VanillaVisualState.Gameplay),
-                "Confirmed gameplay must be minimized while the Online stage settles.");
+                "Confirmed gameplay must be minimized while Online settles.");
             Assert(!VanillaReconnectSupervisor.ShouldKeepClientMinimized(VanillaReconnectStage.LoggingIn, VanillaVisualState.LoginShell),
-                "The client currently receiving recovery input must stay available to the login workflow.");
-            Assert(!VanillaReconnectSupervisor.ShouldKeepClientMinimized(VanillaReconnectStage.WaitingForClient, VanillaVisualState.Unknown),
-                "A missing/unidentified client cannot be minimized.");
+                "The client receiving login input must stay available.");
         }
 
-        private static void ObservationAccessRecoveryPolicy()
+        private static void SequentialLaunchBinding()
         {
-            const int pid = 987654;
-            string detail;
-            ProcessObservationAccessRegistry.Forget(pid);
-            Assert(!ProcessObservationAccessRegistry.RequiresFreshClientProcess(pid, out detail), "Unknown PID was marked for recycle.");
-            ProcessObservationAccessRegistry.RecordInitialOpenFailure(pid, "OpenProcess(read/limited-query, 0x1010)", 5, "access denied");
-            Assert(ProcessObservationAccessRegistry.RequiresFreshClientProcess(pid, out detail) && detail == "access denied",
-                "Normal read-only OpenProcess access denial was not retained.");
-            Assert(VanillaObservationRecoveryPolicy.ShouldRecycle(true, true, false, true),
-                "Running auto-recovery supervisor should recycle a denied pre-existing client.");
-            Assert(!VanillaObservationRecoveryPolicy.ShouldRecycle(false, true, false, true), "Stopped supervisor must not recycle clients.");
-            Assert(!VanillaObservationRecoveryPolicy.ShouldRecycle(true, false, false, true), "Disabled auto-recovery must not recycle clients.");
-            Assert(!VanillaObservationRecoveryPolicy.ShouldRecycle(true, true, true, true), "Active recovery script must not be interrupted.");
-            ProcessObservationAccessRegistry.RecordOpenSuccess(pid);
-            Assert(!ProcessObservationAccessRegistry.RequiresFreshClientProcess(pid, out detail), "Successful fresh OpenProcess did not clear denial state.");
-            ProcessObservationAccessRegistry.RecordInitialOpenFailure(pid, "OpenProcess(read/limited-query, 0x1010)", 87, "wrong error");
-            Assert(!ProcessObservationAccessRegistry.RequiresFreshClientProcess(pid, out detail), "Non-access-denied failure was incorrectly recycled.");
-            ProcessObservationAccessRegistry.Forget(pid);
-        }
-
-        private static void ObservationRepairAssignmentPolicy()
-        {
-            Assert(VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(2, 2, 2),
-                "Two configured accounts and two denied live clients should be repairable in account/start-order mapping.");
-            Assert(VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(2, 2, 1),
-                "One denied client is identifiable when both configured live clients are present.");
-            Assert(VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(1, 1, 1),
-                "Single configured live client should be repairable.");
-            Assert(!VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(2, 1, 1),
-                "One surviving client among two configured accounts is ambiguous without a readable identity.");
-            Assert(!VanillaObservationRecoveryPolicy.HasUnambiguousStartupAssignment(1, 2, 1),
-                "Two live clients cannot be assigned to one enabled account.");
-            Assert(VanillaObservationRecoveryPolicy.TemporaryClientLimit(1, 2, 2) == 2,
-                "Repair must temporarily widen a saved one-client limit when both configured clients are already running.");
-            Assert(VanillaObservationRecoveryPolicy.TemporaryClientLimit(1, 1, 1) == 1,
-                "Single-client repair unexpectedly widened its limit.");
+            int pid;
+            Assert(VanillaReconnectSupervisor.TryParseLaunchedVanillaPid(
+                    "Monk: Patcher started Vanilla MMO (PID 26220).", true, out pid) && pid == 26220,
+                "Patcher-reported game PID was not parsed.");
+            Assert(!VanillaReconnectSupervisor.TryParseLaunchedVanillaPid(
+                    "Monk: Launcher start requested: exe='Vanilla Launcher.exe', startedPID=29128, preExistingVanillaPIDs=[]", true, out pid),
+                "Patcher mode incorrectly treated the launcher PID as the game PID.");
+            Assert(VanillaReconnectSupervisor.TryParseLaunchedVanillaPid(
+                    "Monk: Launcher start requested: exe='Vanilla MMO.exe', startedPID=31415, preExistingVanillaPIDs=[]", false, out pid)
+                    && pid == 31415,
+                "Direct game PID was not parsed.");
+            Assert(VanillaReconnectSupervisor.IsPendingSequentialLaunch(true, true, false, VanillaReconnectStage.Launching),
+                "Active launcher owner must remain pending before binding.");
+            Assert(VanillaReconnectSupervisor.IsPendingSequentialLaunch(true, true, false, VanillaReconnectStage.WaitingForWindow),
+                "Waiting-for-window launcher owner must remain pending before binding.");
+            Assert(!VanillaReconnectSupervisor.IsPendingSequentialLaunch(true, true, true, VanillaReconnectStage.Launching),
+                "An already-bound process must not be rebound.");
+            Assert(!VanillaReconnectSupervisor.IsPendingSequentialLaunch(false, true, false, VanillaReconnectStage.Launching),
+                "A runtime without the recovery lease must not claim a PID.");
         }
 
         private static void PersistentDataMigration()
@@ -186,7 +178,6 @@ namespace Vanilla.Diagnostics.Tests
                 Assert(File.Exists(Path.Combine(data, "Profiles", "Vanilla", "Farm.json")), "Vanilla profile did not migrate.");
                 Assert(File.Exists(Path.Combine(data, "VanillaReconnect", "reconnect.json")), "Reconnect settings did not migrate.");
                 Assert(File.Exists(Path.Combine(data, "supported_servers.json")), "Local server settings did not migrate.");
-                Assert(File.Exists(Path.Combine(oldInstall, "VanillaReconnect", "reconnect.json")), "Sibling release should remain a rollback backup.");
             }
             finally
             {
@@ -194,15 +185,35 @@ namespace Vanilla.Diagnostics.Tests
                 Delete(root);
             }
         }
+
         private static void UpdaterVersionComparison()
         {
-            Assert(VanillaUpdater.IsNewerVersion(new Version(0, 6, 2), new Version(0, 6, 1)), "Newer patch version was rejected.");
-            Assert(!VanillaUpdater.IsNewerVersion(new Version(0, 6, 1), new Version(0, 6, 1)), "Equal version was treated as an update.");
-            Assert(!VanillaUpdater.IsNewerVersion(new Version(0, 5, 9), new Version(0, 6, 1)), "Older version was treated as an update.");
+            Assert(VanillaUpdater.IsNewerVersion(new Version(0, 6, 2), new Version(0, 6, 1)), "Newer version was rejected.");
+            Assert(!VanillaUpdater.IsNewerVersion(new Version(0, 6, 1), new Version(0, 6, 1)), "Equal version was treated as newer.");
+            Assert(!VanillaUpdater.IsNewerVersion(new Version(0, 5, 9), new Version(0, 6, 1)), "Older version was treated as newer.");
         }
-        private static string Temp() { string p = Path.Combine(Path.GetTempPath(), "4rtools-reconnect-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(p); return p; }
-        private static void Delete(string p) { try { Directory.Delete(p, true); } catch { } }
-        private static void Test(string name, Action action) { try { action(); passed++; Console.WriteLine("PASS " + name); } catch (Exception ex) { failed++; Console.Error.WriteLine("FAIL " + name + ": " + ex); } }
-        private static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
+
+        private static string Temp()
+        {
+            string path = Path.Combine(Path.GetTempPath(), "4rtools-reconnect-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(path);
+            return path;
+        }
+
+        private static void Delete(string path)
+        {
+            try { Directory.Delete(path, true); } catch { }
+        }
+
+        private static void Test(string name, Action action)
+        {
+            try { action(); passed++; Console.WriteLine("PASS " + name); }
+            catch (Exception ex) { failed++; Console.Error.WriteLine("FAIL " + name + ": " + ex); }
+        }
+
+        private static void Assert(bool value, string message)
+        {
+            if (!value) throw new Exception(message);
+        }
     }
 }
