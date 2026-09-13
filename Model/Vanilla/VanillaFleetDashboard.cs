@@ -374,7 +374,7 @@ namespace _4RTools.Model.Vanilla
         {
             if (!observeClients)
             {
-                extra.Text = "Offline UI validation: live client observation is disabled.";
+                SetText(extra, "Offline UI validation: live client observation is disabled.");
                 return;
             }
             IReadOnlyList<VanillaFleetClientInfo> clients;
@@ -382,23 +382,28 @@ namespace _4RTools.Model.Vanilla
             catch (Exception ex)
             {
                 foreach (ClientCard card in cards) card.ShowObservationUnavailable(ex.Message);
-                extra.Text = "Live memory observation error: " + ex.Message;
+                SetText(extra, "Live memory observation error: " + ex.Message);
                 return;
             }
             for (int i = 0; i < cards.Length; i++) cards[i].ShowClient(i < clients.Count ? clients[i] : null);
             int unavailable = clients.Count(client => client.Error != null);
-            if (unavailable > 0) extra.Text = clients.Count + " Vanilla processes detected; observation stopped for " + unavailable
-                + ". Hover over a client observation error for details.";
-            else if (clients.Count <= 2) extra.Text = clients.Count == 0
+            if (unavailable > 0) SetText(extra, clients.Count + " Vanilla processes detected; observation stopped for " + unavailable
+                + ". Hover over a client observation error for details.");
+            else if (clients.Count <= 2) SetText(extra, clients.Count == 0
                 ? "No Vanilla clients running. Recovery & relog can start the configured clients."
-                : "Live values are read from the selected Vanilla build's read-only memory map. Location/activity appear automatically when those mappings are verified.";
-            else extra.Text = clients.Count + " Vanilla processes detected; the dashboard shows the first two only.";
+                : "Live values are read from the selected Vanilla build's read-only memory map. Location/activity appear automatically when those mappings are verified.");
+            else SetText(extra, clients.Count + " Vanilla processes detected; the dashboard shows the first two only.");
         }
 
         protected override void Dispose(bool disposing)
         {
             if (disposing) timer.Dispose();
             base.Dispose(disposing);
+        }
+
+        private static void SetText(Label label, string text)
+        {
+            if (!string.Equals(label.Text, text, StringComparison.Ordinal)) label.Text = text;
         }
 
         private sealed class ClientCard : GroupBox
@@ -408,8 +413,8 @@ namespace _4RTools.Model.Vanilla
             private readonly Label sp = new Label { AutoSize = true };
             private readonly Label location = new Label { AutoSize = true, ForeColor = Color.DimGray };
             private readonly Label activity = new Label { AutoSize = true, ForeColor = Color.DimGray };
-            private readonly ProgressBar hpBar = new ProgressBar { Height = 8, Dock = DockStyle.Top, Maximum = 100 };
-            private readonly ProgressBar spBar = new ProgressBar { Height = 8, Dock = DockStyle.Top, Maximum = 100 };
+            private readonly StaticLevelBar hpBar = new StaticLevelBar { Height = 8, Dock = DockStyle.Top };
+            private readonly StaticLevelBar spBar = new StaticLevelBar { Height = 8, Dock = DockStyle.Top };
             private readonly string emptyTitle;
             private readonly ToolTip errorTip = new ToolTip { AutoPopDelay = 30000 };
 
@@ -437,30 +442,31 @@ namespace _4RTools.Model.Vanilla
                 errorTip.SetToolTip(activity, info?.Error);
                 if (info == null)
                 {
-                    Text = emptyTitle;
-                    title.Text = "Not running";
-                    hp.Text = "HP —";
-                    sp.Text = "SP —";
+                    if (!string.Equals(Text, emptyTitle, StringComparison.Ordinal)) Text = emptyTitle;
+                    SetText(title, "Not running");
+                    SetText(hp, "HP —");
+                    SetText(sp, "SP —");
                     hpBar.Value = spBar.Value = 0;
-                    location.Text = "Location —";
-                    activity.Text = "Waiting for client";
+                    SetText(location, "Location —");
+                    SetText(activity, "Waiting for client");
                     return;
                 }
-                Text = "PID " + info.ProcessId;
-                title.Text = info.CharacterName + (info.NameVerified ? "" : "  [unverified name]");
-                hp.Text = "HP  " + Vital(info.CurrentHP, info.MaxHP) + (info.HpVerified ? "" : "  [unverified]");
-                sp.Text = "SP  " + Vital(info.CurrentSP, info.MaxSP) + (info.SpVerified ? "" : "  [unverified]");
+                string caption = "PID " + info.ProcessId;
+                if (!string.Equals(Text, caption, StringComparison.Ordinal)) Text = caption;
+                SetText(title, info.CharacterName + (info.NameVerified ? "" : "  [unverified name]"));
+                SetText(hp, "HP  " + Vital(info.CurrentHP, info.MaxHP) + (info.HpVerified ? "" : "  [unverified]"));
+                SetText(sp, "SP  " + Vital(info.CurrentSP, info.MaxSP) + (info.SpVerified ? "" : "  [unverified]"));
                 hpBar.Value = Clamp(info.HpPercent);
                 spBar.Value = Clamp(info.SpPercent);
-                location.Text = "Location: " + info.Location;
-                activity.Text = info.Error == null ? "Activity: " + info.Activity : "Observation: " + info.Error;
+                SetText(location, "Location: " + info.Location);
+                SetText(activity, info.Error == null ? "Activity: " + info.Activity : "Observation: " + info.Error);
             }
 
             public void ShowObservationUnavailable(string error)
             {
                 ShowClient(null);
-                title.Text = "Status unavailable";
-                activity.Text = "Observation: " + error;
+                SetText(title, "Status unavailable");
+                SetText(activity, "Observation: " + error);
                 errorTip.SetToolTip(this, error);
                 errorTip.SetToolTip(activity, error);
             }
@@ -476,6 +482,40 @@ namespace _4RTools.Model.Vanilla
                 return current.HasValue && maximum.HasValue ? current.Value + " / " + maximum.Value : "Unavailable";
             }
             private static int Clamp(decimal? value) { return value.HasValue ? Math.Max(0, Math.Min(100, (int)Math.Round(value.Value))) : 0; }
+        }
+
+        private sealed class StaticLevelBar : Control
+        {
+            private int value;
+
+            public StaticLevelBar()
+            {
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+                BackColor = Color.Gainsboro;
+                ForeColor = Color.Green;
+            }
+
+            public int Value
+            {
+                get { return value; }
+                set
+                {
+                    int next = Math.Max(0, Math.Min(100, value));
+                    if (this.value == next) return;
+                    this.value = next;
+                    Invalidate();
+                }
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                e.Graphics.Clear(BackColor);
+                int width = (int)Math.Round(ClientSize.Width * (value / 100d));
+                if (width <= 0 || ClientSize.Height <= 0) return;
+                using (var brush = new SolidBrush(ForeColor))
+                    e.Graphics.FillRectangle(brush, 0, 0, Math.Min(width, ClientSize.Width), ClientSize.Height);
+            }
         }
     }
 }
