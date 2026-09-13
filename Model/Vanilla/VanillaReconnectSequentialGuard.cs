@@ -103,6 +103,7 @@ namespace _4RTools.Model.Vanilla
             if (strictSequentialLaunchGuardHooked) return;
             strictSequentialLaunchGuardHooked = true;
             supervisor.EnableStrictSequentialLaunchGuard();
+            InstallHardenedSupervisorButtons();
             InstallFullDebugLogUi();
         }
     }
