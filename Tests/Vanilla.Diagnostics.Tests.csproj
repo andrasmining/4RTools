@@ -59,6 +59,7 @@
     <Compile Include="VanillaTemporaryActionTests.cs" />
     <Compile Include="VanillaMemoryAndWeightTests.cs" />
     <Compile Include="VanillaMemoryScannerTests.cs" />
+    <Compile Include="VanillaUtf8MemoryDiscoveryTests.cs" />
     <Compile Include="ProcessObservationContextTests.cs" />
     <Compile Include="VanillaFleetMonitorTests.cs" />
     <ProjectReference Include="..\4RTools.csproj">
