@@ -65,8 +65,6 @@ namespace _4RTools.Model.Vanilla
             if (simplifiedRecoveryUiInstalled || IsDisposed) return;
             simplifiedRecoveryUiInstalled = true;
 
-            // These legacy fields are no longer user decisions. Launch arguments are intentionally
-            // blank, proxy belongs to each account, and the client count is the number of enabled accounts.
             launchArgs.Text = string.Empty;
             launchArgs.Visible = false;
             proxy.Visible = false;
@@ -134,7 +132,7 @@ namespace _4RTools.Model.Vanilla
             if (selected == null) return;
             VanillaProxyRoute route = (VanillaProxyRoute)selectedAccountProxy.SelectedItem;
             VanillaAccountProxyPreferences.Set(selected.Id, route);
-            settings.Proxy = route; // compatibility value for legacy diagnostic/recovery code paths.
+            settings.Proxy = route;
             proxy.SelectedItem = route;
             RefreshAccountProxyColumn();
             QueueAutoSave("Proxy " + route + " saved for " + selected.Label);
@@ -188,6 +186,10 @@ namespace _4RTools.Model.Vanilla
             visualWatchdog.CheckedChanged += (s, e) => QueueAutoSave("Visual watchdog preference saved");
             accounts.RowsAdded += (s, e) => { SynchronizeDerivedUiValues(); QueueAutoSave("Account changes saved"); };
             accounts.RowsRemoved += (s, e) => { SynchronizeDerivedUiValues(); QueueAutoSave("Account changes saved"); };
+            FormClosing += (s, e) =>
+            {
+                if (autosaveTimer != null && autosaveTimer.Enabled) SaveAutomaticallyNow();
+            };
         }
 
         private string pendingSaveMessage = "Saved";
@@ -209,7 +211,6 @@ namespace _4RTools.Model.Vanilla
             {
                 SynchronizeDerivedUiValues();
                 ReadTop();
-                // ReadTop sees the hidden compatibility controls. Re-assert the derived values.
                 settings.LaunchArguments = string.Empty;
                 settings.MaxClients = Math.Max(1, settings.Accounts.Count(a => a.Enabled));
                 VanillaReconnectAccount selected = SelectedAccount();
