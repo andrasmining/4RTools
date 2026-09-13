@@ -79,17 +79,23 @@ namespace _4RTools.Model.Vanilla
             {
                 EnsureSession().CaptureBaseline(SelectedType(), SelectedScope()); return "Baseline captured.";
             });
-            changed.Click += async (s, e) => await CompareAsync(VanillaMemoryScanComparison.Changed);
-            unchanged.Click += async (s, e) => await CompareAsync(VanillaMemoryScanComparison.Unchanged);
-            increased.Click += async (s, e) => await CompareAsync(VanillaMemoryScanComparison.Increased);
-            decreased.Click += async (s, e) => await CompareAsync(VanillaMemoryScanComparison.Decreased);
-            exactScan.Click += async (s, e) => await CompareAsync(VanillaMemoryScanComparison.Exact);
+            changed.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Changed);
+            unchanged.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Unchanged);
+            increased.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Increased);
+            decreased.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Decreased);
+            exactScan.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Exact);
             reset.Click += (s, e) => { session?.Reset(); grid.Rows.Clear(); status.Text = "Reset. Capture a new baseline or run Exact."; };
             copy.Click += (s, e) => Guard(CopySelected);
             export.Click += (s, e) => Guard(ExportCandidates);
             clients.SelectedIndexChanged += (s, e) => ResetSession("Client changed; discovery state reset.");
             valueType.SelectedIndexChanged += (s, e) => { if (session != null && session.HasBaseline) ResetSession("Value type changed; capture a new baseline."); };
             scope.SelectedIndexChanged += (s, e) => { if (session != null && session.HasBaseline) ResetSession("Scope changed; capture a new baseline."); };
+        }
+
+        private async Task CompareSafelyAsync(VanillaMemoryScanComparison comparison)
+        {
+            try { await CompareAsync(comparison); }
+            catch (Exception ex) { if (!disposed && !IsDisposed) status.Text = "Stopped: " + ex.Message; }
         }
 
         private async Task CompareAsync(VanillaMemoryScanComparison comparison)
