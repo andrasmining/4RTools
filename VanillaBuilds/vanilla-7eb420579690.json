@@ -1,23 +1,29 @@
 {
   "SchemaVersion": 1,
-  "Label": "Vanilla — HP/SP and character-name mapping under validation",
+  "Label": "Vanilla — verified HP/SP and character name",
   "Sha256": "7eb420579690bd2f5c81b42fa69888cb3d144486d3c275a19073f5216698b3ef",
   "Machine": 332,
   "ImageSize": 15839232,
-  "Evidence": "2026-09-07: one unique main-data HP/SP quartet matched the user screenshot (456/456 HP, 113/113 SP), and one exact null-terminated string matched the visible character name. Both were repeatedly observed read-only. Controlled changes and lifecycle validation remain outstanding; these mappings expose diagnostic observations but do not enable automation. Target, combat, position, readiness and statuses are unmapped.",
+  "Evidence": "2026-09-07 to 2026-09-13: the main-data HP/maxHP/SP/maxSP quartet and null-terminated character-name mapping were observed read-only across live play. On 2026-09-13 the user confirmed current HP and current SP changing in 4RTools with gameplay, maxima matching the client, and CharacterName=Norder matching the live character. These five fields are promoted for this exact executable fingerprint only. X/Y/map/target/action/status/readiness/loading/autobattle remain unmapped and unavailable.",
   "MemoryMap": {
     "SchemaVersion": 1,
     "ProcessName": "Vanilla MMO.exe",
-    "Evidence": "Module-relative candidates matched visible character values. Unverified fields are never used by automated actions.",
+    "Evidence": "Module-relative mappings validated only for the exact fingerprint above. Unknown gameplay fields remain unavailable rather than inferred.",
     "Fields": {
-      "CurrentHP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DDC", "Encoding": "UInt32", "Evidence": "Unique quartet matched visible HP 456; controlled HP change untested." },
-      "MaxHP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE0", "Encoding": "UInt32", "Evidence": "Unique quartet matched visible max HP 456; maximum change untested." },
-      "CurrentSP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE4", "Encoding": "UInt32", "Evidence": "Unique quartet matched visible SP 113; controlled SP use untested." },
-      "MaxSP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE8", "Encoding": "UInt32", "Evidence": "Unique quartet matched visible max SP 113; maximum change untested." },
-      "CharacterName": { "Module": "Vanilla MMO.exe", "Address": "0xD3B7B0", "Encoding": "Utf8", "ByteCount": 40, "Evidence": "One exact null-terminated string in main data matched the visible character name; character switch untested." }
+      "CurrentHP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DDC", "Encoding": "UInt32", "Evidence": "Live current HP was observed changing with gameplay and matching the visible client on 2026-09-13." },
+      "MaxHP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE0", "Encoding": "UInt32", "Evidence": "Live max HP repeatedly matched the selected character while current HP changed on 2026-09-13." },
+      "CurrentSP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE4", "Encoding": "UInt32", "Evidence": "Live current SP was observed decreasing/regenerating and matching the visible client on 2026-09-13." },
+      "MaxSP": { "Module": "Vanilla MMO.exe", "Address": "0xD38DE8", "Encoding": "UInt32", "Evidence": "Live max SP repeatedly matched the selected character while current SP changed on 2026-09-13." },
+      "CharacterName": { "Module": "Vanilla MMO.exe", "Address": "0xD3B7B0", "Encoding": "Utf8", "ByteCount": 40, "Evidence": "Read-only value Norder matched the live selected character on 2026-09-13; exact-fingerprint mapping only." }
     }
   },
-  "VerifiedFields": [],
+  "VerifiedFields": [
+    "CurrentHP",
+    "MaxHP",
+    "CurrentSP",
+    "MaxSP",
+    "CharacterName"
+  ],
   "ActionStates": [],
   "NoTargetValues": [],
   "MaximumVital": 1000000000,
