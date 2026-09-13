@@ -192,8 +192,8 @@ Prefer read-only client observation plus ordinary keyboard/mouse input through
 the mechanisms already used by 4RTools. Use Vanilla's own Autobattle for movement
 and combat; do not replace it with a monster scanner or bot pathfinding. If a
 read or action is blocked by Gepard, stop that line of investigation and report
-the exact operation and error. Do not try stronger privileges, alternative
-access paths, or protection changes as a workaround.
+the exact operation and error. Do not use alternate memory-access paths, token
+manipulation, handle duplication, injection, or protection changes as a workaround.
 
 For live checks, use a test character when possible. Do not purchase, delete,
 drop, or trade items, and do not automate aggressively. Before enabling a live
@@ -227,14 +227,11 @@ working directory. This is the user's established local environment requirement.
 Do not alter antivirus/security settings yourself. Keep build caches and logs
 out of source control; their storage location is separate from application launch.
 
-Run the Vanilla product with the caller's existing permissions (`asInvoker`),
-without accepting or requesting elevation for observation. Access evidence must
-identify the observer context and exact failing operation/access mask. A failed
-external helper attach does not establish that an existing product session or a
-fresh normal product launch cannot read. When authorized, test the actual product
-context separately; do not infer that retained handles, launch order, or Gepard
-caused a discrepancy without evidence. Never duplicate/steal handles or bypass a
-denied operation to compare contexts.
+Run the Vanilla product with administrator privileges (`requireAdministrator`) so
+its integrity level matches the elevated Vanilla MMO clients it observes. This is
+the intentional product runtime model. A failed read must still remain read-only:
+do not use elevation as a gateway to injection, memory writes, token manipulation,
+handle duplication, protection changes, or alternate access paths.
 
 For release-oriented tasks, done means a usable artifact as well as source code.
 When requested, produce `dist/<release-folder>/` and
