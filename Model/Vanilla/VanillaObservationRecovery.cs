@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using _4RTools.Utils;
 
@@ -67,6 +68,11 @@ namespace _4RTools.Utils
                 detail = failure.Detail;
                 return true;
             }
+        }
+
+        internal static int[] DeniedProcessIds()
+        {
+            lock (Gate) return InitialOpenFailures.Keys.ToArray();
         }
 
         internal static void Forget(int processId)
@@ -187,20 +193,88 @@ namespace _4RTools.Forms
     public partial class Container
     {
         private bool observationRecoveryHooked;
+        private bool startupObservationRepairStarting;
+        private bool startupObservationRepairOwnsSupervisor;
+        private readonly HashSet<string> startupObservationRepairAccounts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private void HookObservationRecovery()
         {
             if (observationRecoveryHooked || integratedReconnectSupervisor == null) return;
             observationRecoveryHooked = true;
             integratedReconnectSupervisor.Updated += RecoverDeniedObservationAccess;
+            TryStartOneShotObservationRepair();
             RecoverDeniedObservationAccess();
+        }
+
+        private void TryStartOneShotObservationRepair()
+        {
+            if (startupObservationRepairStarting || integratedReconnectSupervisor == null || integratedReconnectSupervisor.IsRunning) return;
+            int[] deniedPids = ProcessObservationAccessRegistry.DeniedProcessIds();
+            if (deniedPids.Length == 0) return;
+
+            VanillaReconnectSettings reconnect = integratedReconnectSupervisor.Settings;
+            var enabled = reconnect.Accounts.Where(a => a.Enabled).Take(reconnect.MaxClients).ToArray();
+            bool credentialsAvailable = enabled.Any(a => !string.IsNullOrWhiteSpace(a.UserName) && !string.IsNullOrWhiteSpace(a.ProtectedPassword));
+            if (!reconnect.AutoRecover || !credentialsAvailable || string.IsNullOrWhiteSpace(reconnect.LaunchExecutable)
+                || !File.Exists(reconnect.LaunchExecutable))
+            {
+                integratedReconnectSupervisor.RecordSupervisorLog(
+                    "Read-only observation is unavailable for pre-existing Vanilla PID(s) " + string.Join(", ", deniedPids)
+                    + ". Verified offsets are still loaded. Automatic one-shot client recycle was not started because reconnect recovery is not fully configured/enabled.");
+                return;
+            }
+
+            startupObservationRepairStarting = true;
+            try
+            {
+                integratedReconnectSupervisor.RecordSupervisorLog(
+                    "Pre-existing Vanilla PID(s) " + string.Join(", ", deniedPids)
+                    + " denied the normal read-only observation handle after 4RTools started. Starting one-time sequential client recycle; no alternate memory access will be attempted.");
+                integratedReconnectSupervisor.Start();
+                startupObservationRepairOwnsSupervisor = true;
+                startupObservationRepairAccounts.Clear();
+                foreach (VanillaReconnectStatus status in integratedReconnectSupervisor.Statuses())
+                    if (status.ProcessId.HasValue && deniedPids.Contains(status.ProcessId.Value))
+                        startupObservationRepairAccounts.Add(status.AccountId);
+            }
+            finally
+            {
+                startupObservationRepairStarting = false;
+            }
         }
 
         private void RecoverDeniedObservationAccess()
         {
-            if (IsDisposed || integratedReconnectSupervisor == null || !integratedReconnectSupervisor.IsRunning) return;
-            try { integratedReconnectSupervisor.RecoverObservationDeniedClientIfNeeded(); }
-            catch (Exception ex) { integratedReconnectSupervisor.RecordSupervisorLog("Fresh-observation recovery check failed: " + ex.Message); }
+            if (startupObservationRepairStarting || IsDisposed || integratedReconnectSupervisor == null || !integratedReconnectSupervisor.IsRunning) return;
+            try
+            {
+                integratedReconnectSupervisor.RecoverObservationDeniedClientIfNeeded();
+                CompleteOneShotObservationRepairIfReady();
+            }
+            catch (Exception ex)
+            {
+                integratedReconnectSupervisor.RecordSupervisorLog("Fresh-observation recovery check failed: " + ex.Message);
+            }
+        }
+
+        private void CompleteOneShotObservationRepairIfReady()
+        {
+            if (!startupObservationRepairOwnsSupervisor || startupObservationRepairAccounts.Count == 0) return;
+            var statuses = integratedReconnectSupervisor.Statuses()
+                .Where(s => startupObservationRepairAccounts.Contains(s.AccountId)).ToArray();
+            if (statuses.Length != startupObservationRepairAccounts.Count) return;
+            foreach (VanillaReconnectStatus status in statuses)
+            {
+                string detail;
+                if (!status.ProcessId.HasValue || status.Stage != VanillaReconnectStage.Online
+                    || ProcessObservationAccessRegistry.RequiresFreshClientProcess(status.ProcessId.Value, out detail)) return;
+            }
+
+            startupObservationRepairOwnsSupervisor = false;
+            startupObservationRepairAccounts.Clear();
+            integratedReconnectSupervisor.RecordSupervisorLog(
+                "One-time fresh-observation repair completed. Recovered client(s) are Online/minimized; returning supervisor to its previous stopped state.");
+            integratedReconnectSupervisor.Stop();
         }
     }
 }
