@@ -24,6 +24,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Recovery ownership blocks parallel client workflows", SequentialRecoveryGate);
             Test("Supervisor minimizes only healthy gameplay clients", ManagedMinimizePolicy);
             Test("Launcher PID binding closes the duplicate-launch race", SequentialLaunchBinding);
+            Test("Sequential startup advances only after gameplay resume and minimize", HardenedStartupAdvanceGate);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -153,6 +154,20 @@ namespace Vanilla.Diagnostics.Tests
                 "An already-bound process must not be rebound.");
             Assert(!VanillaReconnectSupervisor.IsPendingSequentialLaunch(false, true, false, VanillaReconnectStage.Launching),
                 "A runtime without the recovery lease must not claim a PID.");
+        }
+
+        private static void HardenedStartupAdvanceGate()
+        {
+            Assert(!VanillaReconnectSupervisor.SequentialStartupMayAdvance(false, true, true, false),
+                "Startup advanced without confirmed gameplay.");
+            Assert(!VanillaReconnectSupervisor.SequentialStartupMayAdvance(true, false, true, false),
+                "Startup advanced before the resume hotkey was sent.");
+            Assert(!VanillaReconnectSupervisor.SequentialStartupMayAdvance(true, true, false, false),
+                "Startup advanced before the current client was minimized.");
+            Assert(!VanillaReconnectSupervisor.SequentialStartupMayAdvance(true, true, true, true),
+                "Startup advanced after a failed current-client sequence.");
+            Assert(VanillaReconnectSupervisor.SequentialStartupMayAdvance(true, true, true, false),
+                "Startup did not advance after gameplay + one resume + minimize completed successfully.");
         }
 
         private static void PersistentDataMigration()
