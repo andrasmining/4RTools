@@ -93,8 +93,28 @@ namespace _4RTools.Model.Vanilla
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+            NormalizeReconnectUiText();
             ConfigureScopedTestUi();
             HookSupervisedMinimizePolicy();
+        }
+
+        private void NormalizeReconnectUiText()
+        {
+            Text = "4RTools Vanilla - Restart & Relog";
+            NormalizeReconnectControlText(this);
+        }
+
+        private static void NormalizeReconnectControlText(Control root)
+        {
+            foreach (Control child in root.Controls)
+            {
+                if (child is Button && child.Text.StartsWith("Browse", StringComparison.OrdinalIgnoreCase))
+                    child.Text = "Browse...";
+                else if (child is Label && child.Text.StartsWith("Character slot (1", StringComparison.OrdinalIgnoreCase))
+                    child.Text = "Character slot (1-15)";
+
+                if (child.HasChildren) NormalizeReconnectControlText(child);
+            }
         }
 
         private void HookSupervisedMinimizePolicy()
