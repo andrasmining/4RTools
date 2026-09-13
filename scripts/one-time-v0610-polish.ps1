@@ -34,6 +34,22 @@ if (-not $text.Contains('private void Guard(Action action)')) { throw 'Temporary
 $text = $text.Replace('private void Guard(Action action)', 'private void Guard(System.Action action)')
 WriteText $path $text
 
+$path = 'Tests/Vanilla.Diagnostics.Tests.csproj'
+$text = ReadText $path
+$old = '    <Compile Include="VanillaReconnectRegressionTests.cs" />'
+$new = $old + "`r`n    <Compile Include=\"VanillaTemporaryActionTests.cs\" />"
+if (-not $text.Contains($old)) { throw 'Tests csproj anchor not found.' }
+$text = $text.Replace($old,$new)
+WriteText $path $text
+
+$path = 'Tests/Program.cs'
+$text = ReadText $path
+$old = '            failed += VanillaReconnectRegressionTests.Run();'
+$new = $old + "`r`n            failed += VanillaTemporaryActionTests.Run();"
+if (-not $text.Contains($old)) { throw 'Test runner anchor not found.' }
+$text = $text.Replace($old,$new)
+WriteText $path $text
+
 $agents = 'AGENTS.md'
 $text = ReadText $agents
 $old = @'
@@ -60,4 +76,4 @@ if (-not $text.Contains($old)) { throw 'AGENTS product direction anchor not foun
 $text = $text.Replace($old,$new)
 WriteText $agents $text
 
-Write-Host '0.6.10 workspace compile fixes and polish applied.'
+Write-Host '0.6.10 workspace compile fixes, tests and polish applied.'
