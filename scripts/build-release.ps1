@@ -118,17 +118,22 @@ function New-PortableArchive([string] $Root, [string] $ArchivePath, [DateTime] $
 
 function Assert-PortableSmokeResult([object] $Report) {
     if ($null -eq $Report) { throw 'Portable smoke report is empty.' }
-    foreach ($requiredField in @('Success', 'MainUi', 'AutomationEnabled', 'GameplayAttached', 'InputSent', 'OriginalFeatureForms')) {
+    foreach ($requiredField in @('Success', 'MainUi', 'AutomationEnabled', 'GameplayAttached', 'InputSent', 'OriginalFeatureForms',
+        'VanillaPollingEnabled', 'FleetPollingEnabled', 'FleetPollCount', 'RecoveryRunning', 'WeightAlertsRunning', 'UpdateCheckRunning')) {
         if ($null -eq $Report.PSObject.Properties[$requiredField]) {
             throw "Portable smoke report is missing $requiredField."
         }
     }
     if ($Report.Success -isnot [bool] -or -not $Report.Success) { throw 'Portable smoke test reported failure.' }
     if ($Report.MainUi -cne 'Container') { throw 'Portable smoke test did not validate the original 4RTools main window.' }
-    foreach ($inactiveField in @('AutomationEnabled', 'GameplayAttached', 'InputSent')) {
+    foreach ($inactiveField in @('AutomationEnabled', 'GameplayAttached', 'InputSent', 'VanillaPollingEnabled',
+        'FleetPollingEnabled', 'RecoveryRunning', 'WeightAlertsRunning', 'UpdateCheckRunning')) {
         if ($Report.$inactiveField -isnot [bool] -or $Report.$inactiveField) {
             throw "Portable smoke test did not prove $inactiveField was false."
         }
+    }
+    if (($Report.FleetPollCount -isnot [int] -and $Report.FleetPollCount -isnot [long]) -or $Report.FleetPollCount -ne 0) {
+        throw 'Portable smoke test did not prove that live fleet discovery remained inactive.'
     }
     if (($Report.OriginalFeatureForms -isnot [int] -and $Report.OriginalFeatureForms -isnot [long]) -or $Report.OriginalFeatureForms -lt 10) {
         throw 'Portable smoke test did not validate the original 4RTools feature forms.'

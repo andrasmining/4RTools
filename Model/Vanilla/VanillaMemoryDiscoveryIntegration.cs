@@ -12,6 +12,7 @@ namespace _4RTools.Forms
         private VanillaWeightAlertsPanel integratedWeightAlerts;
         private VanillaWeightAlertService integratedWeightAlertService;
         private bool memoryDiscoveryIntegrated, weightAlertsIntegrated;
+        internal bool WeightAlertsRunning { get { return integratedWeightAlertService?.IsRunning == true; } }
 
         protected override void OnShown(EventArgs e)
         {
@@ -39,7 +40,7 @@ namespace _4RTools.Forms
             if (weightAlertsIntegrated || vanillaWorkspace == null) return;
             weightAlertsIntegrated = true;
             integratedWeightAlertService = new VanillaWeightAlertService(AppDomain.CurrentDomain.BaseDirectory);
-            integratedWeightAlertService.Start();
+            if (!smokeTest) integratedWeightAlertService.Start();
             vanillaWeightAlertsPage = new TabPage("Alerts") { Padding = new Padding(6), UseVisualStyleBackColor = true };
             int insertAt = vanillaMemoryDiscoveryPage == null ? vanillaWorkspace.TabPages.IndexOf(vanillaDiagnosticsPage)
                 : vanillaWorkspace.TabPages.IndexOf(vanillaMemoryDiscoveryPage);
@@ -60,6 +61,7 @@ namespace _4RTools.Forms
 
         private void EnsureMemoryDiscoveryEmbedded()
         {
+            if (smokeTest) return;
             if (integratedMemoryDiscovery != null && !integratedMemoryDiscovery.IsDisposed) return;
             integratedMemoryDiscovery = new VanillaMemoryDiscoveryPanel(integratedFleetMonitor) { Dock = DockStyle.Fill };
             vanillaMemoryDiscoveryPage.Controls.Add(integratedMemoryDiscovery);
@@ -68,6 +70,7 @@ namespace _4RTools.Forms
 
         private void EnsureWeightAlertsEmbedded()
         {
+            if (smokeTest) return;
             if (integratedWeightAlerts != null && !integratedWeightAlerts.IsDisposed) return;
             integratedWeightAlerts = new VanillaWeightAlertsPanel(integratedWeightAlertService) { Dock = DockStyle.Fill };
             vanillaWeightAlertsPage.Controls.Add(integratedWeightAlerts);

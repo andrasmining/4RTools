@@ -48,6 +48,9 @@ namespace _4RTools.Model.Vanilla
         private readonly Dictionary<int, Reader> readers = new Dictionary<int, Reader>();
         private readonly object gate = new object();
         private bool disposed;
+        private int pollCount;
+
+        internal int PollCount { get { lock (gate) return pollCount; } }
 
         public VanillaFleetMonitor(string baseDirectory)
         {
@@ -59,6 +62,7 @@ namespace _4RTools.Model.Vanilla
             lock (gate)
             {
                 if (disposed) return new VanillaFleetClientInfo[0];
+                pollCount++;
                 var live = new List<int>();
                 foreach (Process process in Process.GetProcessesByName("Vanilla MMO"))
                 {
@@ -236,13 +240,17 @@ namespace _4RTools.Model.Vanilla
     public sealed class VanillaFleetDashboardPanel : UserControl
     {
         private readonly VanillaFleetMonitor monitor;
+        private readonly bool observeClients;
         private readonly Timer timer = new Timer { Interval = 500 };
         private readonly ClientCard[] cards = { new ClientCard("Client 1"), new ClientCard("Client 2") };
         private readonly Label extra = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(8, 4, 0, 0) };
 
-        public VanillaFleetDashboardPanel(VanillaFleetMonitor monitor)
+        internal bool IsPolling { get { return timer.Enabled; } }
+
+        public VanillaFleetDashboardPanel(VanillaFleetMonitor monitor, bool observeClients = true)
         {
             this.monitor = monitor ?? throw new ArgumentNullException(nameof(monitor));
+            this.observeClients = observeClients;
             Dock = DockStyle.Top;
             Height = 150;
             MinimumSize = new Size(600, 145);
@@ -258,12 +266,17 @@ namespace _4RTools.Model.Vanilla
             root.SetColumnSpan(extra, 2);
             Controls.Add(root);
             timer.Tick += (s, e) => RefreshNow();
-            timer.Start();
+            if (observeClients) timer.Start();
             RefreshNow();
         }
 
         public void RefreshNow()
         {
+            if (!observeClients)
+            {
+                extra.Text = "Offline UI validation: live client observation is disabled.";
+                return;
+            }
             IReadOnlyList<VanillaFleetClientInfo> clients;
             try { clients = monitor.Poll(); }
             catch (Exception ex)

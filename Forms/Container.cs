@@ -22,10 +22,11 @@ namespace _4RTools.Forms
         private ToggleApplicationStateForm toggleForm;
         private VanillaAutomationForm vanillaExtras;
         private readonly Label vanillaStatus = new Label { AutoSize = true, MaximumSize = new Size(520, 0) };
-        private bool refreshingClients, profilesReady, closed;
+        private bool refreshingClients, profilesReady, closed, validatingClient;
         private string reportedFailure;
-        internal bool AutomationEnabled { get { return toggleForm?.IsOn == true || vanillaSession.IsEnabled; } }
+        internal bool AutomationEnabled { get { return toggleForm?.IsOn == true || vanillaSession.IsEnabled || integratedAutomationSession?.IsEnabled == true; } }
         internal bool GameplayAttached { get { return ClientSingleton.GetClient() != null; } }
+        internal bool VanillaPollingEnabled { get { return vanillaTimer.Enabled; } }
         internal VanillaClientState VanillaSnapshot { get { return vanillaSession.Snapshot; } }
         internal bool VanillaTabIsFirst { get { return atkDefMode.TabPages.Count > 0 && object.ReferenceEquals(atkDefMode.TabPages[0], tabPageVanilla); } }
         internal string PrimaryTabOrder { get { return string.Join(" | ", atkDefMode.TabPages.Cast<TabPage>().Select(page => page.Text)); } }
@@ -111,7 +112,7 @@ namespace _4RTools.Forms
 
         private void processCB_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (refreshingClients || this.processCB.SelectedItem == null) return;
+            if (refreshingClients || (smokeTest && !validatingClient) || this.processCB.SelectedItem == null) return;
             try
             {
                 ForceOff("Client changed");
@@ -153,6 +154,7 @@ namespace _4RTools.Forms
 
         private void refreshProcessList()
         {
+            if (smokeTest && !validatingClient) return;
             string previous = processCB.SelectedItem as string;
             refreshingClients = true;
             try
@@ -334,6 +336,7 @@ namespace _4RTools.Forms
 
         private void PollVanilla()
         {
+            if (smokeTest && !validatingClient) return;
             vanillaSession.Tick();
             var client = ClientSingleton.GetClient();
             if (client?.IsVanilla != true)
@@ -373,10 +376,17 @@ namespace _4RTools.Forms
 
         internal void SelectClientForValidation(int processId)
         {
-            foreach (var item in processCB.Items)
-                if (item.ToString().EndsWith(".exe - " + processId, StringComparison.Ordinal))
-                { processCB.SelectedItem = item; atkDefMode.SelectedTab = tabPageVanilla; return; }
-            throw new InvalidOperationException("Requested client is not in the Ragnarok Client list.");
+            // Only the explicit --original-ui-check path may attach during a smoke-mode launch.
+            validatingClient = true;
+            try
+            {
+                refreshProcessList();
+                foreach (var item in processCB.Items)
+                    if (item.ToString().EndsWith(".exe - " + processId, StringComparison.Ordinal))
+                    { processCB.SelectedItem = item; atkDefMode.SelectedTab = tabPageVanilla; return; }
+                throw new InvalidOperationException("Requested client is not in the Ragnarok Client list.");
+            }
+            finally { validatingClient = false; }
         }
 
         public void SetToggleApplicationStateWindow()

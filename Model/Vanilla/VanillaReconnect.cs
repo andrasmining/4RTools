@@ -1504,7 +1504,7 @@ namespace _4RTools.Model.Vanilla
         private bool testRunning;
         private int testGeneration;
 
-        public VanillaReconnectForm(VanillaReconnectSupervisor supervisor)
+        public VanillaReconnectForm(VanillaReconnectSupervisor supervisor, bool observeClients = true)
         {
             this.supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
             Text = "4RTools Vanilla â€” Restart & Relog";
@@ -1517,7 +1517,10 @@ namespace _4RTools.Model.Vanilla
             supervisor.Updated += SupervisorUpdated;
             supervisor.Logged += SupervisorLogged;
             LoadFromSupervisor();
-            try { supervisor.DetectRunningClients(); } catch { }
+            if (observeClients)
+            {
+                try { supervisor.DetectRunningClients(); } catch { }
+            }
             RefreshStatus();
         }
 

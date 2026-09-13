@@ -25,6 +25,17 @@ namespace _4RTools.Forms
         private VanillaFleetDashboardPanel integratedFleetDashboard;
         private VanillaAutomationSession integratedAutomationSession;
         private VanillaTemporaryActionsPanel integratedTemporaryActions;
+        internal bool FleetPollingEnabled { get { return integratedFleetDashboard?.IsPolling == true; } }
+        internal int FleetPollCount { get { return integratedFleetMonitor?.PollCount ?? 0; } }
+        internal bool RecoveryRunning { get { return integratedReconnectSupervisor?.IsRunning == true; } }
+        internal bool UpdateCheckRunning { get { return updateCheckRunning; } }
+
+        internal void AssertSmokeBackgroundServicesInactive()
+        {
+            if (!smokeTest || VanillaPollingEnabled || FleetPollingEnabled || FleetPollCount != 0
+                || RecoveryRunning || WeightAlertsRunning || UpdateCheckRunning || AutomationEnabled)
+                throw new InvalidOperationException("Smoke startup must keep live polling, recovery, alerts, updates, and automation inactive.");
+        }
 
         protected override void OnLoad(EventArgs e)
         {
@@ -101,10 +112,10 @@ namespace _4RTools.Forms
             header.Controls.Add(integratedUpdateStatus);
             root.Controls.Add(header, 0, 0);
 
-            integratedFleetDashboard = new VanillaFleetDashboardPanel(integratedFleetMonitor) { Dock = DockStyle.Fill };
+            integratedFleetDashboard = new VanillaFleetDashboardPanel(integratedFleetMonitor, observeClients: !smokeTest) { Dock = DockStyle.Fill };
             root.Controls.Add(integratedFleetDashboard, 0, 1);
 
-            vanillaWorkspace = new TabControl { Dock = DockStyle.Fill, Padding = new Point(16, 7), Font = new Font(Font.FontFamily, 9F, FontStyle.Regular) };
+            vanillaWorkspace = new TabControl { Dock = DockStyle.Fill, Padding = new Point(16, 7), Font = new Font(Font.FontFamily, 9F, FontStyle.Regular), Enabled = !smokeTest };
             vanillaRecoveryPage = new TabPage("Recovery & relog") { Padding = new Padding(6) };
             vanillaRulesPage = new TabPage("Automation") { Padding = new Padding(6) };
             vanillaTemporaryPage = new TabPage("Temporary actions") { Padding = new Padding(6) };
@@ -118,7 +129,7 @@ namespace _4RTools.Forms
                 if (vanillaWorkspace.SelectedTab == vanillaDiagnosticsPage) EnsureDiagnosticsEmbedded();
             };
 
-            integratedReconnectView = new VanillaReconnectForm(integratedReconnectSupervisor);
+            integratedReconnectView = new VanillaReconnectForm(integratedReconnectSupervisor, observeClients: !smokeTest);
             integratedReconnectView.PrepareForEmbeddedHost();
             vanillaRecoveryPage.Controls.Add(integratedReconnectView);
             integratedReconnectView.Show();
@@ -134,6 +145,7 @@ namespace _4RTools.Forms
 
         private void EnsureAutomationEmbedded()
         {
+            if (smokeTest) return;
             if (vanillaExtras != null && !vanillaExtras.IsDisposed) return;
             integratedAutomationSession?.Dispose();
             integratedAutomationSession = new VanillaAutomationSession(AppDomain.CurrentDomain.BaseDirectory);
@@ -150,6 +162,7 @@ namespace _4RTools.Forms
 
         private void EnsureTemporaryActionsEmbedded()
         {
+            if (smokeTest) return;
             if (integratedTemporaryActions != null && !integratedTemporaryActions.IsDisposed) return;
             integratedTemporaryActions = new VanillaTemporaryActionsPanel(AppDomain.CurrentDomain.BaseDirectory);
             vanillaTemporaryPage.Controls.Add(integratedTemporaryActions);
@@ -158,6 +171,7 @@ namespace _4RTools.Forms
 
         private void EnsureDiagnosticsEmbedded()
         {
+            if (smokeTest) return;
             if (vanillaDiagnostics != null && !vanillaDiagnostics.IsDisposed) return;
             ForceOff("Diagnostics opened");
             vanillaDiagnostics = new VanillaDiagnosticsForm(subject);

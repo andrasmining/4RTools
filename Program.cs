@@ -124,7 +124,16 @@ namespace _4RTools
                     form.ShowInTaskbar = false;
                     form.Opacity = 0;
                     form.Show();
-                    System.Windows.Forms.Application.DoEvents();
+                    // Exercise startup callbacks for more than two dashboard timer periods.
+                    // The offline path must remain inert even when live clients and SMTP settings exist.
+                    var startupClock = System.Diagnostics.Stopwatch.StartNew();
+                    do
+                    {
+                        System.Windows.Forms.Application.DoEvents();
+                        form.AssertSmokeBackgroundServicesInactive();
+                        System.Threading.Thread.Sleep(10);
+                    }
+                    while (startupClock.ElapsedMilliseconds < 1100);
                     if (form.AutomationEnabled || form.GameplayAttached || IntPtr.Size != 4)
                         throw new InvalidOperationException("Unexpected startup automation, game attachment, or process architecture.");
                     var mainTabs = Descendants(form).OfType<System.Windows.Forms.TabControl>()
@@ -176,21 +185,30 @@ namespace _4RTools
                             bitmap.Save(args[imageIndex + 1]);
                         }
                     }
-                    form.Close();
-                    File.WriteAllText(output, JsonConvert.SerializeObject(new
+                    form.AssertSmokeBackgroundServicesInactive();
+                    // Capture actual state before Close() disposes the services.
+                    var report = new
                     {
                         Success = true, Version = VanillaUpdater.CurrentVersionText, PointerBytes = IntPtr.Size,
                         MainUi = "Container", OriginalFeatureForms = featureForms,
                         FeatureForms = originalForms,
-                        AutomationEnabled = false,
+                        AutomationEnabled = form.AutomationEnabled,
+                        VanillaPollingEnabled = form.VanillaPollingEnabled,
+                        FleetPollingEnabled = form.FleetPollingEnabled,
+                        FleetPollCount = form.FleetPollCount,
+                        RecoveryRunning = form.RecoveryRunning,
+                        WeightAlertsRunning = form.WeightAlertsRunning,
+                        UpdateCheckRunning = form.UpdateCheckRunning,
                         ExecutableDirectory = AppDomain.CurrentDomain.BaseDirectory,
                         WorkingDirectory = Environment.CurrentDirectory,
                         ProfileRoundTrip = Profile.ListAll().Count > 0,
                         StockClientDefinitions = stock.Count,
-                        GameplayAttached = liveCheck, InputSent = false, Snapshot = snapshot,
+                        GameplayAttached = form.GameplayAttached, InputSent = false, Snapshot = snapshot,
                         Checked = liveCheck ? "Original client selector and shared read-only snapshot; automation OFF without input or keyboard hook"
-                            : "Original 4RTools window and feature forms, embedded dependencies, portable profiles, UI show/close; automation OFF without game attachment or keyboard hook"
-                    }, Formatting.Indented));
+                            : "Original 4RTools window and feature forms, embedded dependencies, portable profiles, UI show/close; live polling, recovery, weight alerts, updates, and automation inactive without game attachment or keyboard hook"
+                    };
+                    form.Close();
+                    File.WriteAllText(output, JsonConvert.SerializeObject(report, Formatting.Indented));
                 }
             }
             catch (Exception ex)
