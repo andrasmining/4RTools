@@ -1,5 +1,4 @@
 using System.Drawing;
-using System.Threading;
 using System.Windows.Forms;
 using _4RTools.Model.Vanilla;
 
@@ -8,7 +7,7 @@ namespace _4RTools.Forms
     public partial class Container
     {
         private bool vanillaFleetSizingApplied;
-        private Timer vanillaMemoryAccessDiagnosticTimer;
+        private System.Windows.Forms.Timer vanillaMemoryAccessDiagnosticTimer;
 
         private void ApplyVanillaFleetSizing()
         {
@@ -33,11 +32,11 @@ namespace _4RTools.Forms
         private void StartMemoryAccessDiagnostics()
         {
             if (smokeTest || vanillaMemoryAccessDiagnosticTimer != null) return;
-            vanillaMemoryAccessDiagnosticTimer = new Timer { Interval = 2000 };
+            vanillaMemoryAccessDiagnosticTimer = new System.Windows.Forms.Timer { Interval = 2000 };
             vanillaMemoryAccessDiagnosticTimer.Tick += (s, e) =>
-                ThreadPool.QueueUserWorkItem(_ => VanillaMemoryAccessDiagnostics.CaptureCurrentClients());
+                System.Threading.ThreadPool.QueueUserWorkItem(_ => VanillaMemoryAccessDiagnostics.CaptureCurrentClients());
             vanillaMemoryAccessDiagnosticTimer.Start();
-            ThreadPool.QueueUserWorkItem(_ => VanillaMemoryAccessDiagnostics.CaptureCurrentClients());
+            System.Threading.ThreadPool.QueueUserWorkItem(_ => VanillaMemoryAccessDiagnostics.CaptureCurrentClients());
             FormClosed += (s, e) =>
             {
                 try { vanillaMemoryAccessDiagnosticTimer?.Stop(); } catch { }
