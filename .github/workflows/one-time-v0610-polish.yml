@@ -1,4 +1,4 @@
-name: One-time 0.6.10 Vanilla workspace polish
+name: One-time 0.6.10 Vanilla workspace final validation
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Apply polish and compile fix
+      - name: Apply final source fixes
         shell: powershell
         run: '& .\scripts\one-time-v0610-polish.ps1'
       - name: Restore
