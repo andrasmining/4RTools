@@ -23,6 +23,7 @@ namespace Vanilla.Diagnostics.Tests
                 catch (Exception ex) { failed++; Console.Error.WriteLine("FAIL " + test.Key + ": " + ex); }
             }
             Console.WriteLine("Temporary actions: {0} passed; {1} failed. No process or input was opened.", tests.Count - failed, failed);
+            failed += VanillaMemoryAndWeightTests.Run();
             return failed;
         }
 
