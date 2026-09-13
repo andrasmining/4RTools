@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using Newtonsoft.Json;
 using _4RTools.Model.Vanilla;
+using _4RTools.Utils;
 
 namespace Vanilla.Diagnostics.Tests
 {
@@ -23,6 +24,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Reconnect backoff doubles and caps at one hour", ExponentialBackoff);
             Test("Recovery ownership blocks parallel client workflows", SequentialRecoveryGate);
             Test("Supervisor minimizes only healthy gameplay clients", ManagedMinimizePolicy);
+            Test("Denied initial observation is marked for fresh-client recovery", ObservationAccessRecoveryPolicy);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -119,6 +121,27 @@ namespace Vanilla.Diagnostics.Tests
                 "The client currently receiving recovery input must stay available to the login workflow.");
             Assert(!VanillaReconnectSupervisor.ShouldKeepClientMinimized(VanillaReconnectStage.WaitingForClient, VanillaVisualState.Unknown),
                 "A missing/unidentified client cannot be minimized.");
+        }
+
+        private static void ObservationAccessRecoveryPolicy()
+        {
+            const int pid = 987654;
+            string detail;
+            ProcessObservationAccessRegistry.Forget(pid);
+            Assert(!ProcessObservationAccessRegistry.RequiresFreshClientProcess(pid, out detail), "Unknown PID was marked for recycle.");
+            ProcessObservationAccessRegistry.RecordInitialOpenFailure(pid, "OpenProcess(read/limited-query, 0x1010)", 5, "access denied");
+            Assert(ProcessObservationAccessRegistry.RequiresFreshClientProcess(pid, out detail) && detail == "access denied",
+                "Normal read-only OpenProcess access denial was not retained.");
+            Assert(VanillaObservationRecoveryPolicy.ShouldRecycle(true, true, false, true),
+                "Running auto-recovery supervisor should recycle a denied pre-existing client.");
+            Assert(!VanillaObservationRecoveryPolicy.ShouldRecycle(false, true, false, true), "Stopped supervisor must not recycle clients.");
+            Assert(!VanillaObservationRecoveryPolicy.ShouldRecycle(true, false, false, true), "Disabled auto-recovery must not recycle clients.");
+            Assert(!VanillaObservationRecoveryPolicy.ShouldRecycle(true, true, true, true), "Active recovery script must not be interrupted.");
+            ProcessObservationAccessRegistry.RecordOpenSuccess(pid);
+            Assert(!ProcessObservationAccessRegistry.RequiresFreshClientProcess(pid, out detail), "Successful fresh OpenProcess did not clear denial state.");
+            ProcessObservationAccessRegistry.RecordInitialOpenFailure(pid, "OpenProcess(read/limited-query, 0x1010)", 87, "wrong error");
+            Assert(!ProcessObservationAccessRegistry.RequiresFreshClientProcess(pid, out detail), "Non-access-denied failure was incorrectly recycled.");
+            ProcessObservationAccessRegistry.Forget(pid);
         }
 
         private static void PersistentDataMigration()
