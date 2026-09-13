@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Threading;
 using System.Windows.Forms;
 using _4RTools.Model.Vanilla;
 
@@ -33,9 +34,10 @@ namespace _4RTools.Forms
         {
             if (smokeTest || vanillaMemoryAccessDiagnosticTimer != null) return;
             vanillaMemoryAccessDiagnosticTimer = new Timer { Interval = 2000 };
-            vanillaMemoryAccessDiagnosticTimer.Tick += (s, e) => VanillaMemoryAccessDiagnostics.CaptureCurrentClients();
+            vanillaMemoryAccessDiagnosticTimer.Tick += (s, e) =>
+                ThreadPool.QueueUserWorkItem(_ => VanillaMemoryAccessDiagnostics.CaptureCurrentClients());
             vanillaMemoryAccessDiagnosticTimer.Start();
-            VanillaMemoryAccessDiagnostics.CaptureCurrentClients();
+            ThreadPool.QueueUserWorkItem(_ => VanillaMemoryAccessDiagnostics.CaptureCurrentClients());
             FormClosed += (s, e) =>
             {
                 try { vanillaMemoryAccessDiagnosticTimer?.Stop(); } catch { }
