@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -19,7 +20,7 @@ namespace _4RTools.Model.Vanilla
         private readonly TextBox exact = new TextBox { Width = 130 };
         private readonly Button baseline = MakeButton("CAPTURE BASELINE"), changed = MakeButton("CHANGED"), unchanged = MakeButton("UNCHANGED"),
             increased = MakeButton("INCREASED"), decreased = MakeButton("DECREASED"), exactScan = MakeButton("EXACT"), reset = MakeButton("RESET"),
-            copy = MakeButton("COPY SELECTED CANDIDATE"), export = MakeButton("EXPORT CANDIDATES…");
+            copy = MakeButton("COPY SELECTED CANDIDATE"), copyAll = MakeButton("COPY ALL CANDIDATES"), export = MakeButton("EXPORT CANDIDATES…");
         private readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(1200, 0), ForeColor = Color.DimGray };
         private readonly DataGridView grid = new DataGridView
         {
@@ -67,7 +68,7 @@ namespace _4RTools.Model.Vanilla
             controls.Controls.Add(Caption("Exact value")); controls.Controls.Add(exact);
             root.Controls.Add(controls, 0, 2);
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Margin = new Padding(0, 7, 0, 7) };
-            foreach (Control control in new Control[] { baseline, changed, unchanged, increased, decreased, exactScan, reset, copy, export }) actions.Controls.Add(control);
+            foreach (Control control in new Control[] { baseline, changed, unchanged, increased, decreased, exactScan, reset, copy, copyAll, export }) actions.Controls.Add(control);
             actions.Controls.Add(status); root.Controls.Add(actions, 0, 3);
             foreach (string column in new[] { "Address", "Main module + offset", "Previous", "Current", "Delta" }) grid.Columns.Add(column, column);
             grid.Columns[0].FillWeight = 120; grid.Columns[1].FillWeight = 130;
@@ -90,8 +91,9 @@ namespace _4RTools.Model.Vanilla
             increased.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Increased);
             decreased.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Decreased);
             exactScan.Click += async (s, e) => await CompareSafelyAsync(VanillaMemoryScanComparison.Exact);
-            reset.Click += (s, e) => Guard(() => { session?.Reset(); grid.Rows.Clear(); status.Text = "Reset. Capture a new baseline or run Exact."; });
+            reset.Click += (s, e) => Guard(() => { session?.Reset(); grid.Rows.Clear(); status.Text = "Reset. Capture a new baseline or run Exact."; SetButtons(true); });
             copy.Click += (s, e) => Guard(CopySelected);
+            copyAll.Click += (s, e) => Guard(CopyAllCandidates);
             export.Click += (s, e) => Guard(ExportCandidates);
             clients.SelectedIndexChanged += (s, e) => ResetSession("Client changed; discovery state reset.");
             valueType.SelectedIndexChanged += (s, e) => { if (session != null && session.HasBaseline) ResetSession("Value type changed; capture a new baseline."); };
@@ -206,6 +208,34 @@ namespace _4RTools.Model.Vanilla
             status.Text = "Candidate copied. It is intentionally marked unverified.";
         }
 
+        private void CopyAllCandidates()
+        {
+            if (session == null) throw new InvalidOperationException("No discovery session exists.");
+            if (session.Candidates.Count == 0) throw new InvalidOperationException("There are no candidate results to copy.");
+            Clipboard.SetText(FormatCandidatesForClipboard(session.ProcessId, session.ValueType, session.Scope, session.Candidates));
+            status.Text = session.Candidates.Count.ToString(CultureInfo.InvariantCulture) + " candidates copied to clipboard.";
+        }
+
+        internal static string FormatCandidatesForClipboard(int processId, VanillaMemoryScanValueType type, VanillaMemoryScanScope scanScope, IReadOnlyList<VanillaMemoryCandidate> candidates)
+        {
+            if (candidates == null) throw new ArgumentNullException(nameof(candidates));
+            var text = new StringBuilder();
+            text.Append("PID=").Append(processId.ToString(CultureInfo.InvariantCulture))
+                .Append("\tType=").Append(type)
+                .Append("\tScope=").Append(scanScope)
+                .Append("\tCandidates=").Append(candidates.Count.ToString(CultureInfo.InvariantCulture)).AppendLine();
+            text.AppendLine("Address\tMain module + offset\tPrevious\tCurrent\tDelta");
+            foreach (VanillaMemoryCandidate candidate in candidates)
+            {
+                text.Append(candidate.AddressHex).Append('\t')
+                    .Append(candidate.ModuleOffsetHex).Append('\t')
+                    .Append(candidate.PreviousValue.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                    .Append(candidate.CurrentValue.ToString(CultureInfo.InvariantCulture)).Append('\t')
+                    .Append(candidate.Delta.ToString(CultureInfo.InvariantCulture)).AppendLine();
+            }
+            return text.ToString();
+        }
+
         private void ExportCandidates()
         {
             if (session == null || (!session.HasBaseline && !session.IsStopped)) throw new InvalidOperationException("No discovery session exists.");
@@ -233,6 +263,7 @@ namespace _4RTools.Model.Vanilla
             ClientChoice choice = clients.SelectedItem as ClientChoice;
             bool canRead = enabled && choice != null && !stoppedClients.ContainsKey(choice.ProcessId);
             baseline.Enabled = changed.Enabled = unchanged.Enabled = increased.Enabled = decreased.Enabled = exactScan.Enabled = reset.Enabled = copy.Enabled = canRead;
+            copyAll.Enabled = canRead && session != null && session.Candidates.Count > 0;
             export.Enabled = enabled && session != null && (session.HasBaseline || session.IsStopped);
             clients.Enabled = valueType.Enabled = scope.Enabled = enabled;
         }
