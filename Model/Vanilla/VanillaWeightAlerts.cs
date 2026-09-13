@@ -211,15 +211,15 @@ namespace _4RTools.Model.Vanilla
                     state.Fingerprint = fingerprint; state.BuildProfile = build;
                     adapter.Observe(state, TimeSpan.Zero);
                     if (source.IsStopped || state.Error != null) return Error(state.Error ?? source.Status);
-                    bool valid = state.CurrentWeight.Validation == StateValidation.Valid && state.MaxWeight.Validation == StateValidation.Valid;
-                    if (!valid) return Error("Weight fields are not valid for the current sample.");
+                    decimal percent;
+                    string error;
+                    if (!VanillaWeightValidation.TryGetPercent(state, out percent, out error)) return Error(error);
                     uint current = state.CurrentWeight.Value, maximum = state.MaxWeight.Value;
-                    if (maximum == 0 || current > maximum || maximum > 1000000000U) return Error("Weight values failed sanity validation.");
                     string name = state.CharacterName.Validation == StateValidation.Valid && state.CharacterName.IsAvailable ? state.CharacterName.Value : "PID " + processId;
                     return new VanillaWeightObservation
                     {
                         ProcessId = processId, CharacterName = name, CurrentWeight = current, MaxWeight = maximum,
-                        Percent = current * 100m / maximum, Verified = true, Build = build
+                        Percent = percent, Verified = true, Build = build
                     };
                 }
                 catch (Exception ex) { return Error(ex.Message); }
@@ -248,6 +248,7 @@ namespace _4RTools.Model.Vanilla
 
         public event System.Action<string> StatusChanged;
         public VanillaWeightAlertStore Store { get { return store; } }
+        public bool IsRunning { get { lock (gate) return timer != null && !disposed; } }
         public string Status { get { lock (gate) return status; } }
         public IReadOnlyList<VanillaWeightObservation> Latest { get { lock (gate) return latest.ToArray(); } }
         public VanillaWeightAlertSettings Settings { get { lock (gate) return settings.Clone(); } }

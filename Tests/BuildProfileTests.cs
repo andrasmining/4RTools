@@ -23,6 +23,10 @@ namespace Vanilla.Diagnostics.Tests
                 { "Verified fields become optional typed automation signals", Verified },
                 { "Unknown action codes remain unavailable", UnknownAction },
                 { "Resource and coordinate sanity failures invalidate fields", Sanity },
+                { "Raw weight diagnostics reject invalid pairs without inferring trust", WeightReaderValidation },
+                { "Verified weight pairs share bounded percentage calculation", WeightPercentages },
+                { "Weight sanity failures cannot reach alerts or be promoted by the adapter", WeightSanity },
+                { "Missing or unverified weight fields never produce alert percentages", WeightUnknown },
                 { "Readiness never follows from valid HP alone", Readiness },
                 { "Build adapters reject arbitrary diagnostics maps", MapProvenance },
                 { "Demo and mismatched builds cannot enable automation", Untrusted },
@@ -120,6 +124,105 @@ namespace Vanilla.Diagnostics.Tests
             {
                 var value = fixture.Observe(); Assert(value.HealthValidated && !value.Ready, "HP cannot imply client ready.");
             }
+        }
+        private static void WeightReaderValidation()
+        {
+            using (var fixture = new Fixture(Profile()))
+            {
+                foreach (var pair in InvalidWeightPairs())
+                {
+                    fixture.Put(VanillaField.CurrentWeight, pair.Item1); fixture.Put(VanillaField.MaxWeight, pair.Item2);
+                    var snapshot = fixture.PollRaw();
+                    Assert(snapshot.CurrentWeight.Validation == StateValidation.Invalid && snapshot.MaxWeight.Validation == StateValidation.Invalid,
+                        "The raw source used by snapshots must invalidate both sides of a bad weight pair.");
+                    Assert(snapshot.CurrentWeight.IsAvailable && snapshot.MaxWeight.IsAvailable && snapshot.CurrentWeight.Error != null,
+                        "Diagnostics retain the observed values and explain the invalid pair.");
+                    new VanillaStateAdapter(null, IdentityValue()).Observe(snapshot, TimeSpan.Zero);
+                    Assert(snapshot.CurrentWeight.Validation == StateValidation.Invalid && snapshot.MaxWeight.Validation == StateValidation.Invalid,
+                        "An unknown build must not erase numeric sanity errors from diagnostics.");
+                }
+                fixture.Put(VanillaField.CurrentWeight, 0); fixture.Put(VanillaField.MaxWeight, 100);
+                var recovered = fixture.PollRaw();
+                Assert(recovered.CurrentWeight.Validation == StateValidation.Unverified && recovered.MaxWeight.Validation == StateValidation.Unverified,
+                    "A subsequent sane pair remains unverified in the raw reader.");
+                Assert(recovered.CurrentWeight.Error == null && recovered.MaxWeight.Error == null,
+                    "Prior sanity errors must not leak into a fresh good sample.");
+            }
+        }
+        private static void WeightPercentages()
+        {
+            using (var fixture = new Fixture(Profile()))
+            {
+                foreach (var pair in new[] { Tuple.Create(0u, 1u), Tuple.Create(1u, 1u), Tuple.Create(850u, 1000u),
+                    Tuple.Create(1000000000u, 1000000000u), Tuple.Create(1u, 1000000000u) })
+                {
+                    fixture.Put(VanillaField.CurrentWeight, pair.Item1); fixture.Put(VanillaField.MaxWeight, pair.Item2); fixture.Observe();
+                    decimal percent; string error;
+                    Assert(fixture.Snapshot.CurrentWeight.Validation == StateValidation.Valid && fixture.Snapshot.MaxWeight.Validation == StateValidation.Valid,
+                        "Only a sane pair with verified mappings becomes valid.");
+                    Assert(VanillaWeightValidation.TryGetPercent(fixture.Snapshot, out percent, out error)
+                        && error == null && percent == pair.Item1 * 100m / pair.Item2,
+                        "The alert gate accepts inclusive numeric boundaries and computes percentages without integer overflow.");
+                }
+            }
+        }
+        private static void WeightSanity()
+        {
+            var profile = Profile(); profile.MaximumVital = uint.MaxValue;
+            using (var fixture = new Fixture(profile))
+            {
+                foreach (var pair in InvalidWeightPairs())
+                {
+                    fixture.Put(VanillaField.CurrentWeight, pair.Item1); fixture.Put(VanillaField.MaxWeight, pair.Item2); fixture.Observe();
+                    Assert(fixture.Snapshot.CurrentWeight.Validation == StateValidation.Invalid && fixture.Snapshot.MaxWeight.Validation == StateValidation.Invalid,
+                        "Verified profile entries cannot override weight sanity errors, even with a larger HP/SP limit.");
+                    decimal percent; string error;
+                    Assert(!VanillaWeightValidation.TryGetPercent(fixture.Snapshot, out percent, out error) && !string.IsNullOrWhiteSpace(error),
+                        "The alert gate rejects bad pairs with a useful error.");
+                    fixture.Snapshot.CurrentWeight.Validation = fixture.Snapshot.MaxWeight.Validation = StateValidation.Valid;
+                    fixture.Snapshot.CurrentWeight.Error = fixture.Snapshot.MaxWeight.Error = null;
+                    Assert(!VanillaWeightValidation.TryGetPercent(fixture.Snapshot, out percent, out error),
+                        "The alert gate independently validates the numeric pair even if a caller assigns valid flags.");
+                }
+            }
+        }
+        private static void WeightUnknown()
+        {
+            foreach (VanillaField field in new[] { VanillaField.CurrentWeight, VanillaField.MaxWeight })
+            {
+                var profile = Profile(); profile.VerifiedFields.Remove(field);
+                using (var fixture = new Fixture(profile))
+                {
+                    fixture.Put(VanillaField.CurrentWeight, 85); fixture.Put(VanillaField.MaxWeight, 100); fixture.Observe();
+                    decimal percent; string error;
+                    Assert(fixture.Snapshot.Fields[field].Validation == StateValidation.Unverified
+                        && !VanillaWeightValidation.TryGetPercent(fixture.Snapshot, out percent, out error),
+                        "A plausible pair cannot grant trust to an unverified mapping.");
+                }
+                profile.MemoryMap.Fields.Remove(field);
+                using (var fixture = new Fixture(profile))
+                {
+                    var remaining = field == VanillaField.CurrentWeight ? VanillaField.MaxWeight : VanillaField.CurrentWeight;
+                    foreach (uint value in new[] { 0u, 100u })
+                    {
+                        fixture.Put(remaining, value); fixture.PollRaw();
+                        Assert(fixture.Snapshot.Fields[remaining].Validation == StateValidation.Invalid
+                            && fixture.Snapshot.Fields[remaining].Error.Contains(field.ToString()),
+                            "Raw diagnostics reject an incomplete weight pair and identify the missing counterpart.");
+                        fixture.Observe();
+                        decimal percent; string error;
+                        Assert(!fixture.Snapshot.Fields[field].IsAvailable && fixture.Snapshot.Fields[field].Validation == StateValidation.Unavailable
+                            && fixture.Snapshot.Fields[remaining].Validation == StateValidation.Invalid
+                            && !VanillaWeightValidation.TryGetPercent(fixture.Snapshot, out percent, out error),
+                            "A missing half stays unavailable; profile trust cannot make the remaining half valid or produce an alert sample.");
+                    }
+                }
+            }
+        }
+        private static IEnumerable<Tuple<uint, uint>> InvalidWeightPairs()
+        {
+            return new[] { Tuple.Create(0u, 0u), Tuple.Create(1u, 0u), Tuple.Create(101u, 100u),
+                Tuple.Create(1u, 1000000001u), Tuple.Create(uint.MaxValue, uint.MaxValue) };
         }
         private static void MapProvenance()
         {
@@ -295,11 +398,12 @@ namespace Vanilla.Diagnostics.Tests
                 memory.Put(memory.MainModuleBaseAddress + VanillaMemoryMap.ParseAddress(mapping.Address), bytes);
             }
             private int sample;
-            public RuleObservation Observe()
+            public VanillaClientState PollRaw()
             {
                 var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).AddSeconds(sample++);
-                Snapshot = source.Poll(timestamp); return adapter.Observe(Snapshot, TimeSpan.FromSeconds(sample));
+                return Snapshot = source.Poll(timestamp);
             }
+            public RuleObservation Observe() { PollRaw(); return adapter.Observe(Snapshot, TimeSpan.FromSeconds(sample)); }
             public void Dispose() { source.Dispose(); }
         }
         private sealed class FakeMemory : IReadOnlyProcessMemory

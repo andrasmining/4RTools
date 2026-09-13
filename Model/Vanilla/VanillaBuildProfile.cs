@@ -178,9 +178,11 @@ namespace _4RTools.Model.Vanilla
                 field.Validation = field.IsAvailable ? StateValidation.Unverified : StateValidation.Unavailable;
                 if (field.IsAvailable) field.Error = null;
             }
+            VanillaWeightValidation.ValidateSample(state);
             if (!result.TrustedBuild || state.Error != null) { ResetActivity(); return result; }
             foreach (VanillaField field in profile.VerifiedFields)
-                if (state.Fields[field].IsAvailable) state.Fields[field].Validation = StateValidation.Valid;
+                if (state.Fields[field].IsAvailable && state.Fields[field].Validation != StateValidation.Invalid)
+                    state.Fields[field].Validation = StateValidation.Valid;
 
             ValidateVitals(state, VanillaField.CurrentHP, VanillaField.MaxHP);
             ValidateVitals(state, VanillaField.CurrentSP, VanillaField.MaxSP);

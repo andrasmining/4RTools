@@ -129,6 +129,7 @@ namespace _4RTools.Model.Vanilla
             }
             previous = VanillaClientState.Create(session, now, previous, values, addresses, map,
                 IsStopped ? (failure ?? "Observation session stopped.") : null);
+            VanillaWeightValidation.ValidateSample(previous);
             previous.ProcessId = memory.ProcessId;
             previous.ProcessName = memory.ProcessName;
             previous.ModuleBaseAddress = memory.MainModuleBaseAddress;
