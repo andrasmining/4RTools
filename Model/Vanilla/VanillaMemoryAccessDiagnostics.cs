@@ -23,6 +23,8 @@ namespace _4RTools.Model.Vanilla
         private static readonly HashSet<int> LoggedPids = new HashSet<int>();
         private static bool headerWritten;
 
+        internal static string LogPath { get { return Path.Combine(VanillaAppData.LogsDirectory, "memory-access.log"); } }
+
         internal static void CaptureCurrentClients()
         {
             Process[] processes;
@@ -51,6 +53,97 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
+        internal static void RecordObservationFailure(int pid, Exception error)
+        {
+            if (error == null) return;
+            Write("OBSERVATION FAILURE PID=" + pid + ": " + error.GetType().FullName + ": " + error.Message);
+        }
+
+        internal static string BuildClipboardBundle(string reconnectCurrentPath)
+        {
+            CaptureCurrentClients();
+            var text = new StringBuilder(32768);
+            text.AppendLine("=== 4RTOOLS VANILLA FULL DEBUG LOG ===");
+            text.AppendLine("Generated UTC: " + DateTimeOffset.UtcNow.ToString("O"));
+            try { text.AppendLine("4RTools version: " + Assembly.GetExecutingAssembly().GetName().Version); } catch { }
+            text.AppendLine("Observer: " + ProcessObservationContext.Current);
+            text.AppendLine("Data root: " + VanillaAppData.RootDirectory);
+            text.AppendLine();
+
+            AppendFileSection(text, "MEMORY ACCESS DEBUG", LogPath);
+
+            string[] reconnectFiles = CurrentReconnectSessionFiles(reconnectCurrentPath);
+            if (reconnectFiles.Length == 0)
+                AppendMissingSection(text, "RECONNECT SESSION", reconnectCurrentPath);
+            else
+                foreach (string file in reconnectFiles)
+                    AppendFileSection(text, "RECONNECT SESSION - " + Path.GetFileName(file), file);
+
+            AppendFileSection(text, "VANILLA CORE LOG", Path.Combine(VanillaAppData.LogsDirectory, "vanilla.log"));
+            AppendFileSection(text, "UPDATE ERROR LOG", Path.Combine(VanillaAppData.LogsDirectory, "update-error.log"));
+
+            text.AppendLine("=== END FULL DEBUG LOG ===");
+            return text.ToString();
+        }
+
+        private static string[] CurrentReconnectSessionFiles(string currentPath)
+        {
+            if (string.IsNullOrWhiteSpace(currentPath)) return new string[0];
+            try
+            {
+                string full = Path.GetFullPath(currentPath);
+                string directory = Path.GetDirectoryName(full);
+                if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return new string[0];
+                string stem = Path.GetFileNameWithoutExtension(full);
+                int part = stem.LastIndexOf("-part", StringComparison.OrdinalIgnoreCase);
+                if (part > 0)
+                {
+                    string suffix = stem.Substring(part + 5);
+                    int ignored;
+                    if (int.TryParse(suffix, out ignored)) stem = stem.Substring(0, part);
+                }
+                return Directory.GetFiles(directory, stem + "*.log", SearchOption.TopDirectoryOnly)
+                    .Where(path =>
+                    {
+                        string candidate = Path.GetFileNameWithoutExtension(path);
+                        if (string.Equals(candidate, stem, StringComparison.OrdinalIgnoreCase)) return true;
+                        if (!candidate.StartsWith(stem + "-part", StringComparison.OrdinalIgnoreCase)) return false;
+                        int value;
+                        return int.TryParse(candidate.Substring((stem + "-part").Length), out value);
+                    })
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+            catch { return new string[0]; }
+        }
+
+        private static void AppendFileSection(StringBuilder text, string caption, string path)
+        {
+            text.AppendLine("=== " + caption + " ===");
+            text.AppendLine("Path: " + (string.IsNullOrWhiteSpace(path) ? "(none)" : path));
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                text.AppendLine("(file not present)");
+                text.AppendLine();
+                return;
+            }
+            try
+            {
+                text.Append(File.ReadAllText(path));
+                if (text.Length > 0 && text[text.Length - 1] != '\n') text.AppendLine();
+            }
+            catch (Exception ex) { text.AppendLine("(could not read file: " + ex.Message + ")"); }
+            text.AppendLine();
+        }
+
+        private static void AppendMissingSection(StringBuilder text, string caption, string path)
+        {
+            text.AppendLine("=== " + caption + " ===");
+            text.AppendLine("Path: " + (string.IsNullOrWhiteSpace(path) ? "(none)" : path));
+            text.AppendLine("(no current reconnect session log found)");
+            text.AppendLine();
+        }
+
         private static void CapturePid(int pid)
         {
             try
@@ -67,6 +160,7 @@ namespace _4RTools.Model.Vanilla
                 Write("TARGET PID=" + pid + "; session=" + targetSession + "; configuredTarget=" + targetFile
                     + "; rights=[" + vmRead + "; " + query + "; " + sync + "; " + combined + "]"
                     + "; moduleSnapshot=" + modules + ".");
+                WriteBuildProfile();
                 WriteRelatedGameFiles(configuredTarget);
             }
             catch (Exception ex)
@@ -90,7 +184,7 @@ namespace _4RTools.Model.Vanilla
             string observerFile = DescribeFile(observerPath);
             Write("SESSION 4RToolsVersion=" + version + "; observer=" + observerFile + "; "
                 + ProcessObservationContext.Current + "; OS=" + Environment.OSVersion.VersionString
-                + "; currentDirectory='" + Environment.CurrentDirectory + "'.");
+                + "; currentDirectory='" + Environment.CurrentDirectory + "'; dataRoot='" + VanillaAppData.RootDirectory + "'.");
         }
 
         private static string ResolveConfiguredTarget()
@@ -108,6 +202,22 @@ namespace _4RTools.Model.Vanilla
                 Write("CONFIG target resolution failed: " + ex.GetType().Name + ": " + ex.Message);
                 return null;
             }
+        }
+
+        private static void WriteBuildProfile()
+        {
+            try
+            {
+                string directory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds");
+                if (!Directory.Exists(directory))
+                {
+                    Write("BUILD PROFILE directory missing: '" + directory + "'.");
+                    return;
+                }
+                foreach (string path in Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+                    Write("BUILD PROFILE " + DescribeFile(path));
+            }
+            catch (Exception ex) { Write("BUILD PROFILE scan failed: " + ex.Message); }
         }
 
         private static string SessionText(int pid)
@@ -200,9 +310,8 @@ namespace _4RTools.Model.Vanilla
             {
                 string directory = VanillaAppData.LogsDirectory;
                 Directory.CreateDirectory(directory);
-                string path = Path.Combine(directory, "memory-access.log");
                 string line = DateTimeOffset.UtcNow.ToString("O") + " " + message + Environment.NewLine;
-                lock (Gate) File.AppendAllText(path, line, Encoding.UTF8);
+                lock (Gate) File.AppendAllText(LogPath, line, Encoding.UTF8);
             }
             catch { }
         }
