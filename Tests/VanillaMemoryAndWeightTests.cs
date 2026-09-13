@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using _4RTools.Model.Vanilla;
+using _4RTools.Utils;
 
 namespace Vanilla.Diagnostics.Tests
 {
@@ -12,6 +14,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Memory finder parses decimal and hexadecimal values", ParseValues);
             failed += Test("Memory finder rejects values outside selected width", ParseBounds);
             failed += Test("Memory finder copies all candidates with module offsets", CandidateClipboard);
+            failed += Test("Configured launcher resolves adjacent Vanilla executable", ConfiguredExecutableResolution);
             failed += Test("Weight fields accept UInt32 memory mappings", WeightMappings);
             failed += Test("Weight alert thresholds enforce re-arm hysteresis", WeightThresholds);
             failed += Test("Enabled weight e-mail alerts require SMTP transport", WeightMailValidation);
@@ -52,6 +55,24 @@ namespace Vanilla.Diagnostics.Tests
             Contains(text, "0x00D362EC\t0xD352EC\t2630\t2630\t0", "second candidate");
         }
 
+        private static void ConfiguredExecutableResolution()
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "4rtools-vanilla-path-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                string launcher = Path.Combine(directory, "Vanilla Launcher.exe");
+                string client = Path.Combine(directory, "Vanilla MMO.exe");
+                File.WriteAllBytes(launcher, new byte[] { 1 });
+                File.WriteAllBytes(client, new byte[] { 2 });
+                Equal(client, ReadOnlyProcessMemory.ResolveVanillaExecutableFromLaunch(launcher), "adjacent client");
+                Equal(client, ReadOnlyProcessMemory.ResolveVanillaExecutableFromLaunch(client), "direct client");
+                if (ReadOnlyProcessMemory.ResolveVanillaExecutableFromLaunch(Path.Combine(directory, "missing.exe")) != client)
+                    throw new Exception("A configured launcher path in the Vanilla directory must still resolve the adjacent client.");
+            }
+            finally { try { Directory.Delete(directory, true); } catch { } }
+        }
+
         private static void WeightMappings()
         {
             string json = "{\"SchemaVersion\":1,\"ProcessName\":\"Vanilla MMO.exe\",\"Fields\":{"
@@ -90,6 +111,12 @@ namespace Vanilla.Diagnostics.Tests
         private static void Equal(long expected, long actual, string label)
         {
             if (expected != actual) throw new Exception(label + ": expected " + expected + ", got " + actual + ".");
+        }
+
+        private static void Equal(string expected, string actual, string label)
+        {
+            if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+                throw new Exception(label + ": expected '" + expected + "', got '" + actual + "'.");
         }
 
         private static void Contains(string text, string expected, string label)
