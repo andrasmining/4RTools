@@ -1,0 +1,346 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
+using _4RTools.Model.Vanilla.Automation;
+using _4RTools.Utils;
+
+namespace _4RTools.Model.Vanilla
+{
+    public sealed class VanillaFleetClientInfo
+    {
+        public int ProcessId { get; internal set; }
+        public string CharacterName { get; internal set; }
+        public uint? CurrentHP { get; internal set; }
+        public uint? MaxHP { get; internal set; }
+        public uint? CurrentSP { get; internal set; }
+        public uint? MaxSP { get; internal set; }
+        public bool HpVerified { get; internal set; }
+        public bool SpVerified { get; internal set; }
+        public bool NameVerified { get; internal set; }
+        public string Location { get; internal set; }
+        public string Activity { get; internal set; }
+        public string Build { get; internal set; }
+        public string Error { get; internal set; }
+        public bool Ready { get; internal set; }
+
+        public decimal? HpPercent { get { return Percent(CurrentHP, MaxHP); } }
+        public decimal? SpPercent { get { return Percent(CurrentSP, MaxSP); } }
+
+        private static decimal? Percent(uint? current, uint? maximum)
+        {
+            if (!current.HasValue || !maximum.HasValue || maximum.Value == 0) return null;
+            return Math.Max(0m, Math.Min(100m, current.Value * 100m / maximum.Value));
+        }
+    }
+
+    /// <summary>
+    /// Keeps lightweight read-only observations for the at-most-two live Vanilla clients.
+    /// It never sends input. Each PID is fingerprinted and resolved through the audited build profile.
+    /// </summary>
+    public sealed class VanillaFleetMonitor : IDisposable
+    {
+        private readonly string baseDirectory;
+        private readonly Stopwatch clock = Stopwatch.StartNew();
+        private readonly Dictionary<int, Reader> readers = new Dictionary<int, Reader>();
+        private readonly object gate = new object();
+        private bool disposed;
+
+        public VanillaFleetMonitor(string baseDirectory)
+        {
+            this.baseDirectory = Path.GetFullPath(baseDirectory ?? throw new ArgumentNullException(nameof(baseDirectory)));
+        }
+
+        public IReadOnlyList<VanillaFleetClientInfo> Poll()
+        {
+            lock (gate)
+            {
+                if (disposed) return new VanillaFleetClientInfo[0];
+                var live = new List<int>();
+                foreach (Process process in Process.GetProcessesByName("Vanilla MMO"))
+                {
+                    using (process)
+                    {
+                        try
+                        {
+                            if (!process.HasExited && process.MainWindowHandle != IntPtr.Zero) live.Add(process.Id);
+                        }
+                        catch (InvalidOperationException) { }
+                        catch (System.ComponentModel.Win32Exception) { }
+                    }
+                }
+                live = live.Distinct().OrderBy(value => value).ToList();
+                foreach (int dead in readers.Keys.Where(pid => !live.Contains(pid)).ToArray())
+                {
+                    readers[dead].Dispose();
+                    readers.Remove(dead);
+                }
+                foreach (int pid in live)
+                {
+                    if (readers.ContainsKey(pid)) continue;
+                    try { readers.Add(pid, new Reader(baseDirectory, pid)); }
+                    catch (Exception ex) { readers.Add(pid, Reader.Failed(pid, ex.Message)); }
+                }
+                return live.Select(pid => readers[pid].Poll(clock.Elapsed)).ToArray();
+            }
+        }
+
+        public IReadOnlyList<int> LiveProcessIds()
+        {
+            return Poll().Select(item => item.ProcessId).ToArray();
+        }
+
+        public void Dispose()
+        {
+            lock (gate)
+            {
+                if (disposed) return;
+                disposed = true;
+                foreach (var reader in readers.Values) reader.Dispose();
+                readers.Clear();
+                clock.Stop();
+            }
+        }
+
+        private sealed class Reader : IDisposable
+        {
+            private readonly int processId;
+            private readonly MemoryStateSource source;
+            private readonly VanillaStateAdapter adapter;
+            private readonly string fingerprint, build;
+            private readonly string startupError;
+            private bool disposed;
+            private VanillaFleetClientInfo last;
+
+            public static Reader Failed(int processId, string error) { return new Reader(processId, error); }
+
+            private Reader(int processId, string error)
+            {
+                this.processId = processId;
+                startupError = error;
+            }
+
+            public Reader(string baseDirectory, int processId)
+            {
+                this.processId = processId;
+                ReadOnlyProcessMemory memory = null;
+                try
+                {
+                    memory = new ReadOnlyProcessMemory(processId);
+                    if (!string.Equals(memory.ProcessName, "Vanilla MMO", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Selected process is not Vanilla MMO.");
+                    if (memory.PointerSize != 4) throw new InvalidOperationException("Only the 32-bit Vanilla client is supported by the current build profile.");
+                    var identity = VanillaExecutableIdentity.Read(memory.ExecutablePath);
+                    fingerprint = identity.Sha256;
+                    var profile = VanillaBuildProfile.Find(Path.Combine(baseDirectory, "VanillaBuilds"), identity, _ => { });
+                    if (profile == null) throw new InvalidOperationException("No verified Vanilla build profile matches this executable.");
+                    build = profile.Label;
+                    adapter = new VanillaStateAdapter(profile, identity);
+                    source = new MemoryStateSource(memory, profile.MemoryMap);
+                    memory = null; // MemoryStateSource owns it now.
+                }
+                finally { memory?.Dispose(); }
+            }
+
+            public VanillaFleetClientInfo Poll(TimeSpan now)
+            {
+                if (disposed) return last ?? ErrorInfo("Observation closed.");
+                if (startupError != null) return last = ErrorInfo(startupError);
+                try
+                {
+                    var snapshot = source.Poll(DateTimeOffset.UtcNow);
+                    snapshot.Fingerprint = fingerprint;
+                    snapshot.BuildProfile = build;
+                    var observation = adapter.Observe(snapshot, now);
+                    if (source.IsStopped || snapshot.Error != null)
+                        return last = ErrorInfo(snapshot.Error ?? source.Status);
+                    return last = BuildInfo(snapshot, observation);
+                }
+                catch (Exception ex) { return last = ErrorInfo(ex.Message); }
+            }
+
+            private VanillaFleetClientInfo BuildInfo(VanillaClientState state, RuleObservation observation)
+            {
+                string name = state.CharacterName.IsAvailable ? state.CharacterName.Value : "Unknown character";
+                var location = BuildLocation(state);
+                var activity = BuildActivity(state, observation);
+                return new VanillaFleetClientInfo
+                {
+                    ProcessId = processId,
+                    CharacterName = name,
+                    CurrentHP = state.CurrentHP.IsAvailable ? (uint?)state.CurrentHP.Value : null,
+                    MaxHP = state.MaxHP.IsAvailable ? (uint?)state.MaxHP.Value : null,
+                    CurrentSP = state.CurrentSP.IsAvailable ? (uint?)state.CurrentSP.Value : null,
+                    MaxSP = state.MaxSP.IsAvailable ? (uint?)state.MaxSP.Value : null,
+                    HpVerified = state.CurrentHP.Validation == StateValidation.Valid && state.MaxHP.Validation == StateValidation.Valid,
+                    SpVerified = state.CurrentSP.Validation == StateValidation.Valid && state.MaxSP.Validation == StateValidation.Valid,
+                    NameVerified = state.CharacterName.Validation == StateValidation.Valid,
+                    Location = location,
+                    Activity = activity,
+                    Build = build,
+                    Ready = observation.Ready,
+                    Error = null
+                };
+            }
+
+            private static string BuildLocation(VanillaClientState state)
+            {
+                bool map = state.Map.IsAvailable && state.Map.Validation == StateValidation.Valid;
+                bool xy = state.X.IsAvailable && state.Y.IsAvailable
+                    && state.X.Validation == StateValidation.Valid && state.Y.Validation == StateValidation.Valid;
+                if (map && xy) return state.Map.Value + "  (" + state.X.Value + ", " + state.Y.Value + ")";
+                if (map) return state.Map.Value;
+                if (xy) return "(" + state.X.Value + ", " + state.Y.Value + ")";
+                return "Location mapping pending";
+            }
+
+            private static string BuildActivity(VanillaClientState state, RuleObservation observation)
+            {
+                if (observation.Loading) return "Loading";
+                if (observation.IsCasting == true) return "Casting";
+                if (observation.InCombat == true) return "In combat";
+                if (state.LastMovementAtUtc.HasValue && DateTimeOffset.UtcNow - state.LastMovementAtUtc.Value < TimeSpan.FromSeconds(2))
+                    return "Moving";
+                if (observation.HasTarget == true) return "Target acquired";
+                if (observation.PositionValidated) return "Stationary";
+                return "Activity mapping pending";
+            }
+
+            private VanillaFleetClientInfo ErrorInfo(string error)
+            {
+                return new VanillaFleetClientInfo
+                {
+                    ProcessId = processId,
+                    CharacterName = "Vanilla MMO",
+                    Location = "Unavailable",
+                    Activity = "Observation unavailable",
+                    Build = build,
+                    Error = error,
+                    Ready = false
+                };
+            }
+
+            public void Dispose()
+            {
+                if (disposed) return;
+                disposed = true;
+                source?.Dispose();
+            }
+        }
+    }
+
+    /// <summary>Always-visible two-client status strip for the Vanilla-first workspace.</summary>
+    public sealed class VanillaFleetDashboardPanel : UserControl
+    {
+        private readonly VanillaFleetMonitor monitor;
+        private readonly Timer timer = new Timer { Interval = 500 };
+        private readonly ClientCard[] cards = { new ClientCard("Client 1"), new ClientCard("Client 2") };
+        private readonly Label extra = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(8, 4, 0, 0) };
+
+        public VanillaFleetDashboardPanel(VanillaFleetMonitor monitor)
+        {
+            this.monitor = monitor ?? throw new ArgumentNullException(nameof(monitor));
+            Dock = DockStyle.Top;
+            Height = 150;
+            MinimumSize = new Size(600, 145);
+            BackColor = Color.White;
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(4) };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.Controls.Add(cards[0], 0, 0);
+            root.Controls.Add(cards[1], 1, 0);
+            root.Controls.Add(extra, 0, 1);
+            root.SetColumnSpan(extra, 2);
+            Controls.Add(root);
+            timer.Tick += (s, e) => RefreshNow();
+            timer.Start();
+            RefreshNow();
+        }
+
+        public void RefreshNow()
+        {
+            IReadOnlyList<VanillaFleetClientInfo> clients;
+            try { clients = monitor.Poll(); }
+            catch (Exception ex)
+            {
+                clients = new VanillaFleetClientInfo[0];
+                extra.Text = "Live memory observation error: " + ex.Message;
+            }
+            for (int i = 0; i < cards.Length; i++) cards[i].ShowClient(i < clients.Count ? clients[i] : null);
+            if (clients.Count <= 2) extra.Text = clients.Count == 0
+                ? "No Vanilla clients running. Recovery & relog can start the configured clients."
+                : "Live values are read from the selected Vanilla build's read-only memory map. Location/activity appear automatically when those mappings are verified.";
+            else extra.Text = clients.Count + " Vanilla processes detected; the dashboard shows the first two only.";
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) timer.Dispose();
+            base.Dispose(disposing);
+        }
+
+        private sealed class ClientCard : GroupBox
+        {
+            private readonly Label title = new Label { AutoSize = true, Font = new Font("Segoe UI", 11F, FontStyle.Bold) };
+            private readonly Label hp = new Label { AutoSize = true };
+            private readonly Label sp = new Label { AutoSize = true };
+            private readonly Label location = new Label { AutoSize = true, ForeColor = Color.DimGray };
+            private readonly Label activity = new Label { AutoSize = true, ForeColor = Color.DimGray };
+            private readonly ProgressBar hpBar = new ProgressBar { Height = 8, Dock = DockStyle.Top, Maximum = 100 };
+            private readonly ProgressBar spBar = new ProgressBar { Height = 8, Dock = DockStyle.Top, Maximum = 100 };
+            private readonly string emptyTitle;
+
+            public ClientCard(string emptyTitle)
+            {
+                this.emptyTitle = emptyTitle;
+                Dock = DockStyle.Fill;
+                Margin = new Padding(4);
+                Padding = new Padding(10);
+                var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 5 };
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+                layout.Controls.Add(title, 0, 0); layout.SetColumnSpan(title, 2);
+                layout.Controls.Add(hp, 0, 1); layout.Controls.Add(sp, 1, 1);
+                layout.Controls.Add(hpBar, 0, 2); layout.Controls.Add(spBar, 1, 2);
+                layout.Controls.Add(location, 0, 3); layout.SetColumnSpan(location, 2);
+                layout.Controls.Add(activity, 0, 4); layout.SetColumnSpan(activity, 2);
+                Controls.Add(layout);
+                ShowClient(null);
+            }
+
+            public void ShowClient(VanillaFleetClientInfo info)
+            {
+                if (info == null)
+                {
+                    Text = emptyTitle;
+                    title.Text = "Not running";
+                    hp.Text = "HP —";
+                    sp.Text = "SP —";
+                    hpBar.Value = spBar.Value = 0;
+                    location.Text = "Location —";
+                    activity.Text = "Waiting for client";
+                    return;
+                }
+                Text = "PID " + info.ProcessId;
+                title.Text = info.CharacterName + (info.NameVerified ? "" : "  [unverified name]");
+                hp.Text = "HP  " + Vital(info.CurrentHP, info.MaxHP) + (info.HpVerified ? "" : "  [unverified]");
+                sp.Text = "SP  " + Vital(info.CurrentSP, info.MaxSP) + (info.SpVerified ? "" : "  [unverified]");
+                hpBar.Value = Clamp(info.HpPercent);
+                spBar.Value = Clamp(info.SpPercent);
+                location.Text = "Location: " + info.Location;
+                activity.Text = info.Error == null ? "Activity: " + info.Activity : "Observation: " + info.Error;
+            }
+
+            private static string Vital(uint? current, uint? maximum)
+            {
+                return current.HasValue && maximum.HasValue ? current.Value + " / " + maximum.Value : "Unavailable";
+            }
+            private static int Clamp(decimal? value) { return value.HasValue ? Math.Max(0, Math.Min(100, (int)Math.Round(value.Value))) : 0; }
+        }
+    }
+}
