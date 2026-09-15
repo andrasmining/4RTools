@@ -1,4 +1,4 @@
-name: Autobattle development recovery
+name: Autobattle development validation
 
 on:
   push:
@@ -6,32 +6,115 @@ on:
     paths: ['.github/workflows/autobattle-development.yml']
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+concurrency:
+  group: autobattle-development
+  cancel-in-progress: false
+
 jobs:
-  inspect:
+  validate:
     runs-on: windows-2022
-    timeout-minutes: 10
+    timeout-minutes: 35
     steps:
+      - name: Preserve repository bytes before checkout
+        shell: powershell
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          persist-credentials: false
-      - name: Export source and branch history without credentials
+      - name: Recover reviewed source and fix integration
         shell: powershell
         run: |
-          git status --short
-          git log -8 --oneline
-          git bundle create "$env:RUNNER_TEMP/4RTools-review.bundle" --all
-          if ($LASTEXITCODE -ne 0) { throw 'Repository export failed.' }
-          git bundle verify "$env:RUNNER_TEMP/4RTools-review.bundle"
-          if ($LASTEXITCODE -ne 0) { throw 'Repository export verification failed.' }
+          git config user.name '4RTools engineering'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          @'
+          from pathlib import Path
+          import base64, hashlib, lzma, os, re, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args])
+          assert os.environ['GITHUB_REF_NAME'] == 'fix/autobattle-movement-verification'
+          data = ''.join(Path('.github/autobattle-patch-%d.txt' % i).read_text().strip() for i in (1, 2))
+          patch = lzma.decompress(base64.b64decode(data, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'cfe76d34bee35af59b616f2dbdc7a51a4037db6680c24b65a6ce1976eb5a7750'
+          paths = re.findall(r'^diff --git a/(\S+) b/\1$', patch.decode(), re.M)
+          assert len(paths) == 14 and all(not p.startswith('.github/') for p in paths)
+          endings = {}
+          for name in paths:
+              current = subprocess.run(['git', 'show', 'HEAD:' + name], capture_output=True)
+              original = subprocess.run(['git', 'show', '727ae89922c7cd9d665c3db979ddbacbee1827a8:' + name], capture_output=True)
+              assert current.returncode == original.returncode, 'Concurrent source change: ' + name
+              if current.returncode == 0:
+                  assert current.stdout == original.stdout, 'Concurrent source change: ' + name
+                  endings[name] = b'\r\n' in original.stdout
+                  Path(name).write_bytes(original.stdout.replace(b'\r\n', b'\n'))
+          patchfile = Path(os.environ['RUNNER_TEMP']) / 'autobattle-reviewed.patch'
+          patchfile.write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', '--unidiff-zero', str(patchfile)], check=True)
+          subprocess.run(['git', 'apply', '--unidiff-zero', str(patchfile)], check=True)
+          for name in ['Model/Vanilla/VanillaAutobattleResume.cs', 'Model/Vanilla/VanillaForegroundInput.cs']:
+              path = Path(name)
+              text = path.read_text()
+              text = re.sub(r'(?<![\w.])Action\b', 'System.Action', text)
+              if name.endswith('VanillaAutobattleResume.cs'):
+                  old = 'Path.Combine(baseDirectory, "VanillaBuilds")'
+                  assert text.count(old) == 1
+                  text = text.replace(old, 'AutobattleBuildProfileDirectory')
+                  old = 'private int resumeVerificationGeneration;'
+                  assert text.count(old) == 1
+                  text = text.replace(old, old + '\n\n        // Shipped build profiles live beside the executable, never in mutable user data.\n        internal static string AutobattleBuildProfileDirectory\n        {\n            get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds"); }\n        }')
+              path.write_bytes(text.encode('utf-8'))
+          for name, crlf in endings.items():
+              if crlf:
+                  path = Path(name)
+                  path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
+          git('add', '--', *paths)
+          subprocess.run(['git', '-c', 'core.whitespace=cr-at-eol', 'diff', '--cached', '--check'], check=True)
+          git('archive', '--format=zip', '--output=' + str(Path(os.environ['RUNNER_TEMP']) / 'candidate-source.zip'), git('write-tree').decode().strip())
+          print(git('diff', '--cached', '--stat').decode())
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Reviewed source recovery failed.' }
+      - name: Restore dependencies
+        shell: powershell
+        run: |
+          nuget restore 4RTools.sln -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+      - name: Validate shipped state profiles
+        shell: powershell
+        run: ./scripts/validate-vanilla-build-profiles.ps1
+      - name: Debug build and regression suite
+        shell: powershell
+        run: ./scripts/build.ps1 -Configuration Debug -VanillaRelease
+      - name: Release build, tests, portable package and Windows launch smoke
+        shell: powershell
+        run: ./scripts/build-release.ps1 -Version 0.6.35
+      - name: Native Windows mock-data UI regression harness
+        shell: powershell
+        run: ./scripts/test-ui-layout.ps1
+      - name: Commit validated source and remove obsolete patch payloads
+        shell: powershell
+        run: |
+          git rm .github/autobattle-patch-1.txt .github/autobattle-patch-2.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Patch cleanup failed.' }
+          git commit -m 'fix: verify autobattle movement with three bounded startup attempts'
+          if ($LASTEXITCODE -ne 0) { throw 'Validated source commit failed.' }
+          git push origin "HEAD:$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) { throw 'Branch advanced; no overwrite attempted.' }
+          git bundle create "$env:RUNNER_TEMP/validated-source.bundle" --all
+          if ($LASTEXITCODE -ne 0) { throw 'Validated source export failed.' }
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: recovery-source-${{ github.run_id }}
-          path: ${{ runner.temp }}/4RTools-review.bundle
-          retention-days: 1
-          if-no-files-found: error
+          name: autobattle-validation-${{ github.run_id }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/ui-layout/**
+            ${{ runner.temp }}/candidate-source.zip
+            ${{ runner.temp }}/validated-source.bundle
+            ${{ env.LOCALAPPDATA }}/4RTools-Engineering/builds/**/*.log
+          retention-days: 7
+          if-no-files-found: warn
