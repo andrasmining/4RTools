@@ -8,7 +8,6 @@ namespace _4RTools.Forms
     public partial class Container
     {
         private bool globalDebugUiInstalled;
-        private bool taskbarMinimizeGuard;
         private CheckBox globalDebugEnabled;
         private Button globalCopyDebug;
         private System.Windows.Forms.Timer globalDebugSnapshotTimer;
@@ -20,11 +19,7 @@ namespace _4RTools.Forms
             globalDebugUiInstalled = true;
             _4RTools.Model.Vanilla.VanillaDebugLog.Initialize();
 
-            // The main product window must remain a normal taskbar window. The legacy container
-            // resize handler hides minimized forms for tray-only behavior, so this later handler
-            // immediately reverses that hide while preserving the Minimized state.
             ShowInTaskbar = true;
-            Resize += KeepMainWindowInTaskbar;
 
             Button anchor = FindControlByText<Button>(this, "OPEN DATA FOLDER");
             if (anchor != null && anchor.Parent != null)
@@ -81,23 +76,8 @@ namespace _4RTools.Forms
             {
                 try { globalDebugSnapshotTimer?.Stop(); globalDebugSnapshotTimer?.Dispose(); } catch { }
                 globalDebugSnapshotTimer = null;
-                try { Resize -= KeepMainWindowInTaskbar; } catch { }
             };
             WriteGlobalDebugSnapshot();
-        }
-
-        private void KeepMainWindowInTaskbar(object sender, EventArgs e)
-        {
-            if (smokeTest || WindowState != FormWindowState.Minimized || taskbarMinimizeGuard) return;
-            taskbarMinimizeGuard = true;
-            try
-            {
-                ShowInTaskbar = true;
-                if (!Visible) Show();
-                if (WindowState != FormWindowState.Minimized) WindowState = FormWindowState.Minimized;
-                _4RTools.Model.Vanilla.VanillaDebugLog.Write("UI", "Main 4RTools window minimized to taskbar; tray-only hiding suppressed.");
-            }
-            finally { taskbarMinimizeGuard = false; }
         }
 
         private void CopyGlobalDebugLog()
