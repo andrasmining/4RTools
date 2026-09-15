@@ -105,6 +105,9 @@ namespace _4RTools.Model.Vanilla
                     {
                         if (!runtimes.TryGetValue(account.Id, out runtime)) throw new InvalidOperationException("Runtime disappeared for " + account.Label + ".");
                         existingPid = runtime.ProcessId.HasValue && IsAlive(runtime.ProcessId.Value) ? runtime.ProcessId : null;
+                        if (existingPid.HasValue && !CanAdoptExistingGameplayClient(runtime.ResumeSent,
+                            runtime.ResumeVerificationFailed, runtime.ScriptRunning))
+                            throw new InvalidOperationException(account.Label + ": existing client has an unfinished or failed startup. Verify it with the Resume hotkey test before starting later clients.");
                     }
 
                     if (existingPid.HasValue)
@@ -112,14 +115,21 @@ namespace _4RTools.Model.Vanilla
                         Log(account.Label + ": existing PID " + existingPid.Value + " found. Verifying gameplay before releasing the sequential gate.");
                         VanillaDebugLog.Write("STARTUP", account.Label + ": existing PID " + existingPid.Value + " verification begin.");
                         using (var input = new VanillaForegroundInput(existingPid.Value))
+                        {
+                            input.CancellationRequested = () => StartupCancelled(generation);
                             WaitForGameplayStable(input, existingPid.Value, generation, 15000, account.Label + " existing client");
+                        }
 
-                        if (!KeepAssignedClientMinimized(account.Id))
+                        if (!RunOwnedClientStep(runtime, existingPid.Value, () => StartupCancelled(generation),
+                            () => KeepAssignedClientMinimized(account.Id)))
                             throw new InvalidOperationException(account.Label + ": existing gameplay client could not be confirmed minimized; next client was NOT started.");
 
                         lock (gate)
                         {
-                            if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                            Runtime current;
+                            if (StartupCancelled(generation) || !runtimes.TryGetValue(account.Id, out current)
+                                || !ReferenceEquals(current, runtime) || runtime.ProcessId != existingPid.Value)
+                                throw new OperationCanceledException("Sequential startup client changed.");
                             runtime.ResumeSent = true; // never toggle an adopted already-running client.
                             runtime.HasBeenOnline = true;
                             runtime.ScriptRunning = false;
@@ -214,6 +224,10 @@ namespace _4RTools.Model.Vanilla
                 if (!pid.HasValue) throw new InvalidOperationException(account.Label + ": launcher did not produce a Vanilla MMO PID.");
                 lock (gate)
                 {
+                    Runtime current;
+                    if (StartupCancelled(generation) || !runtimes.TryGetValue(account.Id, out current)
+                        || !ReferenceEquals(runtime, current) || runtime.ResumeOperationGeneration != resumeGeneration)
+                        throw new OperationCanceledException("Sequential startup cancelled before client binding.");
                     Bind(runtime, pid.Value, true, "Sequential startup: launcher produced Vanilla client");
                     runtime.ScriptRunning = true;
                     runtime.RecoveryOwned = true;
@@ -224,6 +238,8 @@ namespace _4RTools.Model.Vanilla
                 WaitForWindow(pid.Value, 60000);
                 using (var input = new VanillaForegroundInput(pid.Value))
                 {
+                    input.CancellationRequested = () => StartupCancelled(generation)
+                        || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration);
                     SelectProxyWhenVisible(input, pid.Value, account, config, generation);
 
                     string password = store.UnprotectPassword(account.ProtectedPassword);
@@ -261,7 +277,9 @@ namespace _4RTools.Model.Vanilla
 
                 if (StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration))
                     throw new OperationCanceledException("Sequential startup cancelled.");
-                bool minimized = KeepAssignedClientMinimized(account.Id);
+                bool minimized = RunOwnedClientStep(runtime, pid.Value,
+                    () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
+                    () => KeepAssignedClientMinimized(account.Id));
                 if (!SequentialStartupMayAdvance(true, true, minimized, false))
                     throw new InvalidOperationException(account.Label + ": could not confirm minimization; next client was NOT started.");
 

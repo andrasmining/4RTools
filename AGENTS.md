@@ -43,6 +43,19 @@ purpose and whether it is still used, and preserve useful functionality. Do not
 overwrite newer work, discard experiments that are still needed, or remove
 changes merely because they are inconvenient.
 
+## Final integration and branch cleanup
+
+Completed work belongs in remote `main`, not a leftover working branch. Verify
+that `main` contains the final tested commit, then delete completed task branches
+locally and remotely. Remove obsolete temporary workflows and patch payloads.
+The normal finished state is only `main`; preserve valid concurrent work before
+integrating or removing an older task branch. Never delete release tags.
+
+A genuine external blocker may leave one clearly identified working branch.
+Resume it on the next pass, solve or replace the failed approach, integrate the
+result into `main`, and delete it. Do not accumulate unfinished branches or hide
+a failed implementation by abandoning it on another branch.
+
 ## Mandatory Git workflow
 
 All meaningful completed work must be committed. All commits must be pushed to

@@ -568,12 +568,15 @@ namespace _4RTools.Model.Vanilla
             lock (gate)
             {
                 Interlocked.Increment(ref resumeVerificationGeneration);
-                foreach (var active in runtimes.Values.Where(r => r.Stage == VanillaReconnectStage.VerifyingAutobattle))
+                Interlocked.Increment(ref diagnosticGeneration);
+                Interlocked.Increment(ref hardenedStartupGeneration);
+                hardenedStartupRunning = false;
+                foreach (var active in runtimes.Values.Where(r => r.ScriptRunning))
                 {
                     active.ScriptRunning = false;
                     active.RecoveryOwned = false;
                     active.ResumeVerificationFailed = true;
-                    active.ResumeFailureDetail = "Settings changed during autobattle verification; no further hotkeys sent";
+                    active.ResumeFailureDetail = "Settings changed during startup/recovery; no further input sent";
                     SetStage(active, VanillaReconnectStage.Error, active.ResumeFailureDetail);
                 }
                 settings = copy;
@@ -607,12 +610,18 @@ namespace _4RTools.Model.Vanilla
             lock (gate)
             {
                 Interlocked.Increment(ref resumeVerificationGeneration);
+                Interlocked.Increment(ref diagnosticGeneration);
                 Interlocked.Increment(ref hardenedStartupGeneration);
                 hardenedStartupRunning = false;
                 running = false;
                 timer?.Change(Timeout.Infinite, Timeout.Infinite);
                 foreach (var runtime in runtimes.Values)
                 {
+                    if (runtime.ScriptRunning && !runtime.ResumeSent)
+                    {
+                        runtime.ResumeVerificationFailed = true;
+                        runtime.ResumeFailureDetail = "Startup/recovery was stopped before verification completed";
+                    }
                     runtime.ScriptRunning = false;
                     runtime.RecoveryOwned = false;
                     SetStage(runtime, VanillaReconnectStage.Stopped, "Supervisor stopped");
@@ -859,6 +868,8 @@ namespace _4RTools.Model.Vanilla
             string arguments = settings.LaunchArguments ?? "";
             string accountId = runtime.Account.Id;
             string label = runtime.Account.Label;
+            int generation = Interlocked.Increment(ref resumeVerificationGeneration);
+            runtime.ResumeOperationGeneration = generation;
             runtime.LastLaunch = now;
             runtime.NextRecoveryAt = null;
             runtime.ResumeSent = false;
@@ -882,7 +893,10 @@ namespace _4RTools.Model.Vanilla
                         {
                             lock (gate)
                             {
-                                aborted = disposed || !running;
+                                Runtime current;
+                                aborted = disposed || !running || generation != Volatile.Read(ref resumeVerificationGeneration)
+                                    || !runtimes.TryGetValue(accountId, out current) || !ReferenceEquals(runtime, current)
+                                    || current.ResumeOperationGeneration != generation || !current.ScriptRunning;
                                 return aborted;
                             }
                         });
@@ -892,7 +906,9 @@ namespace _4RTools.Model.Vanilla
                 lock (gate)
                 {
                     Runtime current;
-                    if (!runtimes.TryGetValue(accountId, out current)) return;
+                    if (generation != Volatile.Read(ref resumeVerificationGeneration)
+                        || !runtimes.TryGetValue(accountId, out current) || !ReferenceEquals(runtime, current)
+                        || current.ResumeOperationGeneration != generation || !current.ScriptRunning) return;
                     current.ScriptRunning = false;
                     if (aborted || disposed || !running)
                     {
@@ -957,11 +973,15 @@ namespace _4RTools.Model.Vanilla
             int pid = runtime.ProcessId.Value;
             var account = runtime.Account.Clone();
             var config = settings.Clone();
-            ThreadPool.QueueUserWorkItem(_ => LoginWorker(runtime.Account.Id, pid, account, config, freshLaunch));
+            int generation = Interlocked.Increment(ref resumeVerificationGeneration);
+            runtime.ResumeOperationGeneration = generation;
+            ThreadPool.QueueUserWorkItem(_ => LoginWorker(runtime, pid, account, config, freshLaunch, generation));
         }
 
-        private void LoginWorker(string accountId, int pid, VanillaReconnectAccount account, VanillaReconnectSettings config, bool freshLaunch)
+        private void LoginWorker(Runtime owner, int pid, VanillaReconnectAccount account, VanillaReconnectSettings config, bool freshLaunch, int generation)
         {
+            string accountId = account.Id;
+            Func<bool> cancelled = () => !IsRunning || ResumeWorkerCancelled(owner, pid, generation);
             string error = null;
             try
             {
@@ -970,6 +990,7 @@ namespace _4RTools.Model.Vanilla
                 WaitForWindow(pid, 60000);
                 using (var input = new VanillaForegroundInput(pid))
                 {
+                    input.CancellationRequested = cancelled;
                     input.Activate();
                     if (freshLaunch)
                     {
@@ -983,7 +1004,8 @@ namespace _4RTools.Model.Vanilla
                                 throw new InvalidOperationException("Proxy list was not detected confidently; no proxy input was sent. " + proxyDetection);
                             string proxyCapture = Path.Combine(baseDirectory, "Logs", "proxy-screen-last.png");
                             try { Directory.CreateDirectory(Path.GetDirectoryName(proxyCapture)); proxyImage.Save(proxyCapture, ImageFormat.Png); } catch { }
-                            int routeIndex = (int)config.Proxy;
+                            VanillaProxyRoute route = VanillaAccountProxyPreferences.Get(account.Id, config.Proxy);
+                            int routeIndex = (int)route;
                             Rectangle safe = proxyLayout.Rows[routeIndex];
                             var random = new Random(unchecked(Environment.TickCount ^ pid ^ (routeIndex * 7919)));
                             int marginX = Math.Max(1, safe.Width / 4), marginY = Math.Max(1, safe.Height / 4);
@@ -995,7 +1017,7 @@ namespace _4RTools.Model.Vanilla
                             for (int i = 0; i < 8; i++) { input.Press(Keys.Up); Thread.Sleep(55); }
                             for (int i = 0; i < routeIndex; i++) { input.Press(Keys.Down); Thread.Sleep(70); }
                             input.Press(Keys.Enter);
-                            Log(account.Label + ": proxy " + config.Proxy + " selected from detected safe row " + safe + " at verified-inside point (" + px + "," + py + "); " + proxyDetection);
+                            Log(account.Label + ": proxy " + route + " selected from detected safe row " + safe + " at verified-inside point (" + px + "," + py + "); " + proxyDetection);
                         }
                         Thread.Sleep(config.StageDelayMs);
                     }
@@ -1020,12 +1042,13 @@ namespace _4RTools.Model.Vanilla
             {
                 bool closedAfterFailure = false;
                 string closeEvidence = null;
-                if (error != null) closedAfterFailure = TryCloseProcess(pid, out closeEvidence);
                 lock (gate)
                 {
                     Runtime runtime;
-                    if (runtimes.TryGetValue(accountId, out runtime) && runtime.ProcessId == pid)
+                    if (!cancelled() && runtimes.TryGetValue(accountId, out runtime) && ReferenceEquals(owner, runtime)
+                        && runtime.ProcessId == pid)
                     {
+                        if (error != null) closedAfterFailure = TryCloseProcess(pid, out closeEvidence);
                         runtime.ScriptRunning = false;
                         runtime.LoginLikeSince = runtime.GameplaySince = null;
                         if (error == null)

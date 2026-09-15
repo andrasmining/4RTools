@@ -226,6 +226,31 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
+        private bool RunOwnedClientStep(Runtime owner, int pid, Func<bool> cancelled, Func<bool> action)
+        {
+            lock (gate)
+            {
+                Runtime current;
+                if (cancelled() || disposed || !runtimes.TryGetValue(owner.Account.Id, out current)
+                    || !ReferenceEquals(owner, current) || current.ProcessId != pid || !current.Account.Enabled)
+                    throw new OperationCanceledException("Client ownership changed; no window action performed.");
+                return action();
+            }
+        }
+
+        internal static bool CanAdoptExistingGameplayClient(bool resumeSent, bool failed, bool busy)
+        {
+            return resumeSent && !failed && !busy;
+        }
+
+        private static void RecordDiagnosticResumeResult(Runtime runtime, bool succeeded, string failure)
+        {
+            runtime.ResumeSent = succeeded;
+            runtime.ResumeVerificationFailed = !succeeded;
+            runtime.ResumeFailureDetail = succeeded ? null : "Autobattle verification failed: " + failure;
+            if (succeeded) runtime.HasBeenOnline = true;
+        }
+
         private void QueueVerifiedResume(Runtime runtime)
         {
             if (runtime.ScriptRunning || runtime.ResumeVerificationFailed || !runtime.ProcessId.HasValue) return;
@@ -254,7 +279,9 @@ namespace _4RTools.Model.Vanilla
                         () => !IsRunning || ResumeWorkerCancelled(runtime, pid, generation),
                         detail => ResumeProgress(runtime, pid, generation, detail)).ConfigureAwait(false);
                     if (!IsRunning || ResumeWorkerCancelled(runtime, pid, generation)) throw new OperationCanceledException();
-                    if (!KeepAssignedClientMinimized(account.Id))
+                    if (!RunOwnedClientStep(runtime, pid,
+                        () => !IsRunning || ResumeWorkerCancelled(runtime, pid, generation),
+                        () => KeepAssignedClientMinimized(account.Id)))
                         throw new InvalidOperationException("Movement verified but client minimization could not be confirmed.");
                 }
                 catch (OperationCanceledException) { cancelled = true; }

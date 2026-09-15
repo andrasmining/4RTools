@@ -24,6 +24,7 @@ namespace _4RTools.Model.Vanilla
     /// </summary>
     internal sealed class VanillaForegroundInput : IDisposable
     {
+        private static readonly object ForegroundGate = new object();
         private readonly Process process;
         private readonly IntPtr preferredWindow;
         private IntPtr window;
@@ -164,6 +165,11 @@ namespace _4RTools.Model.Vanilla
 
         public void Activate()
         {
+            lock (ForegroundGate) ActivateCore();
+        }
+
+        private void ActivateCore()
+        {
             ThrowIfCancelled();
             if (process.HasExited) throw new InvalidOperationException("Vanilla client exited.");
 
@@ -263,6 +269,12 @@ namespace _4RTools.Model.Vanilla
 
         public string ClickNormalizedWithDiagnostics(double x, double y, bool requireForeground = true)
         {
+            lock (ForegroundGate) return ClickCore(x, y, requireForeground);
+        }
+
+        private string ClickCore(double x, double y, bool requireForeground)
+        {
+            ThrowIfCancelled();
             if (requireForeground) Activate();
             else
             {
@@ -299,6 +311,11 @@ namespace _4RTools.Model.Vanilla
             GetCursorPos(out actual);
             IntPtr hitAtClick = WindowFromPoint(actual);
 
+            VerifyForeground();
+            uint hitPid;
+            GetWindowThreadProcessId(hitAtClick, out hitPid);
+            if (hitPid != (uint)process.Id)
+                throw new InvalidOperationException("Mouse target no longer belongs to the intended client; no click sent.");
             var down = new[] { new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } } } };
             uint downSent = SendInput(1, down, Marshal.SizeOf(typeof(INPUT)));
             int downError = downSent == 1 ? 0 : Marshal.GetLastWin32Error();
@@ -339,12 +356,16 @@ namespace _4RTools.Model.Vanilla
 
         public void Press(Keys key)
         {
-            Activate();
-            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " KEY " + key + " press; foreground=" + DescribeWindow(GetForegroundWindow()) + ".");
-            SendKey(key, false);
-            Thread.Sleep(70);
-            SendKey(key, true);
-            Thread.Sleep(45);
+            lock (ForegroundGate)
+            {
+                Activate();
+                VerifyForeground();
+                VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " KEY " + key + " press.");
+                SendKey(key, false);
+                try { Thread.Sleep(70); }
+                finally { SendKey(key, true); }
+                Thread.Sleep(45);
+            }
         }
 
         public void Chord(bool ctrl, bool alt, bool shift, Keys key)
@@ -355,6 +376,19 @@ namespace _4RTools.Model.Vanilla
 
         // Resume takes its fresh baseline after Activate; do not refocus/sleep again before the chord.
         internal void ChordInVerifiedForeground(bool ctrl, bool alt, bool shift, Keys key)
+        {
+            lock (ForegroundGate) ChordCore(ctrl, alt, shift, key);
+        }
+
+        private void VerifyForeground()
+        {
+            ThrowIfCancelled();
+            if (process.HasExited || window == IntPtr.Zero || GetForegroundWindow() != window
+                || !IsUsableWindowForProcess(window, process.Id))
+                throw new InvalidOperationException("The intended client no longer owns foreground focus; no input sent.");
+        }
+
+        private void ChordCore(bool ctrl, bool alt, bool shift, Keys key)
         {
             VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CHORD " + ChordText(ctrl, alt, shift, key) + " begin.");
             DispatchGuardedChord(ctrl, alt, shift, key, () =>
@@ -407,12 +441,18 @@ namespace _4RTools.Model.Vanilla
 
         public void TypeText(string text)
         {
+            lock (ForegroundGate) TypeTextCore(text);
+        }
+
+        private void TypeTextCore(string text)
+        {
             if (text == null) return;
             Activate();
             VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " typing text length=" + text.Length + " (content intentionally not logged). target="
                 + DescribeWindow(window) + ".");
             foreach (char c in text)
             {
+                VerifyForeground();
                 SendUnicode(c, false);
                 SendUnicode(c, true);
                 Thread.Sleep(22);

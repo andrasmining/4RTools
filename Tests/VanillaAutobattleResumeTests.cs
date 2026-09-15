@@ -17,6 +17,13 @@ namespace Vanilla.Diagnostics.Tests
 
         internal static int Run()
         {
+            Test("Resume profiles are loaded from the executable directory", ProfileDirectory);
+            Test("STOP cancels diagnostic completions", DiagnosticStop);
+            Test("Settings changes cancel diagnostic completions", DiagnosticSettingsChange);
+            Test("Rejected diagnostic requests keep the current generation", DiagnosticRejectedRequest);
+            Test("Resume completion rejects a replaced PID", OwnedCompletion);
+            Test("Failed or interrupted startup cannot be adopted as healthy", SafeAdoption);
+            Test("Successful explicit resume clears the failed latch", DiagnosticResult);
             Test("X movement verifies the first attempt", () => Success(1, false));
             Test("Y-only movement verifies the first attempt", () => Success(1, true));
             Test("Second attempt succeeds without a third key", () => Success(2, false));
@@ -59,6 +66,91 @@ namespace Vanilla.Diagnostics.Tests
             Test("Release failure does not strand other held modifiers", ChordReleaseFailure);
             Console.WriteLine("Autobattle resume: {0} passed; {1} failed. Fake clock, state and input only.", passed, failed);
             return failed;
+        }
+
+        private static void ProfileDirectory()
+        {
+            Assert(VanillaReconnectSupervisor.AutobattleBuildProfileDirectory ==
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds"), "Profiles came from user data.");
+        }
+        private static void DiagnosticStop()
+        {
+            RuntimeCase((supervisor, runtime) =>
+            {
+                Field(supervisor, "diagnosticGeneration").SetValue(supervisor, 7);
+                supervisor.Stop();
+                Assert((bool)Method("DiagnosticCancelled").Invoke(supervisor, new object[] { 7 }), "STOP retained an old diagnostic.");
+            });
+        }
+        private static void DiagnosticSettingsChange()
+        {
+            RuntimeCase((supervisor, runtime) =>
+            {
+                Field(supervisor, "diagnosticGeneration").SetValue(supervisor, 7);
+                supervisor.Apply(supervisor.Settings, false);
+                Assert((bool)Method("DiagnosticCancelled").Invoke(supervisor, new object[] { 7 }), "Changed settings retained an old diagnostic.");
+            });
+        }
+        private static void DiagnosticRejectedRequest()
+        {
+            RuntimeCase((supervisor, runtime) =>
+            {
+                Field(supervisor, "diagnosticGeneration").SetValue(supervisor, 7);
+                try { supervisor.RunDiagnosticStep(supervisor.Settings.Accounts[0].Id, VanillaReconnectTestStep.ResumeHotkey); }
+                catch (InvalidOperationException) { }
+                Assert((int)Field(supervisor, "diagnosticGeneration").GetValue(supervisor) == 7,
+                    "Rejected request cancelled the current diagnostic while retaining its lease.");
+            });
+        }
+        private static FieldInfo Field(object owner, string name) { return owner.GetType().GetField(name, PrivateInstance); }
+        private static MethodInfo Method(string name)
+        {
+            var result = typeof(VanillaReconnectSupervisor).GetMethod(name,
+                BindingFlags.Static | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            Assert(result != null, "Missing guarded operation: " + name);
+            return result;
+        }
+        private static void OwnedCompletion()
+        {
+            RuntimeCase((supervisor, runtime) =>
+            {
+                bool called = false;
+                Func<bool> action = () => { called = true; return true; };
+                Func<bool> active = () => false;
+                Assert((bool)Method("RunOwnedClientStep").Invoke(supervisor, new object[] { runtime, 42, active, action }) && called,
+                    "Active owner could not complete its step.");
+                called = false;
+                RuntimeField(runtime, "ProcessId", (int?)43);
+                try { Method("RunOwnedClientStep").Invoke(supervisor, new object[] { runtime, 42, active, action }); }
+                catch (TargetInvocationException ex) { Assert(ex.InnerException is OperationCanceledException, "Wrong cancellation error."); }
+                Assert(!called, "Old worker touched the replacement client.");
+                RuntimeField(runtime, "ProcessId", (int?)42);
+                try { Method("RunOwnedClientStep").Invoke(supervisor, new object[] { runtime, 42, (Func<bool>)(() => true), action }); }
+                catch (TargetInvocationException ex) { Assert(ex.InnerException is OperationCanceledException, "Wrong cancellation error."); }
+                Assert(!called, "Cancelled worker completed an action.");
+            });
+        }
+        private static void SafeAdoption()
+        {
+            var method = Method("CanAdoptExistingGameplayClient");
+            foreach (bool sent in new[] { false, true })
+                foreach (bool failed in new[] { false, true })
+                    foreach (bool busy in new[] { false, true })
+                        Assert((bool)method.Invoke(null, new object[] { sent, failed, busy }) == (sent && !failed && !busy),
+                            "Unverified or failed client was treated as healthy.");
+        }
+        private static void DiagnosticResult()
+        {
+            RuntimeCase((supervisor, runtime) =>
+            {
+                RuntimeField(runtime, "ResumeVerificationFailed", true);
+                Method("RecordDiagnosticResumeResult").Invoke(null, new object[] { runtime, true, null });
+                Assert(RuntimeFlag(runtime, "ResumeSent") && !RuntimeFlag(runtime, "ResumeVerificationFailed"),
+                    "A successful explicit retry retained its failed latch.");
+                Method("RecordDiagnosticResumeResult").Invoke(null, new object[] { runtime, false, "No movement" });
+                Assert(!RuntimeFlag(runtime, "ResumeSent") && RuntimeFlag(runtime, "ResumeVerificationFailed"),
+                    "Failed explicit retry was presented as successful.");
+            });
         }
 
         private static readonly BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;

@@ -99,7 +99,7 @@ namespace _4RTools.Model.Vanilla
             VanillaReconnectAccount account;
             VanillaReconnectSettings config;
             int? pid = null;
-            int generation = Interlocked.Increment(ref diagnosticGeneration);
+            int generation;
             lock (gate)
             {
                 Runtime runtime;
@@ -111,6 +111,7 @@ namespace _4RTools.Model.Vanilla
                     if (!runtime.ProcessId.HasValue) throw new InvalidOperationException("No Vanilla client is assigned to this selected account for the step test.");
                     pid = runtime.ProcessId.Value;
                 }
+                generation = Interlocked.Increment(ref diagnosticGeneration);
                 runtime.ScriptRunning = true;
                 account = runtime.Account.Clone();
                 config = settings.Clone();
@@ -139,6 +140,7 @@ namespace _4RTools.Model.Vanilla
                 {
                     using (var input = new VanillaForegroundInput(discoveredPid.Value))
                     {
+                        input.CancellationRequested = () => DiagnosticCancelled(generation);
                         switch (step)
                         {
                             case VanillaReconnectTestStep.ProxySelection:
@@ -150,7 +152,8 @@ namespace _4RTools.Model.Vanilla
                                         throw new InvalidOperationException("Proxy list was not detected confidently; no proxy input was sent. " + proxyDetection);
                                     string proxyCapture = Path.Combine(baseDirectory, "Logs", "proxy-screen-last.png");
                                     try { Directory.CreateDirectory(Path.GetDirectoryName(proxyCapture)); proxyImage.Save(proxyCapture); } catch { }
-                                    int routeIndex = (int)config.Proxy;
+                                    VanillaProxyRoute route = VanillaAccountProxyPreferences.Get(account.Id, config.Proxy);
+                                    int routeIndex = (int)route;
                                     Rectangle safe = proxyLayout.Rows[routeIndex];
                                     var random = new Random(unchecked(Environment.TickCount ^ discoveredPid.Value ^ (routeIndex * 7919)));
                                     int marginX = Math.Max(1, safe.Width / 4), marginY = Math.Max(1, safe.Height / 4);
@@ -162,7 +165,7 @@ namespace _4RTools.Model.Vanilla
                                     for (int i = 0; i < 8; i++) { input.Press(Keys.Up); Thread.Sleep(55); }
                                     for (int i = 0; i < routeIndex; i++) { input.Press(Keys.Down); Thread.Sleep(70); }
                                     input.Press(Keys.Enter);
-                                    Log("TEST " + account.Label + ": proxy " + config.Proxy + " selected from detected safe row " + safe + " at verified-inside point (" + px + "," + py + "); " + proxyDetection);
+                                    Log("TEST " + account.Label + ": proxy " + route + " selected from detected safe row " + safe + " at verified-inside point (" + px + "," + py + "); " + proxyDetection);
                                 }
                                 break;
                             case VanillaReconnectTestStep.FillCredentials:
@@ -232,9 +235,12 @@ namespace _4RTools.Model.Vanilla
                     lock (gate)
                     {
                         Runtime runtime;
-                        if (runtimes.TryGetValue(accountId, out runtime))
+                        if (!DiagnosticCancelled(generation) && runtimes.TryGetValue(accountId, out runtime)
+                            && (step == VanillaReconnectTestStep.LauncherGameStart || runtime.ProcessId == discoveredPid))
                         {
                             if (discoveredPid.HasValue) runtime.ProcessId = discoveredPid;
+                            if (step == VanillaReconnectTestStep.ResumeHotkey)
+                                RecordDiagnosticResumeResult(runtime, error == null && stopped == null, error ?? stopped);
                             runtime.ScriptRunning = false;
                             if (stopped != null) SetStage(runtime, VanillaReconnectStage.Stopped, "Diagnostic test stopped: " + stopped);
                             else SetStage(runtime, error == null ? VanillaReconnectStage.WaitingForGameplay : VanillaReconnectStage.Error,
