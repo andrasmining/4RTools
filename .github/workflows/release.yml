@@ -24,14 +24,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Restore NuGet packages
         shell: powershell
-        run: nuget restore 4RTools.sln -NonInteractive
+        run: |
+          nuget restore 4RTools.sln -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
 
       - name: Resolve release version
         shell: powershell
         run: |
+          if ($env:GITHUB_REF_NAME -ne 'main') { throw 'Releases must be built from main.' }
           $text = Get-Content 'Properties/AssemblyInfo.cs' -Raw
           $match = [regex]::Match($text, 'AssemblyFileVersion\("([0-9]+\.[0-9]+\.[0-9]+)\.0"\)')
           if (-not $match.Success) { throw 'Could not resolve semantic version from AssemblyFileVersion.' }
@@ -82,11 +88,13 @@ jobs:
             & gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
             $releaseExists = $LASTEXITCODE -eq 0
           }
-          finally {
-            $ErrorActionPreference = $previousPreference
-          }
+          finally { $ErrorActionPreference = $previousPreference }
 
           if ($releaseExists) {
+            $tagCommit = & gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq .sha
+            if ($LASTEXITCODE -ne 0 -or $tagCommit.Trim() -ne $env:GITHUB_SHA) {
+              throw 'Existing release points to another source commit; refusing to overwrite its assets.'
+            }
             & gh release upload $tag $zip $checksum --clobber --repo $env:GITHUB_REPOSITORY
             if ($LASTEXITCODE -ne 0) { throw "Failed to refresh assets for $tag." }
           }
@@ -95,6 +103,88 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Failed to publish $tag." }
           }
 
-          $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host "Published $tag"
-          Write-Host "Portable ZIP SHA256: $sha"
+      - name: Verify public assets against the tested package and source
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:VERSION"
+          $name = "4RTools-Vanilla-v$env:VERSION-portable.zip"
+          $releaseJson = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Published release could not be read.' }
+          $release = $releaseJson | ConvertFrom-Json
+          if ($release.draft -or $release.prerelease -or $release.tag_name -ne $tag) { throw 'Expected a public stable release.' }
+          $tagCommit = & gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq .sha
+          if ($LASTEXITCODE -ne 0 -or $tagCommit.Trim() -ne $env:GITHUB_SHA) { throw 'Release tag/source mismatch.' }
+          New-Item -ItemType Directory -Path dist/published -Force | Out-Null
+          foreach ($assetName in @($name, "$name.sha256")) {
+            $asset = @($release.assets | Where-Object { $_.name -eq $assetName })
+            if ($asset.Count -ne 1 -or $asset[0].size -le 0) { throw "Missing or ambiguous release asset: $assetName" }
+            $target = Join-Path dist/published $assetName
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                Invoke-WebRequest -Uri $asset[0].browser_download_url -OutFile $target -UseBasicParsing -TimeoutSec 120
+                break
+              }
+              catch {
+                if ($attempt -eq 3) { throw }
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+            }
+            if ((Get-Item $target).Length -ne $asset[0].size) { throw "Downloaded asset size mismatch: $assetName" }
+          }
+          $download = Join-Path dist/published $name
+          $actual = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = (Get-FileHash (Join-Path dist $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksumText = (Get-Content "$download.sha256" -Raw).Trim()
+          if ($actual -ne $expected -or $checksumText -notmatch ('^' + $actual + '\s+\*?' + [regex]::Escape($name) + '$')) {
+            throw 'Published ZIP/checksum differs from the Windows-tested package.'
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $download))
+          try {
+            $entry = $archive.GetEntry("4RTools-Vanilla-v$env:VERSION/VERSION.txt")
+            if (-not $entry) { throw 'Published package has no VERSION.txt.' }
+            $reader = New-Object IO.StreamReader($entry.Open())
+            try { $identity = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            if ($identity -notmatch ('(?m)^Source commit: ' + [regex]::Escape($env:GITHUB_SHA) + '\r?$') -or
+                $identity -notmatch '(?m)^Source working tree before packaging: clean\r?$') {
+              throw 'Published package was not built from the exact clean release commit.'
+            }
+          }
+          finally { $archive.Dispose() }
+          [ordered]@{
+            version = $env:VERSION
+            tag = $tag
+            sourceCommit = $env:GITHUB_SHA
+            releaseUrl = $release.html_url
+            sha256 = $actual
+            publicDownloadVerified = $true
+            identicalToWindowsTestedPackage = $true
+            cleanSourceIdentityVerified = $true
+          } | ConvertTo-Json | Out-File dist/published/verification.json -Encoding utf8
+          Write-Host "Verified public release $tag; source=$env:GITHUB_SHA; SHA256=$actual"
+
+      - name: Collect release evidence
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path dist/evidence -Force | Out-Null
+          git bundle create dist/evidence/source.bundle --all
+          if ($LASTEXITCODE -ne 0) { throw 'Source evidence export failed.' }
+          $cache = Join-Path $env:LOCALAPPDATA '4RTools-Engineering'
+          foreach ($folder in @('builds', 'portable-tests')) {
+            $source = Join-Path $cache $folder
+            if (Test-Path $source) { Copy-Item $source dist/evidence -Recurse -Force }
+          }
+
+      - name: Upload release verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-release-${{ github.sha }}
+          path: |
+            dist/published/**
+            dist/evidence/**
+          if-no-files-found: error
+          retention-days: 14
