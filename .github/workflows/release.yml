@@ -70,6 +70,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Validate merged-branch cleanup plan
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: '& .\scripts\cleanup-merged-branches.ps1'
+
       - name: Publish GitHub Release
         shell: powershell
         env:
@@ -164,6 +170,12 @@ jobs:
             cleanSourceIdentityVerified = $true
           } | ConvertTo-Json | Out-File dist/published/verification.json -Encoding utf8
           Write-Host "Verified public release $tag; source=$env:GITHUB_SHA; SHA256=$actual"
+
+      - name: Delete verified merged branches
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: '& .\scripts\cleanup-merged-branches.ps1 -Apply'
 
       - name: Collect release evidence
         if: always()
