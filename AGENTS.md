@@ -275,6 +275,17 @@ separate right-aligned status area of the top Vanilla header. Keep ordinary
 workspace/debug actions on the left so update/version information reads as status
 rather than as part of the main action cluster.
 
+The Vanilla UI is Full-HD-first and resolution-responsive. Treat ordinary
+1920x1080-class desktops and RDP sessions around 1980x1020 as primary layouts;
+do not reserve vertical space on the assumption that a 2K display is available.
+Use compact headers and client cards, proportional table/list columns, and
+responsive panel breakpoints: broad screens may place related status/log panels
+side-by-side, while narrower screens should stack them. Every workspace and
+embedded tool must keep critical controls reachable through sensible scrolling
+when the available width or height is smaller. Prefer reflow and content-aware
+sizing over fixed tall sections or fixed column widths that clip important data.
+Keep regression coverage for the main layout breakpoints and portable smoke test.
+
 Recovery settings are auto-save UI: do not require a separate Save button. The
 launcher path, account edits, recovery/watchdog switches, and per-account proxy
 selection must persist automatically and surface a brief success/error indication.
