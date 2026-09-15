@@ -6,12 +6,13 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-// Deliberately a separate, reflection-based x86 executable: exercises the actual shipped
-// controls without adding test modes, mock data or new dependencies to the application.
+// Runs the compiled production UI in its existing inert smoke mode. Reflection supplies
+// fictional account/fleet observations; no gameplay process, credentials or input is used.
 internal static class UiLayoutHarness
 {
     private const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
@@ -19,6 +20,10 @@ internal static class UiLayoutHarness
     private static string output;
     private static readonly List<string> failures = new List<string>();
     private static readonly StringBuilder report = new StringBuilder();
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool GetClientRect(IntPtr window, out RECT rect);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool GetWindowRect(IntPtr window, out RECT rect);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
 
     [STAThread]
     private static int Main(string[] args)
@@ -26,8 +31,7 @@ internal static class UiLayoutHarness
         if (args.Length != 2) return 2;
         output = Path.GetFullPath(args[1]);
         Directory.CreateDirectory(output);
-        string data = Path.Combine(output, "isolated-data");
-        Environment.SetEnvironmentVariable("FOURRTOOLS_DATA_ROOT", data);
+        Environment.SetEnvironmentVariable("FOURRTOOLS_DATA_ROOT", Path.Combine(output, "isolated-data"));
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -44,13 +48,10 @@ internal static class UiLayoutHarness
                 main.Location = Point.Empty;
                 main.Show();
                 Pump();
-                Control workspace = (Control)Field(main, "vanillaWorkspace");
-                workspace.Enabled = true;
+                ((Control)Field(main, "vanillaWorkspace")).Enabled = true;
                 object recovery = Field(main, "integratedReconnectView");
-                Check(recovery != null, "The production Recovery form was not embedded by Container startup.");
+                Check(recovery != null, "Production Recovery form was not embedded by Container startup.");
                 SeedFleet(main);
-
-                // Normal Full-HD/RDP first; then a narrower desktop and a resize back to wide.
                 RunCase(main, recovery, 1920, 1020, 2, 1F);
                 RunCase(main, recovery, 1920, 1020, 4, 1F);
                 RunCase(main, recovery, 1600, 900, 12, 1F);
@@ -58,18 +59,12 @@ internal static class UiLayoutHarness
                 RunCase(main, recovery, 1050, 700, 4, 1F);
                 RunCase(main, recovery, 1920, 1020, 40, 1F);
                 RunCase(main, recovery, 1920, 1020, 4, 1F);
-
-                // Font scaling is explicit: this tests larger text, not a claim of a live
-                // mixed-monitor DPI switch. All sizes/rectangles are measured after layout.
                 RunCase(main, recovery, 1920, 1020, 4, 1.25F);
                 RunCase(main, recovery, 1366, 768, 4, 1.50F);
                 Call(main, "AssertSmokeBackgroundServicesInactive");
             }
         }
-        catch (Exception ex)
-        {
-            failures.Add("Harness exception: " + ex);
-        }
+        catch (Exception ex) { failures.Add("Harness exception: " + ex); }
         report.AppendLine("Failures: " + failures.Count);
         foreach (string failure in failures) report.AppendLine("FAIL " + failure);
         File.WriteAllText(Path.Combine(output, "layout-report.txt"), report.ToString());
@@ -77,13 +72,33 @@ internal static class UiLayoutHarness
         return failures.Count == 0 ? 0 : 1;
     }
 
+    private static void ResizeNativeViewport(Form main, int width, int height)
+    {
+        // The hosted CI desktop can be 1024x768. Framework Form.SetBoundsCore silently
+        // caps the outer window to MaxWindowTrackSize, while its cached ClientSize can still
+        // report the requested Full-HD size. Size this test window natively, then verify both
+        // native rectangles and managed bounds. DrawToBitmap does not need a physical monitor.
+        RECT client, outer;
+        if (!GetClientRect(main.Handle, out client) || !GetWindowRect(main.Handle, out outer))
+            throw new InvalidOperationException("Could not measure the native test window.");
+        int borderX = outer.Right - outer.Left - (client.Right - client.Left);
+        int borderY = outer.Bottom - outer.Top - (client.Bottom - client.Top);
+        if (!SetWindowPos(main.Handle, IntPtr.Zero, 0, 0, width + borderX, height + borderY, 0x0014))
+            throw new InvalidOperationException("Could not size native test viewport: " + Marshal.GetLastWin32Error());
+        Pump();
+        GetClientRect(main.Handle, out client);
+        if (client.Right - client.Left != width || client.Bottom - client.Top != height)
+            throw new InvalidOperationException("Native viewport was not resized to " + width + "x" + height + ".");
+    }
+
     private static void RunCase(Form main, object recovery, int width, int height, int rows, float textScale)
     {
         string name = width + "x" + height + "-" + rows + "accounts-text" + (int)(textScale * 100);
         try
         {
-            main.ClientSize = new Size(width, height);
+            ResizeNativeViewport(main, width, height);
             ((Control)recovery).Font = new Font("Segoe UI", 9F * textScale);
+            ((Label)Field(recovery, "testState")).Text = string.Empty;
             SeedAccounts(recovery, rows);
             Pump();
             Call(main, "AssertSmokeBackgroundServicesInactive");
@@ -92,17 +107,14 @@ internal static class UiLayoutHarness
             Control box = grid;
             while (box != null && !(box is GroupBox)) box = box.Parent;
             Control log = (Control)Field(recovery, "log");
-            Rectangle gridBounds = BoundsIn(grid, main);
-            Rectangle launcherBounds = BoundsIn(launcher, main);
-            Rectangle logBounds = BoundsIn(log, main);
-            report.AppendLine("CASE " + name + " actualClient=" + main.ClientSize + " grid=" + gridBounds
-                + " launcher=" + launcherBounds + " log=" + logBounds);
-            Check(main.ClientSize == new Size(width, height), name + ": requested client size not exercised.");
+            report.AppendLine("CASE " + name + " actualClient=" + main.ClientSize + " outer=" + main.Size
+                + " grid=" + BoundsIn(grid, main) + " launcher=" + BoundsIn(launcher, main) + " log=" + BoundsIn(log, main));
+            Check(main.ClientSize == new Size(width, height), name + ": managed viewport differs from native size.");
+            Check(main.Width >= width && main.Height >= height, name + ": screenshot would be smaller than the requested viewport.");
             Check(grid.Rows.Count == rows, name + ": not all mock account profiles are rendered.");
             Check(FullyVisible(grid, main), name + ": account grid is clipped by an ancestor viewport.");
             Check(FullyVisible(log, main), name + ": log is clipped by an ancestor viewport.");
             Check(grid.Columns.Contains("RuntimePid") && grid.Columns.Contains("RuntimeStatus"), name + ": runtime columns missing.");
-
             int totalWidth = 0;
             foreach (DataGridViewColumn column in grid.Columns)
             {
@@ -116,24 +128,24 @@ internal static class UiLayoutHarness
             Check(totalWidth <= grid.ClientSize.Width, name + ": column widths exceed the grid viewport.");
             Check(grid.Height >= grid.ColumnHeadersHeight + grid.RowTemplate.Height * 5,
                 name + ": fewer than four account rows plus one spare row can fit.");
-            if (rows <= 4)
-                Check(grid.DisplayedRowCount(false) == rows, name + ": an account row is not fully visible.");
+            if (rows <= 4) Check(grid.DisplayedRowCount(false) == rows, name + ": an account row is not fully visible.");
 
-            Control header = launcher;
-            while (header.Parent != null && !(header.Parent is TableLayoutPanel && header.Parent.Controls.Contains(box)))
-                header = header.Parent;
-            // Independently locate the last visible action in the launcher strip. The account
-            // panel should follow the strip, not a leftover 100-pixel designer minimum.
             Control strip = launcher.Parent;
             while (strip.Parent != null && !object.ReferenceEquals(strip.Parent, box.Parent)) strip = strip.Parent;
             int lastBottom = Descendants(strip).Where(c => c.Visible && (c is Button || c is CheckBox || c is TextBox || c is Label))
-                .Select(c => BoundsIn(c, main).Bottom).DefaultIfEmpty(launcherBounds.Bottom).Max();
+                .Select(c => BoundsIn(c, main).Bottom).DefaultIfEmpty(BoundsIn(launcher, main).Bottom).Max();
             int gap = BoundsIn(box, main).Top - lastBottom;
             report.AppendLine("  HEADER gap=" + gap + " totalColumnWidth=" + totalWidth + " displayedRows=" + grid.DisplayedRowCount(false));
             Check(gap >= 0 && gap <= 16, name + ": dead space below launcher/actions: " + gap + "px.");
             foreach (Control control in Descendants(strip).Where(c => c.Visible && (c is Button || c is CheckBox || c is TextBox)))
                 Check(FullyVisible(control, main), name + ": action clipped: " + control.Text);
-
+            foreach (string field in new[] { "globalDebugEnabled", "globalCopyDebug", "integratedUpdateStatus" })
+            {
+                Control control = (Control)Field(main, field);
+                Check(control != null && control.Visible && FullyVisible(control, main), name + ": global header control clipped/missing: " + field);
+            }
+            foreach (Button button in Descendants(main).OfType<Button>().Where(b => b.Visible && b.Text == "CHECK FOR UPDATES"))
+                Check(FullyVisible(button, main), name + ": update button is clipped.");
             if (rows > grid.DisplayedRowCount(false))
             {
                 grid.FirstDisplayedScrollingRowIndex = rows - 1;
@@ -156,19 +168,18 @@ internal static class UiLayoutHarness
 
     private static void SeedAccounts(object recovery, int count)
     {
-        Type accountType = app.GetType("_4RTools.Model.Vanilla.VanillaReconnectAccount", true);
+        Type type = app.GetType("_4RTools.Model.Vanilla.VanillaReconnectAccount", true);
         IList catalog = (IList)Field(recovery, "accountCatalog");
         catalog.Clear();
         for (int i = 0; i < count; i++)
         {
-            object account = Activator.CreateInstance(accountType);
+            object account = Activator.CreateInstance(type);
             Property(account, "Id", "layout-account-" + i);
             Property(account, "Enabled", i < 2);
             Property(account, "Label", i == 0 ? "Priest - long account label to test fitting" : "Account " + (i + 1));
             Property(account, "UserName", i == 1 ? "long_username_for_layout_test" : "mock-user-" + (i + 1));
             Property(account, "CharacterSlot", i % 15 + 1);
-            Property(account, "ResumeCtrl", false);
-            Property(account, "ResumeAlt", true);
+            Property(account, "ResumeCtrl", false); Property(account, "ResumeAlt", true);
             catalog.Add(account);
         }
         Call(recovery, "SynchronizeSupervisorAccountsFromCatalog");
@@ -181,42 +192,33 @@ internal static class UiLayoutHarness
             SetField(entry.Value, "ProcessId", (int?)(12064 + n));
             FieldInfo stage = entry.Value.GetType().GetField("Stage", All);
             stage.SetValue(entry.Value, Enum.Parse(stage.FieldType, n++ == 0 ? "Online" : "Backoff"));
-            SetField(entry.Value, "Detail", "Mock recovery detail: waiting for the other client to finish before reconnecting. No real process is controlled.");
+            SetField(entry.Value, "Detail", "Mock recovery detail: waiting for the other client. No real process is controlled.");
         }
         Call(recovery, "RefreshAccountGridFromCatalog");
         TextBox log = (TextBox)Field(recovery, "log");
         log.Text = string.Join(Environment.NewLine, Enumerable.Range(0, 60).Select(i =>
             "18:00:" + (i % 60).ToString("00") + " [MOCK] Account " + (i % 2 + 1) + ": observed gameplay; client remains minimized. Detailed diagnostic entry " + i));
-        log.SelectionStart = 0;
-        log.ScrollToCaret();
+        log.SelectionStart = 0; log.ScrollToCaret();
     }
 
     private static void SeedFleet(object main)
     {
-        object fleet = Field(main, "integratedFleetDashboard");
-        Array cards = (Array)Field(fleet, "cards");
-        Type infoType = app.GetType("_4RTools.Model.Vanilla.VanillaFleetClientInfo", true);
+        Array cards = (Array)Field(Field(main, "integratedFleetDashboard"), "cards");
+        Type type = app.GetType("_4RTools.Model.Vanilla.VanillaFleetClientInfo", true);
         for (int i = 0; i < cards.Length; i++)
         {
-            object info = Activator.CreateInstance(infoType);
+            object info = Activator.CreateInstance(type);
             Property(info, "ProcessId", 12064 + i);
             Property(info, "CharacterName", i == 0 ? "Mock Novicer" : "Mock Nordina");
-            Property(info, "NameVerified", true);
-            Property(info, "HpVerified", true);
-            Property(info, "SpVerified", true);
+            Property(info, "NameVerified", true); Property(info, "HpVerified", true); Property(info, "SpVerified", true);
             Property(info, "CurrentHP", (uint?)3465); Property(info, "MaxHP", (uint?)4187);
             Property(info, "CurrentSP", (uint?)303); Property(info, "MaxSP", (uint?)367);
-            Property(info, "Location", "yuno_fild08 (283, 233)");
-            Property(info, "Activity", "Stationary");
+            Property(info, "Location", "yuno_fild08 (283, 233)"); Property(info, "Activity", "Stationary");
             Call(cards.GetValue(i), "ShowClient", info);
         }
     }
 
-    private static Rectangle BoundsIn(Control control, Control ancestor)
-    {
-        return ancestor.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
-    }
-
+    private static Rectangle BoundsIn(Control control, Control ancestor) { return ancestor.RectangleToClient(control.RectangleToScreen(control.ClientRectangle)); }
     private static bool FullyVisible(Control control, Control root)
     {
         Rectangle bounds = control.RectangleToScreen(control.ClientRectangle);
@@ -227,7 +229,6 @@ internal static class UiLayoutHarness
         }
         return false;
     }
-
     private static IEnumerable<Control> Descendants(Control root)
     {
         foreach (Control child in root.Controls)
@@ -236,7 +237,6 @@ internal static class UiLayoutHarness
             foreach (Control nested in Descendants(child)) yield return nested;
         }
     }
-
     private static void SaveScreenshot(Form form, string path)
     {
         using (Bitmap bitmap = new Bitmap(form.Width, form.Height))
@@ -253,11 +253,7 @@ internal static class UiLayoutHarness
             bitmap.Save(path, ImageFormat.Png);
         }
     }
-
-    private static void Pump()
-    {
-        for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(10); }
-    }
+    private static void Pump() { for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(10); } }
     private static void Check(bool condition, string message) { if (!condition) failures.Add(message); }
     private static object Field(object target, string name) { return target.GetType().GetField(name, All).GetValue(target); }
     private static void SetField(object target, string name, object value) { target.GetType().GetField(name, All).SetValue(target, value); }
