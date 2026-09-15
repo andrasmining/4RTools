@@ -29,9 +29,10 @@ namespace Vanilla.Diagnostics.Tests
             Test("Gepard splash is never an interactive input target", GepardSplashIsTransient);
             Test("Real Vanilla game window outranks generic windows", GameWindowCandidateRanking);
             Test("Minimized Vanilla game window stays eligible for restore", MinimizedGameWindowCandidate);
-            Test("Recovery runtime panels use wide Full-HD layout", ResponsiveRecoveryBreakpoint);
+            Test("Recovery workspace uses split layout on ordinary Full-HD widths", ResponsiveRecoveryBreakpoint);
             Test("Fleet strip stays minimal across common desktop heights", ResponsiveFleetHeight);
-            Test("Accounts panel grows with available vertical space", ResponsiveAccountsHeight);
+            Test("Account table reserves four rows plus one blank-row worth of breathing room", ResponsiveAccountRows);
+            Test("Saved account catalog keeps extra profiles but limits enabled clients", SavedAccountCatalog);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -215,12 +216,12 @@ namespace Vanilla.Diagnostics.Tests
 
         private static void ResponsiveRecoveryBreakpoint()
         {
-            Assert(!VanillaReconnectForm.UseWideRecoveryLayout(1100),
-                "Narrow recovery layouts should stack status/log vertically.");
-            Assert(VanillaReconnectForm.UseWideRecoveryLayout(1250),
-                "Full-HD recovery content should use side-by-side status/log panels.");
+            Assert(!VanillaReconnectForm.UseWideRecoveryLayout(1000),
+                "Genuinely narrow recovery layouts should stack left workspace and log.");
+            Assert(VanillaReconnectForm.UseWideRecoveryLayout(1100),
+                "Ordinary desktop widths should use the 2:1 workspace/log split.");
             Assert(VanillaReconnectForm.UseWideRecoveryLayout(1800),
-                "Wide desktop recovery layout unexpectedly fell back to stacked panels.");
+                "Full-HD recovery workspace unexpectedly fell back to stacked layout.");
         }
 
         private static void ResponsiveFleetHeight()
@@ -235,16 +236,51 @@ namespace Vanilla.Diagnostics.Tests
                 "Large desktop should still keep the fleet strip minimal.");
         }
 
-        private static void ResponsiveAccountsHeight()
+        private static void ResponsiveAccountRows()
         {
-            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(700) == 132,
-                "Small desktop accounts panel should stay usable without crowding runtime panels.");
-            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(800) == 148,
-                "RDP accounts panel should grow when space is available.");
-            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(920) == 164,
-                "Full-HD accounts panel should have room for both account rows and controls.");
-            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(1050) == 178,
-                "Large desktop accounts panel should use additional vertical space rather than leaving it unused above.");
+            Assert(VanillaReconnectForm.MinimumVisibleAccountRows(1) == 5,
+                "One configured account should still reserve four row slots plus one blank-row worth of breathing room.");
+            Assert(VanillaReconnectForm.MinimumVisibleAccountRows(4) == 5,
+                "Four configured accounts should retain one blank-row worth of breathing room.");
+            Assert(VanillaReconnectForm.MinimumVisibleAccountRows(7) == 8,
+                "The visible-row target should grow with the number of saved profiles.");
+            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(700) == 190,
+                "Constrained layouts should still reserve a useful minimum account area.");
+            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(900) == 210,
+                "Normal Full-HD layouts should reserve a larger minimum account area.");
+        }
+
+        private static void SavedAccountCatalog()
+        {
+            string root = Temp();
+            string previous = Environment.GetEnvironmentVariable(VanillaAppData.DataRootEnvironmentVariable);
+            try
+            {
+                Environment.SetEnvironmentVariable(VanillaAppData.DataRootEnvironmentVariable, root);
+                VanillaAppData.InitializeAndMigrateLegacy(root);
+                var seed = new[]
+                {
+                    new VanillaReconnectAccount { Label = "A", Enabled = true },
+                    new VanillaReconnectAccount { Label = "B", Enabled = true }
+                };
+                var store = new VanillaAccountCatalogStore();
+                var loaded = store.Load(seed);
+                loaded.Add(new VanillaReconnectAccount { Label = "C", Enabled = false });
+                loaded.Add(new VanillaReconnectAccount { Label = "D", Enabled = false });
+                store.Save(loaded);
+                var roundTrip = store.Load(seed);
+                Assert(roundTrip.Count == 4, "Saved catalog dropped extra account profiles.");
+                Assert(roundTrip.Count(a => a.Enabled) == 2, "Saved catalog changed the two-enabled-client limit.");
+
+                roundTrip[2].Enabled = true;
+                VanillaAccountCatalogStore.NormalizeEnabledLimit(roundTrip);
+                Assert(roundTrip.Count(a => a.Enabled) == 2, "Catalog normalization allowed more than two enabled profiles.");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(VanillaAppData.DataRootEnvironmentVariable, previous);
+                Delete(root);
+            }
         }
 
         private static void PersistentDataMigration()
