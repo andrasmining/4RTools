@@ -90,14 +90,21 @@ namespace _4RTools.Model.Vanilla
 
         private void InstallAccountProxyColumn()
         {
-            if (accounts.Columns.Contains("AccountProxy")) return;
-            accounts.Columns.Add(new DataGridViewTextBoxColumn
+            // Freeze the former shared proxy value into each pre-existing account once. From this
+            // point onward the proxy is an account setting and never follows another selected row.
+            foreach (VanillaReconnectAccount account in settings.Accounts)
+                VanillaAccountProxyPreferences.Ensure(account.Id, settings.Proxy);
+
+            if (!accounts.Columns.Contains("AccountProxy"))
             {
-                Name = "AccountProxy",
-                HeaderText = "Proxy",
-                ReadOnly = true,
-                FillWeight = 70
-            });
+                accounts.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    Name = "AccountProxy",
+                    HeaderText = "Proxy",
+                    ReadOnly = true,
+                    FillWeight = 70
+                });
+            }
             help.SetToolTip(accounts,
                 "Managed Vanilla accounts. Double-click or select Edit to change username, password, character slot, proxy and resume hotkey. Passwords use Windows DPAPI and are never written to logs.");
         }
@@ -109,7 +116,7 @@ namespace _4RTools.Model.Vanilla
             {
                 string id = row.Tag as string;
                 if (string.IsNullOrWhiteSpace(id)) continue;
-                row.Cells["AccountProxy"].Value = VanillaAccountProxyPreferences.Get(id, settings.Proxy).ToString();
+                row.Cells["AccountProxy"].Value = VanillaAccountProxyPreferences.Ensure(id, settings.Proxy).ToString();
             }
         }
 
