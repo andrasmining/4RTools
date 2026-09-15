@@ -107,6 +107,7 @@ namespace _4RTools.Model.Vanilla
             InstallHardenedSupervisorButtons();
             InstallHardenedAutoStartBridge();
             InstallSimplifiedRecoveryUi();
+            ScheduleResponsiveRecoveryLayout();
         }
     }
 }
