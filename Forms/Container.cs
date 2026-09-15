@@ -271,7 +271,9 @@ namespace _4RTools.Forms
                     break;
                 case MessageCode.CLICK_ICON_TRAY:
                     this.Show();
+                    this.ShowInTaskbar = true;
                     this.WindowState = FormWindowState.Normal;
+                    this.Activate();
                     break;
                 case MessageCode.SHUTDOWN_APPLICATION:
                     this.ShutdownApplication();
@@ -282,7 +284,9 @@ namespace _4RTools.Forms
 
         private void containerResize(object sender, EventArgs e)
         {
-            if (this.WindowState == FormWindowState.Minimized) { this.Hide(); }
+            // Do not hide the main product window when minimized. Keep it as a normal
+            // taskbar item so the only normal states are active/restored or taskbar-minimized.
+            if (this.WindowState == FormWindowState.Minimized) this.ShowInTaskbar = true;
         }
 
         #region Frames
@@ -397,6 +401,41 @@ namespace _4RTools.Forms
             frm.MdiParent = this;
             this.OnOffPanel.Controls.Add(frm);
             frm.Show();
+        }
+
+        private string StockEnableError()
+        {
+            if (vanillaSession.IsEnabled) return "Stop extra rules before starting original automation.";
+            if (vanillaExtras != null && !vanillaExtras.IsDisposed
+                && vanillaSession.Settings.EmergencyKey == (int)(Keys)Enum.Parse(typeof(Keys), ProfileSingleton.GetCurrent().UserPreferences.toggleStateKey))
+                return "Choose different keys for the original ON/OFF toggle and the extra-rules emergency stop.";
+            return null;
+        }
+
+        public void SetAutopotWindow()
+        {
+            AutopotForm frm = new AutopotForm(subject, false);
+            frm.FormBorderStyle = FormBorderStyle.None;
+            frm.MdiParent = this;
+            frm.Show();
+            addform(this.tabPageAutopot, frm);
+        }
+        public void SetAutopotYggWindow()
+        {
+            AutopotForm frm = new AutopotForm(subject, true);
+            frm.FormBorderStyle = FormBorderStyle.None;
+            frm.MdiParent = this;
+            frm.Show();
+            addform(this.tabPageYggAutopot, frm);
+        }
+
+        public void SetSkillTimerWindow()
+        {
+            SkillTimerForm frm = new SkillTimerForm(subject);
+            frm.FormBorderStyle = FormBorderStyle.None;
+            frm.MdiParent = this;
+            frm.Show();
+            addform(this.tabSkillTimer, frm);
         }
 
         private string StockEnableError()
