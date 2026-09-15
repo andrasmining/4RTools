@@ -1,0 +1,78 @@
+name: Character identity validation
+on:
+  push:
+    branches: [work/character-identity]
+    paths: ['.github/workflows/identity-validation.yml', 'engineering.patch']
+permissions:
+  contents: write
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+concurrency:
+  group: character-identity-validation
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - name: Archive inspected source
+        shell: pwsh
+        run: git archive --format=zip -o inspected-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: inspected-source
+          path: inspected-source.zip
+          retention-days: 2
+      - name: Apply reviewed implementation
+        if: hashFiles('engineering.patch') != ''
+        shell: pwsh
+        run: |
+          git apply --check engineering.patch
+          if ($LASTEXITCODE -ne 0) { throw 'Patch does not match source.' }
+          git apply engineering.patch
+          if ($LASTEXITCODE -ne 0) { throw 'Could not apply reviewed changes.' }
+      - name: Restore
+        if: hashFiles('engineering.patch') != ''
+        shell: powershell
+        run: nuget restore 4RTools.sln -NonInteractive
+      - name: Validate profiles
+        if: hashFiles('engineering.patch') != ''
+        shell: powershell
+        run: '& .\scripts\validate-vanilla-build-profiles.ps1'
+      - name: Debug tests
+        if: hashFiles('engineering.patch') != ''
+        shell: powershell
+        run: '& .\scripts\build.ps1 -Configuration Debug -VanillaRelease'
+      - name: Release tests and portable launch
+        if: hashFiles('engineering.patch') != ''
+        shell: powershell
+        run: '& .\scripts\build-release.ps1 -Version 0.6.35'
+      - name: Native Windows UI tests
+        if: hashFiles('engineering.patch') != ''
+        shell: powershell
+        run: '& .\scripts\test-ui-layout.ps1'
+      - name: UI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: character-ui-evidence
+          path: |
+            dist/ui-layout/*.png
+            dist/ui-layout/*.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Commit validated source and remove one-off tooling
+        if: success() && hashFiles('engineering.patch') != ''
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm engineering.patch .github/workflows/identity-validation.yml
+          git add Model Utils Forms Tests scripts VanillaBuilds Properties RELEASE-NOTES.md
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid source diff.' }
+          git commit -m 'feat: match clients to persistent character identities'
+          if ($LASTEXITCODE -ne 0) { throw 'Commit failed.' }
+          git push origin HEAD:work/character-identity
+          if ($LASTEXITCODE -ne 0) { throw 'Branch advanced; review before retrying.' }
