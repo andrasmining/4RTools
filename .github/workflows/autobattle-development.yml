@@ -72,28 +72,19 @@ jobs:
               text = raw.decode().replace('\r\n', '\n')
               text = re.sub(r'(?<![\w.])Action\b', 'System.Action', text)
               if name.endswith('VanillaAutobattleResume.cs'):
-                  text = replace_one(text, 'private int resumeVerificationGeneration;', '''private int resumeVerificationGeneration;
-
-                  // Supervisor baseDirectory stores mutable settings, not shipped application files.
-                  internal static string AutobattleBuildProfileDirectory
-                  {
-                      get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds"); }
-                  }''')
+                  field = 'private int resumeVerificationGeneration;'
+                  addition = '\n'.join([field, '', '        // Supervisor baseDirectory stores mutable settings, not shipped application files.', '        internal static string AutobattleBuildProfileDirectory', '        {', '            get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds"); }', '        }'])
+                  text = replace_one(text, field, addition)
                   text = replace_one(text, 'Path.Combine(baseDirectory, "VanillaBuilds")', 'AutobattleBuildProfileDirectory')
               if b'\r\n' in raw: text = text.replace('\n', '\r\n')
               path.write_bytes(text.encode())
           path = Path('Tests/VanillaAutobattleResumeTests.cs')
           text = path.read_text()
-          text = replace_one(text, '            Test("X movement verifies the first attempt",', '''            Test("Resume profiles come from the application directory", BuildProfileDirectory);
-                      Test("X movement verifies the first attempt",''')
-          text = replace_one(text, '        private static readonly BindingFlags PrivateInstance', '''        private static void BuildProfileDirectory()
-                  {
-                      string expected = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds");
-                      Assert(string.Equals(VanillaReconnectSupervisor.AutobattleBuildProfileDirectory, expected,
-                          StringComparison.OrdinalIgnoreCase), "Verified profiles were resolved from the mutable user-data directory.");
-                  }
-
-                  private static readonly BindingFlags PrivateInstance''')
+          old = '            Test("X movement verifies the first attempt",'
+          text = replace_one(text, old, '            Test("Resume profiles come from the application directory", BuildProfileDirectory);\n' + old)
+          old = '        private static readonly BindingFlags PrivateInstance'
+          addition = '\n'.join(['        private static void BuildProfileDirectory()', '        {', '            string expected = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds");', '            Assert(string.Equals(VanillaReconnectSupervisor.AutobattleBuildProfileDirectory, expected,', '                StringComparison.OrdinalIgnoreCase), "Verified profiles were resolved from the mutable user-data directory.");', '        }', '', old])
+          text = replace_one(text, old, addition)
           path.write_bytes(text.encode())
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Integration corrections failed.' }
