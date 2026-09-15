@@ -15,60 +15,54 @@ namespace _4RTools.Forms
 
         private void InstallGlobalDebugUi()
         {
-            if (smokeTest || globalDebugUiInstalled) return;
+            if (globalDebugUiInstalled) return;
             globalDebugUiInstalled = true;
-            _4RTools.Model.Vanilla.VanillaDebugLog.Initialize();
-
-            ShowInTaskbar = true;
+            if (!smokeTest)
+            {
+                _4RTools.Model.Vanilla.VanillaDebugLog.Initialize();
+                ShowInTaskbar = true;
+            }
 
             Button anchor = FindControlByText<Button>(this, "OPEN DATA FOLDER");
             if (anchor != null && anchor.Parent != null)
             {
                 Control parent = anchor.Parent;
                 int index = parent.Controls.GetChildIndex(anchor);
-
                 globalDebugEnabled = new CheckBox
                 {
-                    Text = "Debug log",
-                    AutoSize = true,
-                    Checked = _4RTools.Model.Vanilla.VanillaDebugLog.Enabled,
+                    Text = "Debug log", AutoSize = true,
+                    Checked = smokeTest || _4RTools.Model.Vanilla.VanillaDebugLog.Enabled,
                     Margin = new Padding(14, 9, 4, 0)
                 };
                 globalDebugEnabled.CheckedChanged += (s, e) =>
                 {
+                    if (smokeTest) return;
                     _4RTools.Model.Vanilla.VanillaDebugLog.SetEnabled(globalDebugEnabled.Checked);
-                    integratedUpdateStatus.Text = globalDebugEnabled.Checked
-                        ? "Version " + _4RTools.Model.Vanilla.VanillaUpdater.CurrentVersionText + " - debug log ON."
-                        : "Version " + _4RTools.Model.Vanilla.VanillaUpdater.CurrentVersionText + " - debug log OFF.";
+                    integratedUpdateStatus.Text = "Version " + _4RTools.Model.Vanilla.VanillaUpdater.CurrentVersionText
+                        + (globalDebugEnabled.Checked ? " - debug log ON." : " - debug log OFF.");
                 };
-
-                globalCopyDebug = new Button
-                {
-                    Text = "COPY DEBUG LOG",
-                    AutoSize = true,
-                    Margin = new Padding(4)
-                };
+                globalCopyDebug = new Button { Text = "COPY DEBUG LOG", AutoSize = true, Margin = new Padding(4) };
                 globalCopyDebug.Click += (s, e) => CopyGlobalDebugLog();
-
                 parent.Controls.Add(globalDebugEnabled);
                 parent.Controls.SetChildIndex(globalDebugEnabled, Math.Min(parent.Controls.Count - 1, index + 1));
                 parent.Controls.Add(globalCopyDebug);
                 parent.Controls.SetChildIndex(globalCopyDebug, Math.Min(parent.Controls.Count - 1, index + 2));
             }
+            CompactIntegratedHeader();
+            // Smoke/UI tests must exercise the same visible controls but never activate timers,
+            // memory access, update checks or clipboard bundles with real process information.
+            if (smokeTest) return;
 
             if (integratedReconnectSupervisor != null)
             {
                 integratedReconnectSupervisor.Logged += line => _4RTools.Model.Vanilla.VanillaDebugLog.Write("RECOVERY", line);
                 integratedReconnectSupervisor.Updated += WriteRecoveryDebugSnapshot;
             }
-
             if (vanillaWorkspace != null)
                 vanillaWorkspace.SelectedIndexChanged += (s, e) =>
                     _4RTools.Model.Vanilla.VanillaDebugLog.Write("UI", "Vanilla tab selected: " + (vanillaWorkspace.SelectedTab?.Text ?? "none") + ".");
-
             Application.ThreadException += (s, e) =>
                 _4RTools.Model.Vanilla.VanillaDebugLog.Write("THREAD-EXCEPTION", e.Exception == null ? "unknown" : e.Exception.ToString());
-
             globalDebugSnapshotTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             globalDebugSnapshotTimer.Tick += (s, e) => WriteGlobalDebugSnapshot();
             globalDebugSnapshotTimer.Start();
@@ -82,6 +76,7 @@ namespace _4RTools.Forms
 
         private void CopyGlobalDebugLog()
         {
+            if (smokeTest) return;
             try
             {
                 string reconnect = integratedReconnectSupervisor == null ? null : integratedReconnectSupervisor.LogPath;
@@ -99,7 +94,7 @@ namespace _4RTools.Forms
 
         private void WriteRecoveryDebugSnapshot()
         {
-            if (!_4RTools.Model.Vanilla.VanillaDebugLog.Enabled || integratedReconnectSupervisor == null) return;
+            if (smokeTest || !_4RTools.Model.Vanilla.VanillaDebugLog.Enabled || integratedReconnectSupervisor == null) return;
             try
             {
                 string snapshot = string.Join(" | ", integratedReconnectSupervisor.Statuses().Select(s =>
@@ -107,34 +102,26 @@ namespace _4RTools.Forms
                     + ",stage=" + s.Stage + ",screen=" + s.VisualState + ",detail=" + (s.Detail ?? "")));
                 _4RTools.Model.Vanilla.VanillaDebugLog.Write("RECOVERY-STATE", snapshot);
             }
-            catch (Exception ex)
-            {
-                _4RTools.Model.Vanilla.VanillaDebugLog.Write("RECOVERY-STATE", "snapshot failed: " + ex.Message);
-            }
+            catch (Exception ex) { _4RTools.Model.Vanilla.VanillaDebugLog.Write("RECOVERY-STATE", "snapshot failed: " + ex.Message); }
         }
 
         private void WriteGlobalDebugSnapshot()
         {
-            if (!_4RTools.Model.Vanilla.VanillaDebugLog.Enabled) return;
+            if (smokeTest || !_4RTools.Model.Vanilla.VanillaDebugLog.Enabled) return;
             try
             {
                 Process[] live = Process.GetProcessesByName("Vanilla MMO");
                 string pids;
                 try { pids = string.Join(",", live.Select(p => p.Id).OrderBy(id => id)); }
                 finally { foreach (Process p in live) p.Dispose(); }
-
-                string recovery = "recovery=" + (integratedReconnectSupervisor?.IsRunning == true ? "ON" : "OFF")
-                    + ", startup=" + (integratedReconnectSupervisor?.IsHardenedStartupRunning == true ? "ON" : "OFF");
-                string snapshot = "VanillaPIDs=[" + pids + "], " + recovery
+                string snapshot = "VanillaPIDs=[" + pids + "], recovery=" + (integratedReconnectSupervisor?.IsRunning == true ? "ON" : "OFF")
+                    + ", startup=" + (integratedReconnectSupervisor?.IsHardenedStartupRunning == true ? "ON" : "OFF")
                     + ", selectedTab=" + (vanillaWorkspace?.SelectedTab?.Text ?? "none");
                 if (string.Equals(snapshot, lastDebugSnapshot, StringComparison.Ordinal)) return;
                 lastDebugSnapshot = snapshot;
                 _4RTools.Model.Vanilla.VanillaDebugLog.Write("APP-STATE", snapshot);
             }
-            catch (Exception ex)
-            {
-                _4RTools.Model.Vanilla.VanillaDebugLog.Write("APP-STATE", "snapshot failed: " + ex.Message);
-            }
+            catch (Exception ex) { _4RTools.Model.Vanilla.VanillaDebugLog.Write("APP-STATE", "snapshot failed: " + ex.Message); }
         }
 
         private static T FindControlByText<T>(Control root, string text) where T : Control
