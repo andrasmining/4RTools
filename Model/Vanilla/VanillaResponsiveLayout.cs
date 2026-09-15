@@ -280,7 +280,11 @@ namespace _4RTools.Model.Vanilla
         {
             if (accounts.IsDisposed || accounts.ClientSize.Width <= 0) return;
             DataGridViewColumn[] columns = accounts.Columns.Cast<DataGridViewColumn>().Where(c => c.Visible).ToArray();
-            int available = Math.Max(0, accounts.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 2);
+            // ClientSize includes the managed scrollbar and the grid's painted frame. Reserve
+            // both frame edges as well as the scrollbar, even before a long list makes it visible.
+            // Otherwise the final Status column extends under the scrollbar by one pixel and
+            // DataGridView adds a horizontal scrollbar, wasting another row of vertical space.
+            int available = Math.Max(0, accounts.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4);
             int[] widths = columns.Select(ColumnMinimumWidth).ToArray();
             int spare = Math.Max(0, available - widths.Sum());
             string[] flexible = { "Label", "User", "RuntimeStatus" };
