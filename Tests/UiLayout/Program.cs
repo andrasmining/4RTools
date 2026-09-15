@@ -71,6 +71,11 @@ internal static class UiLayoutHarness
                 RunCase(main, recovery, 1920, 1020, 4, 1F, true);
                 // Return from enlarged text/small windows to the initial size on the same instance.
                 RunCase(main, recovery, 1920, 1020, 4, 1F, false);
+                // Vertical scrolling must not consume the last column or create horizontal overflow,
+                // including enlarged text, a stacked narrow workspace and a return to a short list.
+                RunCase(main, recovery, 1920, 1020, 40, 1.50F, false);
+                RunCase(main, recovery, 1050, 700, 40, 1F, false);
+                RunCase(main, recovery, 1920, 1020, 4, 1F, false);
                 Call(main, "AssertSmokeBackgroundServicesInactive");
                 report.AppendLine("Background services: inactive; fleet polls=0; no game input or email enabled.");
             }
@@ -114,8 +119,9 @@ internal static class UiLayoutHarness
             SeedAccounts(recovery, rows);
             ((Label)Field(recovery, "testState")).Text = notifications ? "Save failed: sample error; details in debug log" : string.Empty;
             ((Label)Field(recovery, "runState")).Text = notifications ? "STARTING" : "STOPPED";
-            ((Label)Field(main, "integratedUpdateStatus")).Text = notifications
-                ? "Version 0.6.33 - update check unavailable. Sample long status." : "Version 0.6.33 - up to date.";
+            string version = app.GetName().Version.ToString(3);
+            ((Label)Field(main, "integratedUpdateStatus")).Text = "Version " + version + (notifications
+                ? " - update check unavailable. Sample long status." : " - up to date.");
             Pump();
             Call(main, "AssertSmokeBackgroundServicesInactive");
             DataGridView grid = (DataGridView)Field(recovery, "accounts");
@@ -143,17 +149,7 @@ internal static class UiLayoutHarness
                 double ratio = left.Width / (double)(left.Width + logBox.Width);
                 Check(ratio >= 0.64 && ratio <= 0.69, name + ": accounts/log split is not approximately 2:1: " + ratio);
             }
-            int totalWidth = 0;
-            foreach (DataGridViewColumn column in grid.Columns)
-            {
-                if (!column.Visible) continue;
-                Rectangle cell = grid.GetColumnDisplayRectangle(column.Index, false);
-                totalWidth += column.Width;
-                report.AppendLine("  COLUMN " + column.Name + " width=" + column.Width + " rect=" + cell);
-                Check(cell.Width == column.Width && cell.Left >= 0 && cell.Right <= grid.ClientSize.Width,
-                    name + ": column " + column.Name + " is off-screen or clipped.");
-            }
-            Check(totalWidth <= grid.ClientSize.Width, name + ": column widths exceed grid viewport.");
+            int totalWidth = CheckAccountViewport(grid, name, true);
             Check(grid.Height >= grid.ColumnHeadersHeight + grid.RowTemplate.Height * 5,
                 name + ": fewer than four account rows plus one spare row can fit.");
             if (rows <= 4) Check(grid.DisplayedRowCount(false) == rows, name + ": an account row is not fully visible.");
@@ -192,6 +188,7 @@ internal static class UiLayoutHarness
                 Pump();
                 Check(grid.GetRowDisplayRectangle(rows - 1, true).Height >= grid.Rows[rows - 1].Height,
                     name + ": final account cannot be scrolled fully into view.");
+                CheckAccountViewport(grid, name + " at final account", false);
                 grid.FirstDisplayedScrollingRowIndex = 0;
             }
             grid.CurrentCell = grid.Rows[Math.Min(1, rows - 1)].Cells[1];
@@ -199,6 +196,7 @@ internal static class UiLayoutHarness
             TabControl tabs = (TabControl)Field(main, "primaryWorkspace");
             tabs.SelectedIndex = 1; Pump(); tabs.SelectedIndex = 0; Pump();
             Check(object.Equals(grid.CurrentRow.Tag, selected), name + ": account selection lost when returning to Vanilla.");
+            CheckAccountViewport(grid, name + " after tab return", false);
             SaveScreenshot(main, Path.Combine(output, name + ".png"));
             Rectangle stable = BoundsIn(grid, main);
             Pump();
@@ -210,6 +208,29 @@ internal static class UiLayoutHarness
             failures.Add(name + ": " + ex);
             try { SaveScreenshot(main, Path.Combine(output, name + "-error.png")); } catch { }
         }
+    }
+
+    private static int CheckAccountViewport(DataGridView grid, string context, bool writeReport)
+    {
+        // ClientSize includes DataGridView's managed scrollbar children. Comparing column bounds
+        // only to ClientSize would pass even when the rightmost column sits under the scrollbar.
+        VScrollBar vertical = grid.Controls.OfType<VScrollBar>().FirstOrDefault(b => b.Visible);
+        HScrollBar horizontal = grid.Controls.OfType<HScrollBar>().FirstOrDefault(b => b.Visible);
+        int dataRight = vertical == null ? grid.ClientSize.Width - 2 : vertical.Left;
+        int totalWidth = 0;
+        foreach (DataGridViewColumn column in grid.Columns)
+        {
+            if (!column.Visible) continue;
+            Rectangle cell = grid.GetColumnDisplayRectangle(column.Index, false);
+            totalWidth += column.Width;
+            if (writeReport) report.AppendLine("  COLUMN " + column.Name + " width=" + column.Width + " rect=" + cell);
+            Check(cell.Width == column.Width && cell.Left >= 0 && cell.Right <= dataRight,
+                context + ": column " + column.Name + " is clipped or obscured by a scrollbar (right=" + cell.Right + ", dataRight=" + dataRight + ").");
+        }
+        Check(totalWidth <= grid.ClientSize.Width, context + ": column widths exceed grid viewport.");
+        Check(horizontal == null, context + ": unnecessary horizontal scrollbar despite a fitting account-pane width.");
+        if (writeReport) report.AppendLine("  SCROLLBARS vertical=" + (vertical != null) + ", horizontal=" + (horizontal != null) + ", dataRight=" + dataRight);
+        return totalWidth;
     }
 
     private static void SeedAccounts(object recovery, int count)
