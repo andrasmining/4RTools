@@ -39,7 +39,11 @@ jobs:
         shell: powershell
         run: '& .\scripts\validate-vanilla-build-profiles.ps1'
 
-      - name: Build, test, package and smoke-test
+      - name: Build and test Debug
+        shell: powershell
+        run: '& .\scripts\build.ps1 -Configuration Debug -VanillaRelease'
+
+      - name: Build, test, package and smoke-test Release
         shell: powershell
         run: '& .\scripts\build-release.ps1 -Version $env:VERSION'
 
