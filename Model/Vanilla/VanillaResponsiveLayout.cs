@@ -6,10 +6,9 @@ using System.Windows.Forms;
 namespace _4RTools.Model.Vanilla
 {
     /// <summary>
-    /// Responsive presentation layer for the recovery workspace. The original reconnect form
-    /// predates the integrated Vanilla shell and used a tall, fixed desktop-oriented layout.
-    /// Recompose the existing controls at runtime so behavior/event wiring stays untouched while
-    /// Full-HD/RDP windows use the available space efficiently and smaller windows can scroll.
+    /// Responsive presentation layer for the integrated recovery workspace. Reuses the existing
+    /// behavior/event wiring while keeping the visible surface compact and allowing smaller RDP
+    /// desktops to scroll instead of clipping controls.
     /// </summary>
     internal sealed partial class VanillaReconnectForm
     {
@@ -18,30 +17,36 @@ namespace _4RTools.Model.Vanilla
         private bool responsiveRecoveryApplied;
         private TableLayoutPanel responsiveRoot;
         private TableLayoutPanel responsiveBottom;
+        private GroupBox responsiveAccountBox;
         private GroupBox responsiveStatusBox;
         private GroupBox responsiveLogBox;
-        private Label responsiveInfo;
 
         internal void ScheduleResponsiveRecoveryLayout()
         {
             if (responsiveRecoveryHookInstalled) return;
             responsiveRecoveryHookInstalled = true;
 
-            // ConfigureScopedTestUi runs after base.OnShown(), so defer our composition until the
-            // current UI message has completed and all runtime-added test controls exist.
             Shown += (s, e) => BeginInvoke((MethodInvoker)InstallResponsiveRecoveryLayout);
             SizeChanged += (s, e) =>
             {
                 if (!responsiveRecoveryApplied || IsDisposed) return;
+                ApplyResponsiveHeights();
                 ApplyResponsiveRecoveryBreakpoint();
                 ResizeRecoveryColumns();
-                ResizeResponsiveInfo();
             };
         }
 
         internal static bool UseWideRecoveryLayout(int availableWidth)
         {
             return availableWidth >= WideRecoveryBreakpoint;
+        }
+
+        internal static int PreferredAccountsPanelHeight(int availableHeight)
+        {
+            if (availableHeight < 720) return 132;
+            if (availableHeight < 860) return 148;
+            if (availableHeight < 1000) return 164;
+            return 178;
         }
 
         private void InstallResponsiveRecoveryLayout()
@@ -55,37 +60,39 @@ namespace _4RTools.Model.Vanilla
             responsiveRoot.SuspendLayout();
             try
             {
-                responsiveRoot.Padding = new Padding(6);
+                responsiveRoot.Padding = new Padding(5);
                 responsiveRoot.Margin = Padding.Empty;
                 responsiveRoot.AutoScroll = true;
-                responsiveRoot.AutoScrollMinSize = new Size(900, 520);
+                responsiveRoot.AutoScrollMinSize = new Size(900, 470);
                 responsiveRoot.RowStyles.Clear();
                 responsiveRoot.RowCount = 4;
                 responsiveRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-                responsiveRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 132F));
+                responsiveRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, PreferredAccountsPanelHeight(ClientSize.Height)));
                 responsiveRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
                 responsiveRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 0F));
 
                 TableLayoutPanel oldTop = responsiveRoot.GetControlFromPosition(0, 0) as TableLayoutPanel;
-                GroupBox accountBox = FindGroupBoxStarting(responsiveRoot, "Accounts on this PC");
+                responsiveAccountBox = FindGroupBoxStarting(responsiveRoot, "Accounts");
                 responsiveStatusBox = FindGroupBoxStarting(responsiveRoot, "Live recovery status");
                 responsiveLogBox = FindGroupBoxStarting(responsiveRoot, "Reconnect log");
 
-                if (oldTop != null) RebuildCompactRecoveryHeader(oldTop);
-                if (accountBox != null)
+                if (oldTop != null) RebuildMinimalRecoveryHeader(oldTop);
+                if (responsiveAccountBox != null)
                 {
-                    accountBox.Text = "Accounts (maximum 2 enabled clients)";
-                    accountBox.Padding = new Padding(6);
-                    accountBox.Margin = new Padding(0, 4, 0, 4);
+                    responsiveAccountBox.Text = "Accounts";
+                    responsiveAccountBox.Padding = new Padding(5);
+                    responsiveAccountBox.Margin = new Padding(0, 3, 0, 3);
+                    help.SetToolTip(responsiveAccountBox,
+                        "Up to two managed Vanilla accounts. Select Edit or double-click a row to change account name, username, DPAPI-protected password, character slot, proxy and resume hotkey.");
                 }
 
                 ConfigureAccountsGrid();
                 ConfigureStatusList();
                 ConfigureReconnectLog();
                 BuildResponsiveRuntimeBottom();
+                ApplyResponsiveHeights();
                 ApplyResponsiveRecoveryBreakpoint();
                 ResizeRecoveryColumns();
-                ResizeResponsiveInfo();
             }
             finally
             {
@@ -94,14 +101,14 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        private void RebuildCompactRecoveryHeader(TableLayoutPanel top)
+        private void RebuildMinimalRecoveryHeader(TableLayoutPanel top)
         {
             Button browse = FindButton(this, "Browse...") ?? FindButton(this, "Browseâ€¦");
             Button start = FindButton(this, "START SUPERVISOR");
             Button stop = FindButton(this, "STOP");
             Button network = FindButton(this, "ARM MANUAL NETWORK-DROP TEST");
             GroupBox diagnostics = FindGroupBoxStarting(this, "Startup tests and selected-client diagnostics");
-            responsiveInfo = FindLabelStarting(this, "Passwords are encrypted");
+            Label info = FindLabelStarting(this, "Passwords are encrypted");
 
             top.SuspendLayout();
             try
@@ -110,66 +117,72 @@ namespace _4RTools.Model.Vanilla
                 top.RowStyles.Clear();
                 top.ColumnStyles.Clear();
                 top.ColumnCount = 1;
-                top.RowCount = 4;
+                top.RowCount = 2;
                 top.Dock = DockStyle.Top;
                 top.AutoSize = true;
                 top.Margin = Padding.Empty;
                 top.Padding = Padding.Empty;
-                for (int i = 0; i < 4; i++) top.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                top.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                top.RowStyles.Add(new RowStyle(SizeType.AutoSize));
                 top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
-                var launcherRow = new TableLayoutPanel
-                {
-                    Dock = DockStyle.Top,
-                    AutoSize = true,
-                    ColumnCount = 3,
-                    RowCount = 1,
-                    Margin = Padding.Empty,
-                    Padding = new Padding(0, 1, 0, 1)
-                };
-                launcherRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-                launcherRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-                launcherRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-                launcherRow.Controls.Add(new Label
+                var mainRow = CompactFlow();
+                mainRow.WrapContents = true;
+                mainRow.Controls.Add(new Label
                 {
                     Text = "Launcher",
                     AutoSize = true,
                     Font = new Font(Font, FontStyle.Bold),
-                    Margin = new Padding(0, 7, 8, 0)
-                }, 0, 0);
-                launchPath.Dock = DockStyle.Fill;
-                launchPath.Width = 520;
-                launchPath.Margin = new Padding(0, 3, 6, 3);
-                launcherRow.Controls.Add(launchPath, 1, 0);
+                    Margin = new Padding(0, 7, 5, 0)
+                });
+
+                launchPath.Dock = DockStyle.None;
+                launchPath.Width = 310;
+                launchPath.Margin = new Padding(0, 3, 4, 3);
+                mainRow.Controls.Add(launchPath);
                 if (browse != null)
                 {
                     browse.AutoSize = true;
-                    browse.Margin = new Padding(0, 2, 0, 2);
-                    launcherRow.Controls.Add(browse, 2, 0);
+                    browse.Margin = new Padding(0, 2, 8, 2);
+                    mainRow.Controls.Add(browse);
                 }
-                top.Controls.Add(launcherRow, 0, 0);
 
-                var supervisorRow = CompactFlow();
-                startWithApp.Margin = new Padding(0, 7, 14, 0);
-                autoRecover.Margin = new Padding(0, 7, 14, 0);
-                visualWatchdog.Margin = new Padding(0, 7, 14, 0);
-                supervisorRow.Controls.Add(startWithApp);
-                supervisorRow.Controls.Add(autoRecover);
-                supervisorRow.Controls.Add(visualWatchdog);
-                if (start != null) supervisorRow.Controls.Add(start);
-                if (stop != null) supervisorRow.Controls.Add(stop);
-                runState.Margin = new Padding(12, 7, 0, 0);
-                supervisorRow.Controls.Add(runState);
-                top.Controls.Add(supervisorRow, 0, 1);
+                startWithApp.Text = "Start with 4RTools";
+                autoRecover.Text = "Auto relog";
+                visualWatchdog.Text = "Visual watchdog";
+                startWithApp.Margin = new Padding(0, 7, 10, 0);
+                autoRecover.Margin = new Padding(0, 7, 10, 0);
+                visualWatchdog.Margin = new Padding(0, 7, 10, 0);
+                mainRow.Controls.Add(startWithApp);
+                mainRow.Controls.Add(autoRecover);
+                mainRow.Controls.Add(visualWatchdog);
+
+                if (start != null)
+                {
+                    start.Text = "START";
+                    start.AutoSize = true;
+                    start.Margin = new Padding(2);
+                    mainRow.Controls.Add(start);
+                    help.SetToolTip(start, "Start serialized recovery supervision. Missing clients are completed one at a time.");
+                }
+                if (stop != null)
+                {
+                    stop.AutoSize = true;
+                    stop.Margin = new Padding(2);
+                    mainRow.Controls.Add(stop);
+                }
+                runState.Margin = new Padding(8, 7, 0, 0);
+                mainRow.Controls.Add(runState);
+                top.Controls.Add(mainRow, 0, 0);
 
                 if (diagnostics != null)
                 {
-                    diagnostics.Text = "Startup diagnostics";
+                    diagnostics.Text = "Tests";
                     diagnostics.Dock = DockStyle.Top;
-                    diagnostics.Height = 62;
-                    diagnostics.MinimumSize = new Size(0, 58);
-                    diagnostics.Margin = new Padding(0, 3, 0, 3);
-                    diagnostics.Padding = new Padding(5, 3, 5, 4);
+                    diagnostics.Height = 50;
+                    diagnostics.MinimumSize = new Size(0, 46);
+                    diagnostics.Margin = new Padding(0, 2, 0, 2);
+                    diagnostics.Padding = new Padding(4, 2, 4, 3);
                     FlowLayoutPanel diagnosticRow = diagnostics.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
                     if (diagnosticRow != null)
                     {
@@ -178,30 +191,33 @@ namespace _4RTools.Model.Vanilla
                         diagnosticRow.WrapContents = true;
                         diagnosticRow.Padding = Padding.Empty;
                         diagnosticRow.Margin = Padding.Empty;
-                        if (network != null) diagnosticRow.Controls.Add(network);
-                        testState.Margin = new Padding(10, 7, 0, 0);
+                        if (network != null)
+                        {
+                            network.Text = "NETWORK DROP TEST";
+                            network.Margin = new Padding(3);
+                            diagnosticRow.Controls.Add(network);
+                        }
+                        testState.Margin = new Padding(8, 7, 0, 0);
                         diagnosticRow.Controls.Add(testState);
                     }
-                    top.Controls.Add(diagnostics, 0, 2);
-                }
-                else
-                {
-                    var diagnosticFallback = CompactFlow();
-                    if (network != null) diagnosticFallback.Controls.Add(network);
-                    diagnosticFallback.Controls.Add(testState);
-                    top.Controls.Add(diagnosticFallback, 0, 2);
+                    top.Controls.Add(diagnostics, 0, 1);
                 }
 
-                if (responsiveInfo != null)
+                if (info != null)
                 {
-                    responsiveInfo.Text = "Passwords use Windows DPAPI and are never logged. Recovery uses ordinary Windows input only and does not modify Gepard. Passwords must be entered once on each PC.";
-                    responsiveInfo.Margin = new Padding(0, 2, 0, 2);
-                    responsiveInfo.ForeColor = Color.DimGray;
-                    responsiveInfo.AutoSize = true;
-                    top.Controls.Add(responsiveInfo, 0, 3);
+                    info.Visible = false;
+                    help.SetToolTip(accounts,
+                        "Passwords are stored with Windows DPAPI for this Windows user and are never written to logs. Recovery uses ordinary Windows input and does not modify Gepard. Double-click a row to edit all account settings including proxy.");
                 }
             }
             finally { top.ResumeLayout(true); }
+        }
+
+        private void ApplyResponsiveHeights()
+        {
+            if (responsiveRoot == null || responsiveRoot.RowStyles.Count < 2) return;
+            responsiveRoot.RowStyles[1].SizeType = SizeType.Absolute;
+            responsiveRoot.RowStyles[1].Height = PreferredAccountsPanelHeight(Math.Max(0, ClientSize.Height));
         }
 
         private void ConfigureAccountsGrid()
@@ -210,9 +226,9 @@ namespace _4RTools.Model.Vanilla
             accounts.BackgroundColor = SystemColors.Window;
             accounts.AllowUserToResizeRows = false;
             accounts.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
-            accounts.RowTemplate.Height = 22;
+            accounts.RowTemplate.Height = 24;
             accounts.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            accounts.ColumnHeadersHeight = 24;
+            accounts.ColumnHeadersHeight = 25;
             accounts.ScrollBars = ScrollBars.Vertical;
             accounts.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
 
@@ -242,9 +258,10 @@ namespace _4RTools.Model.Vanilla
             status.SizeChanged += (s, e) => ResizeRecoveryColumns();
             if (responsiveStatusBox != null)
             {
-                responsiveStatusBox.Text = "Live recovery status";
-                responsiveStatusBox.Padding = new Padding(6);
+                responsiveStatusBox.Text = "Status";
+                responsiveStatusBox.Padding = new Padding(5);
                 responsiveStatusBox.Margin = new Padding(0, 0, 4, 0);
+                help.SetToolTip(responsiveStatusBox, "Current account/PID assignment, recovery stage, detected screen and detailed runtime state.");
             }
         }
 
@@ -255,9 +272,10 @@ namespace _4RTools.Model.Vanilla
             log.ScrollBars = ScrollBars.Both;
             if (responsiveLogBox != null)
             {
-                responsiveLogBox.Text = "Reconnect log";
-                responsiveLogBox.Padding = new Padding(6);
+                responsiveLogBox.Text = "Log";
+                responsiveLogBox.Padding = new Padding(5);
                 responsiveLogBox.Margin = new Padding(4, 0, 0, 0);
+                help.SetToolTip(responsiveLogBox, "Current reconnect/startup events. The full application diagnostic bundle is available from COPY DEBUG LOG at the top.");
             }
         }
 
@@ -298,20 +316,20 @@ namespace _4RTools.Model.Vanilla
                     responsiveLogBox.Margin = new Padding(4, 0, 0, 0);
                     responsiveBottom.Controls.Add(responsiveStatusBox, 0, 0);
                     responsiveBottom.Controls.Add(responsiveLogBox, 1, 0);
-                    responsiveRoot.AutoScrollMinSize = new Size(900, 500);
+                    responsiveRoot.AutoScrollMinSize = new Size(900, 470);
                 }
                 else
                 {
                     responsiveBottom.ColumnCount = 1;
                     responsiveBottom.RowCount = 2;
                     responsiveBottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-                    responsiveBottom.RowStyles.Add(new RowStyle(SizeType.Percent, 55F));
-                    responsiveBottom.RowStyles.Add(new RowStyle(SizeType.Percent, 45F));
+                    responsiveBottom.RowStyles.Add(new RowStyle(SizeType.Percent, 58F));
+                    responsiveBottom.RowStyles.Add(new RowStyle(SizeType.Percent, 42F));
                     responsiveStatusBox.Margin = new Padding(0, 0, 0, 3);
                     responsiveLogBox.Margin = new Padding(0, 3, 0, 0);
                     responsiveBottom.Controls.Add(responsiveStatusBox, 0, 0);
                     responsiveBottom.Controls.Add(responsiveLogBox, 0, 1);
-                    responsiveRoot.AutoScrollMinSize = new Size(900, 610);
+                    responsiveRoot.AutoScrollMinSize = new Size(900, 590);
                 }
             }
             finally { responsiveBottom.ResumeLayout(true); }
@@ -321,22 +339,16 @@ namespace _4RTools.Model.Vanilla
         {
             if (status.Columns.Count < 5 || status.ClientSize.Width <= 0) return;
             int width = Math.Max(500, status.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 10);
-            int account = Math.Max(105, (int)(width * 0.14));
-            int pid = Math.Max(62, (int)(width * 0.08));
-            int stage = Math.Max(115, (int)(width * 0.16));
-            int screen = Math.Max(95, (int)(width * 0.13));
+            int account = Math.Max(100, (int)(width * 0.14));
+            int pid = Math.Max(58, (int)(width * 0.08));
+            int stage = Math.Max(110, (int)(width * 0.16));
+            int screen = Math.Max(90, (int)(width * 0.13));
             int detail = Math.Max(170, width - account - pid - stage - screen - 6);
             status.Columns[0].Width = account;
             status.Columns[1].Width = pid;
             status.Columns[2].Width = stage;
             status.Columns[3].Width = screen;
             status.Columns[4].Width = detail;
-        }
-
-        private void ResizeResponsiveInfo()
-        {
-            if (responsiveInfo == null || responsiveRoot == null) return;
-            responsiveInfo.MaximumSize = new Size(Math.Max(420, responsiveRoot.ClientSize.Width - 20), 0);
         }
 
         private static FlowLayoutPanel CompactFlow()
