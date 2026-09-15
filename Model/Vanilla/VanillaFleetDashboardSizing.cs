@@ -14,7 +14,23 @@ namespace _4RTools.Forms
             if (vanillaFleetSizingApplied || integratedFleetDashboard == null) return;
             vanillaFleetSizingApplied = true;
 
-            const int dashboardHeight = 225;
+            UpdateVanillaFleetHeight();
+            SizeChanged += (s, e) => UpdateVanillaFleetHeight();
+            ConfigureFleetLabels(integratedFleetDashboard);
+            StartMemoryAccessDiagnostics();
+        }
+
+        internal static int PreferredFleetDashboardHeight(int availableClientHeight)
+        {
+            if (availableClientHeight < 820) return 128;
+            if (availableClientHeight < 950) return 138;
+            return 145;
+        }
+
+        private void UpdateVanillaFleetHeight()
+        {
+            if (integratedFleetDashboard == null || integratedFleetDashboard.IsDisposed) return;
+            int dashboardHeight = PreferredFleetDashboardHeight(ClientSize.Height);
             integratedFleetDashboard.MinimumSize = new Size(600, dashboardHeight);
             integratedFleetDashboard.Height = dashboardHeight;
 
@@ -24,9 +40,6 @@ namespace _4RTools.Forms
                 host.RowStyles[1].SizeType = SizeType.Absolute;
                 host.RowStyles[1].Height = dashboardHeight;
             }
-
-            ConfigureFleetLabels(integratedFleetDashboard);
-            StartMemoryAccessDiagnostics();
         }
 
         private void StartMemoryAccessDiagnostics()
@@ -64,9 +77,9 @@ namespace _4RTools.Forms
                     layout.RowStyles[0].SizeType = SizeType.AutoSize;
                     layout.RowStyles[1].SizeType = SizeType.AutoSize;
                     layout.RowStyles[2].SizeType = SizeType.Absolute;
-                    layout.RowStyles[2].Height = 10;
+                    layout.RowStyles[2].Height = 8;
                     layout.RowStyles[3].SizeType = SizeType.Absolute;
-                    layout.RowStyles[3].Height = 26;
+                    layout.RowStyles[3].Height = 22;
                     layout.RowStyles[4].SizeType = SizeType.Percent;
                     layout.RowStyles[4].Height = 100;
 
@@ -78,7 +91,7 @@ namespace _4RTools.Forms
                         if (row != 3 && row != 4) continue;
                         label.AutoSize = false;
                         label.Dock = DockStyle.Fill;
-                        label.AutoEllipsis = false;
+                        label.AutoEllipsis = true;
                         label.TextAlign = ContentAlignment.TopLeft;
                     }
                 }
