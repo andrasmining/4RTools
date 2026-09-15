@@ -262,8 +262,18 @@ corruption or accidental default replacement.
 
 Normal end-user operation should be one 4RTools application/window. Integrate
 Vanilla recovery, automation, diagnostics, data paths, and update status into the
-main Vanilla workspace instead of creating competing top-level manager windows
-or duplicate tray icons. The main 4RTools tray remains the application tray.
+main Vanilla workspace instead of creating competing top-level manager windows.
+The main 4RTools window must never use tray-only hiding as its minimized state:
+when the user minimizes it, keep it visible as a normal Windows taskbar item and
+preserve the minimized window state. An existing legacy tray icon may remain for
+compatibility, but it must not replace the taskbar window or cause minimize-to-tray
+behavior. The normal user-visible window states are active/restored or taskbar-
+minimized.
+
+Keep CHECK FOR UPDATES and the current version/update status together in a
+separate right-aligned status area of the top Vanilla header. Keep ordinary
+workspace/debug actions on the left so update/version information reads as status
+rather than as part of the main action cluster.
 
 Recovery settings are auto-save UI: do not require a separate Save button. The
 launcher path, account edits, recovery/watchdog switches, and per-account proxy
@@ -274,8 +284,8 @@ two). Proxy selection is account-specific and must follow the account being
 started or recovered, not one shared global proxy control.
 
 During the current live-hardening phase, global debug logging is ON by default.
-Keep one Debug log checkbox and one COPY DEBUG LOG action in the top Vanilla
-header next to update controls. The copied bundle should aggregate application,
+Keep one Debug log checkbox and one COPY DEBUG LOG action in the left action area
+of the top Vanilla header. The copied bundle should aggregate application,
 startup/recovery, memory-access, update, and other available logs. Debug mode
 should record process/PID changes, stage/visual transitions, launcher evidence,
 focus attempts, clicks/keys/hotkeys, and errors with timestamps while never
