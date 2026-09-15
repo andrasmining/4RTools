@@ -56,9 +56,9 @@ namespace _4RTools.Model.Vanilla
     {
         private bool simplifiedRecoveryUiInstalled;
         private bool autosaveSuppress;
-        private ComboBox selectedAccountProxy;
         private System.Windows.Forms.Timer autosaveTimer;
         private System.Windows.Forms.Timer saveToastTimer;
+        private string pendingSaveMessage = "Saved";
 
         internal void InstallSimplifiedRecoveryUi()
         {
@@ -78,84 +78,28 @@ namespace _4RTools.Model.Vanilla
             RemoveButton("COPY LOG");
             RemoveButton("COPY RECONNECT LOG");
             RemoveButton("COPY FULL DEBUG LOG");
+            RemoveButton("Run login now (selected)");
 
-            InstallAccountProxySelector();
+            InstallAccountProxyColumn();
+            InstallMinimalAccountButtons();
             SynchronizeDerivedUiValues();
             HookAutosave();
             RefreshAccountProxyColumn();
             ShowSaveToast("Auto-save on", false);
         }
 
-        private void InstallAccountProxySelector()
+        private void InstallAccountProxyColumn()
         {
-            Button edit = FindButton(this, "Edit");
-            if (edit == null || edit.Parent == null) return;
-            Control row = edit.Parent;
-
-            if (!accounts.Columns.Contains("AccountProxy"))
+            if (accounts.Columns.Contains("AccountProxy")) return;
+            accounts.Columns.Add(new DataGridViewTextBoxColumn
             {
-                var column = new DataGridViewTextBoxColumn
-                {
-                    Name = "AccountProxy",
-                    HeaderText = "Proxy",
-                    ReadOnly = true,
-                    FillWeight = 70
-                };
-                accounts.Columns.Add(column);
-            }
-
-            var label = new Label
-            {
-                Text = "Proxy for selected account",
-                AutoSize = true,
-                Margin = new Padding(18, 9, 4, 0)
-            };
-            selectedAccountProxy = new ComboBox
-            {
-                Width = 130,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Margin = new Padding(4)
-            };
-            selectedAccountProxy.DataSource = Enum.GetValues(typeof(VanillaProxyRoute));
-            selectedAccountProxy.SelectedIndexChanged += SelectedAccountProxyChanged;
-            accounts.SelectionChanged += (s, e) => LoadSelectedAccountProxy();
-            row.Controls.Add(label);
-            row.Controls.Add(selectedAccountProxy);
-            help.SetToolTip(selectedAccountProxy, "Proxy route used only for the selected account. Each enabled account can use a different route.");
-            LoadSelectedAccountProxy();
-        }
-
-        private void SelectedAccountProxyChanged(object sender, EventArgs e)
-        {
-            if (autosaveSuppress || selectedAccountProxy == null || !(selectedAccountProxy.SelectedItem is VanillaProxyRoute)) return;
-            VanillaReconnectAccount selected = SelectedAccount();
-            if (selected == null) return;
-            VanillaProxyRoute route = (VanillaProxyRoute)selectedAccountProxy.SelectedItem;
-            VanillaAccountProxyPreferences.Set(selected.Id, route);
-            settings.Proxy = route;
-            proxy.SelectedItem = route;
-            RefreshAccountProxyColumn();
-            QueueAutoSave("Proxy " + route + " saved for " + selected.Label);
-        }
-
-        private void LoadSelectedAccountProxy()
-        {
-            if (selectedAccountProxy == null) return;
-            VanillaReconnectAccount selected = SelectedAccount();
-            autosaveSuppress = true;
-            try
-            {
-                selectedAccountProxy.Enabled = selected != null;
-                if (selected != null)
-                {
-                    VanillaProxyRoute route = VanillaAccountProxyPreferences.Get(selected.Id, settings.Proxy);
-                    selectedAccountProxy.SelectedItem = route;
-                    proxy.SelectedItem = route;
-                    settings.Proxy = route;
-                }
-            }
-            finally { autosaveSuppress = false; }
-            RefreshAccountProxyColumn();
+                Name = "AccountProxy",
+                HeaderText = "Proxy",
+                ReadOnly = true,
+                FillWeight = 70
+            });
+            help.SetToolTip(accounts,
+                "Managed Vanilla accounts. Double-click or select Edit to change username, password, character slot, proxy and resume hotkey. Passwords use Windows DPAPI and are never written to logs.");
         }
 
         private void RefreshAccountProxyColumn()
@@ -173,7 +117,7 @@ namespace _4RTools.Model.Vanilla
         {
             autosaveTimer = new System.Windows.Forms.Timer { Interval = 350 };
             autosaveTimer.Tick += (s, e) => SaveAutomaticallyNow();
-            saveToastTimer = new System.Windows.Forms.Timer { Interval = 1800 };
+            saveToastTimer = new System.Windows.Forms.Timer { Interval = 1500 };
             saveToastTimer.Tick += (s, e) =>
             {
                 saveToastTimer.Stop();
@@ -181,18 +125,20 @@ namespace _4RTools.Model.Vanilla
             };
 
             launchPath.TextChanged += (s, e) => QueueAutoSave("Launcher saved");
-            startWithApp.CheckedChanged += (s, e) => QueueAutoSave("Startup preference saved");
-            autoRecover.CheckedChanged += (s, e) => QueueAutoSave("Recovery preference saved");
-            visualWatchdog.CheckedChanged += (s, e) => QueueAutoSave("Visual watchdog preference saved");
+            startWithApp.CheckedChanged += (s, e) => QueueAutoSave("Startup saved");
+            autoRecover.CheckedChanged += (s, e) => QueueAutoSave("Auto relog saved");
+            visualWatchdog.CheckedChanged += (s, e) => QueueAutoSave("Visual watchdog saved");
             accounts.RowsAdded += (s, e) => { SynchronizeDerivedUiValues(); QueueAutoSave("Account changes saved"); };
             accounts.RowsRemoved += (s, e) => { SynchronizeDerivedUiValues(); QueueAutoSave("Account changes saved"); };
+            accounts.CellDoubleClick += (s, e) =>
+            {
+                if (e.RowIndex >= 0) EditAccountMinimal();
+            };
             FormClosing += (s, e) =>
             {
                 if (autosaveTimer != null && autosaveTimer.Enabled) SaveAutomaticallyNow();
             };
         }
-
-        private string pendingSaveMessage = "Saved";
 
         private void QueueAutoSave(string message)
         {
@@ -224,7 +170,7 @@ namespace _4RTools.Model.Vanilla
             catch (Exception ex)
             {
                 VanillaDebugLog.Write("SETTINGS", "Auto-save FAILED: " + ex);
-                ShowSaveToast("Save failed: " + ex.Message, true);
+                ShowSaveToast("Save failed", true);
             }
         }
 
