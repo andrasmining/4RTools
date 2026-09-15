@@ -30,7 +30,8 @@ namespace Vanilla.Diagnostics.Tests
             Test("Real Vanilla game window outranks generic windows", GameWindowCandidateRanking);
             Test("Minimized Vanilla game window stays eligible for restore", MinimizedGameWindowCandidate);
             Test("Recovery runtime panels use wide Full-HD layout", ResponsiveRecoveryBreakpoint);
-            Test("Fleet strip stays compact across common desktop heights", ResponsiveFleetHeight);
+            Test("Fleet strip stays minimal across common desktop heights", ResponsiveFleetHeight);
+            Test("Accounts panel grows with available vertical space", ResponsiveAccountsHeight);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -181,7 +182,7 @@ namespace Vanilla.Diagnostics.Tests
             Assert(VanillaForegroundInput.IsTransientBootstrapWindow("Gepard_Splash_Class", "GepardSplash"),
                 "Known Gepard splash must never receive automated input.");
             Assert(!VanillaForegroundInput.IsTransientBootstrapWindow(
-                    "Vanilla MMO | Gepard Shield 3.0 (^-_-^)", "Vanilla MMO | Gepard Shield 3.0 (^-_-^)"),
+                    "Vanilla MMO | Gepard Shield 3.0 (^-_-^)", "Vanilla MMO | Gepard Shield 3.0 (^-_-^)") ,
                 "Actual Vanilla game window was incorrectly classified as a splash.");
             Assert(VanillaForegroundInput.WindowCandidateScore(true, true, 780, 327, true, false,
                     "Gepard_Splash_Class", "GepardSplash") == int.MinValue,
@@ -224,12 +225,26 @@ namespace Vanilla.Diagnostics.Tests
 
         private static void ResponsiveFleetHeight()
         {
-            Assert(Container.PreferredFleetDashboardHeight(760) == 128,
-                "Small desktop should use compact fleet height.");
-            Assert(Container.PreferredFleetDashboardHeight(900) == 138,
-                "Typical constrained RDP height should use medium fleet height.");
-            Assert(Container.PreferredFleetDashboardHeight(1020) == 145,
-                "Full-HD class desktop should not reserve the old oversized 225px fleet strip.");
+            Assert(Container.PreferredFleetDashboardHeight(700) == 96,
+                "Small desktop should use the most compact fleet strip.");
+            Assert(Container.PreferredFleetDashboardHeight(820) == 104,
+                "Constrained RDP height should keep the fleet strip compact.");
+            Assert(Container.PreferredFleetDashboardHeight(980) == 112,
+                "Full-HD class workspace should not waste vertical space on fleet cards.");
+            Assert(Container.PreferredFleetDashboardHeight(1100) == 120,
+                "Large desktop should still keep the fleet strip minimal.");
+        }
+
+        private static void ResponsiveAccountsHeight()
+        {
+            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(700) == 132,
+                "Small desktop accounts panel should stay usable without crowding runtime panels.");
+            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(800) == 148,
+                "RDP accounts panel should grow when space is available.");
+            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(920) == 164,
+                "Full-HD accounts panel should have room for both account rows and controls.");
+            Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(1050) == 178,
+                "Large desktop accounts panel should use additional vertical space rather than leaving it unused above.");
         }
 
         private static void PersistentDataMigration()
