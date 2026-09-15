@@ -43,6 +43,21 @@ jobs:
         shell: powershell
         run: '& .\scripts\build-release.ps1 -Version $env:VERSION'
 
+      - name: Render and validate mock-data UI
+        shell: powershell
+        run: '& .\scripts\test-ui-layout.ps1'
+
+      - name: Upload UI screenshots and geometry report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-layout-${{ github.sha }}
+          path: |
+            dist/ui-layout/*.png
+            dist/ui-layout/*.txt
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Upload portable build artifact
         uses: actions/upload-artifact@v4
         with:
