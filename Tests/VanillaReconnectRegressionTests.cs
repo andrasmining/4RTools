@@ -25,6 +25,8 @@ namespace Vanilla.Diagnostics.Tests
             Test("Supervisor minimizes only healthy gameplay clients", ManagedMinimizePolicy);
             Test("Launcher PID binding closes the duplicate-launch race", SequentialLaunchBinding);
             Test("Sequential startup advances only after gameplay resume and minimize", HardenedStartupAdvanceGate);
+            Test("Gepard splash is never an interactive input target", GepardSplashIsTransient);
+            Test("Real Vanilla game window outranks generic windows", GameWindowCandidateRanking);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -168,6 +170,30 @@ namespace Vanilla.Diagnostics.Tests
                 "Startup advanced after a failed current-client sequence.");
             Assert(VanillaReconnectSupervisor.SequentialStartupMayAdvance(true, true, true, false),
                 "Startup did not advance after gameplay + one resume + minimize completed successfully.");
+        }
+
+        private static void GepardSplashIsTransient()
+        {
+            Assert(VanillaForegroundInput.IsTransientBootstrapWindow("Gepard_Splash_Class", "GepardSplash"),
+                "Known Gepard splash must never receive automated input.");
+            Assert(!VanillaForegroundInput.IsTransientBootstrapWindow(
+                    "Vanilla MMO | Gepard Shield 3.0 (^-_-^)", "Vanilla MMO | Gepard Shield 3.0 (^-_-^)"),
+                "Actual Vanilla game window was incorrectly classified as a splash.");
+            Assert(VanillaForegroundInput.WindowCandidateScore(true, true, 780, 327, true, false,
+                    "Gepard_Splash_Class", "GepardSplash") == int.MinValue,
+                "Transient splash remained an eligible input candidate.");
+        }
+
+        private static void GameWindowCandidateRanking()
+        {
+            int game = VanillaForegroundInput.WindowCandidateScore(true, true, 1280, 720, true, false,
+                "Vanilla MMO | Gepard Shield 3.0 (^-_-^)", "Vanilla MMO | Gepard Shield 3.0 (^-_-^)");
+            int generic = VanillaForegroundInput.WindowCandidateScore(true, true, 1280, 720, false, false,
+                "SomeWindowClass", "SomeWindow");
+            int preferredLauncher = VanillaForegroundInput.WindowCandidateScore(true, true, 780, 327, true, true,
+                "TThorForm", "Vanilla MMO Launcher");
+            Assert(game > generic, "Actual game window must outrank a generic same-process top-level window.");
+            Assert(preferredLauncher > generic, "Explicit launcher window must remain usable for GAME START input.");
         }
 
         private static void PersistentDataMigration()
