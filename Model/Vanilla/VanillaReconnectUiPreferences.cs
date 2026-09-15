@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -80,18 +81,16 @@ namespace _4RTools.Model.Vanilla
             RemoveButton("COPY FULL DEBUG LOG");
             RemoveButton("Run login now (selected)");
 
-            InstallAccountProxyColumn();
+            InstallAccountColumns();
             InstallMinimalAccountButtons();
             SynchronizeDerivedUiValues();
             HookAutosave();
-            RefreshAccountProxyColumn();
+            RefreshAccountSupplementalColumns();
             ShowSaveToast("Auto-save on", false);
         }
 
-        private void InstallAccountProxyColumn()
+        private void InstallAccountColumns()
         {
-            // Freeze the former shared proxy value into each pre-existing account once. From this
-            // point onward the proxy is an account setting and never follows another selected row.
             foreach (VanillaReconnectAccount account in settings.Accounts)
                 VanillaAccountProxyPreferences.Ensure(account.Id, settings.Proxy);
 
@@ -105,19 +104,76 @@ namespace _4RTools.Model.Vanilla
                     FillWeight = 70
                 });
             }
+            if (!accounts.Columns.Contains("RuntimePid"))
+            {
+                accounts.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    Name = "RuntimePid",
+                    HeaderText = "PID",
+                    ReadOnly = true,
+                    FillWeight = 50
+                });
+            }
+            if (!accounts.Columns.Contains("RuntimeStatus"))
+            {
+                accounts.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    Name = "RuntimeStatus",
+                    HeaderText = "Status",
+                    ReadOnly = true,
+                    FillWeight = 110
+                });
+            }
             help.SetToolTip(accounts,
-                "Managed Vanilla accounts. Double-click or select Edit to change username, password, character slot, proxy and resume hotkey. Passwords use Windows DPAPI and are never written to logs.");
+                "Saved Vanilla account profiles. Double-click or Edit to change credentials, slot, proxy and hotkey. At most two profiles may be enabled at once. Runtime PID/status is shown here; hover Status for full detail.");
         }
 
-        private void RefreshAccountProxyColumn()
+        private void RefreshAccountSupplementalColumns()
         {
-            if (!accounts.Columns.Contains("AccountProxy")) return;
+            if (IsDisposed || accounts.IsDisposed) return;
+            IReadOnlyList<VanillaReconnectStatus> statuses;
+            try { statuses = supervisor.Statuses(); }
+            catch { statuses = new List<VanillaReconnectStatus>(); }
+            var byId = statuses.ToDictionary(s => s.AccountId, StringComparer.OrdinalIgnoreCase);
+
             foreach (DataGridViewRow row in accounts.Rows)
             {
                 string id = row.Tag as string;
                 if (string.IsNullOrWhiteSpace(id)) continue;
-                row.Cells["AccountProxy"].Value = VanillaAccountProxyPreferences.Ensure(id, settings.Proxy).ToString();
+                if (accounts.Columns.Contains("AccountProxy"))
+                    row.Cells["AccountProxy"].Value = VanillaAccountProxyPreferences.Ensure(id, settings.Proxy).ToString();
+
+                VanillaReconnectStatus runtime;
+                if (!byId.TryGetValue(id, out runtime))
+                {
+                    if (accounts.Columns.Contains("RuntimePid")) row.Cells["RuntimePid"].Value = "—";
+                    if (accounts.Columns.Contains("RuntimeStatus"))
+                    {
+                        row.Cells["RuntimeStatus"].Value = "Idle";
+                        row.Cells["RuntimeStatus"].ToolTipText = "No runtime state is currently assigned.";
+                    }
+                    continue;
+                }
+
+                if (accounts.Columns.Contains("RuntimePid"))
+                    row.Cells["RuntimePid"].Value = runtime.ProcessId.HasValue ? runtime.ProcessId.Value.ToString() : "—";
+                if (accounts.Columns.Contains("RuntimeStatus"))
+                {
+                    string compact = runtime.Stage.ToString();
+                    if (runtime.VisualState != VanillaVisualState.Unknown && runtime.Stage != VanillaReconnectStage.Stopped)
+                        compact += " · " + runtime.VisualState;
+                    row.Cells["RuntimeStatus"].Value = compact;
+                    row.Cells["RuntimeStatus"].ToolTipText = string.IsNullOrWhiteSpace(runtime.Detail)
+                        ? compact
+                        : compact + Environment.NewLine + runtime.Detail;
+                }
             }
+        }
+
+        // Existing callers use this name after Add/Edit; keep it as a narrow compatibility wrapper.
+        private void RefreshAccountProxyColumn()
+        {
+            RefreshAccountSupplementalColumns();
         }
 
         private void HookAutosave()
@@ -165,13 +221,15 @@ namespace _4RTools.Model.Vanilla
                 SynchronizeDerivedUiValues();
                 ReadTop();
                 settings.LaunchArguments = string.Empty;
-                settings.MaxClients = Math.Max(1, settings.Accounts.Count(a => a.Enabled));
+                settings.MaxClients = Math.Max(1, Math.Min(2, settings.Accounts.Count(a => a.Enabled)));
                 VanillaReconnectAccount selected = SelectedAccount();
                 if (selected != null) settings.Proxy = VanillaAccountProxyPreferences.Get(selected.Id, settings.Proxy);
                 supervisor.Apply(settings, true);
-                VanillaDebugLog.Write("SETTINGS", "Auto-saved recovery UI. enabledAccounts=" + settings.Accounts.Count(a => a.Enabled)
+                VanillaDebugLog.Write("SETTINGS", "Auto-saved recovery UI. profiles=" + settings.Accounts.Count
+                    + ", enabledAccounts=" + settings.Accounts.Count(a => a.Enabled)
                     + ", launcher='" + settings.LaunchExecutable + "', autoRecover=" + settings.AutoRecover
                     + ", visualWatchdog=" + settings.VisualWatchdog + ".");
+                RefreshAccountSupplementalColumns();
                 ShowSaveToast(pendingSaveMessage, false);
             }
             catch (Exception ex)
@@ -183,16 +241,17 @@ namespace _4RTools.Model.Vanilla
 
         internal void SynchronizeDerivedUiValues()
         {
-            int enabledCount = settings == null || settings.Accounts == null ? 1 : Math.Max(1, settings.Accounts.Count(a => a.Enabled));
+            int rawEnabled = settings == null || settings.Accounts == null ? 0 : settings.Accounts.Count(a => a.Enabled);
+            int managedCount = Math.Max(1, Math.Min(2, rawEnabled));
             autosaveSuppress = true;
             try
             {
                 launchArgs.Text = string.Empty;
-                maxClients.Value = Math.Max(maxClients.Minimum, Math.Min(maxClients.Maximum, enabledCount));
+                maxClients.Value = Math.Max(maxClients.Minimum, Math.Min(maxClients.Maximum, managedCount));
                 if (settings != null)
                 {
                     settings.LaunchArguments = string.Empty;
-                    settings.MaxClients = enabledCount;
+                    settings.MaxClients = managedCount;
                 }
             }
             finally { autosaveSuppress = false; }
