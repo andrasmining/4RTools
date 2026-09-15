@@ -57,6 +57,48 @@ jobs:
           print('Reviewed patch applied; instruction update committed. Feature candidate remains uncommitted until Windows gates pass.')
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Reviewed patch application failed.' }
+      - name: Correct reviewed namespace and application-directory integration
+        shell: powershell
+        run: |
+          @'
+          from pathlib import Path
+          import re
+          def replace_one(text, old, new):
+              assert text.count(old) == 1, old
+              return text.replace(old, new)
+          for name in ['Model/Vanilla/VanillaAutobattleResume.cs', 'Model/Vanilla/VanillaForegroundInput.cs']:
+              path = Path(name)
+              raw = path.read_bytes()
+              text = raw.decode().replace('\r\n', '\n')
+              text = re.sub(r'(?<![\w.])Action\b', 'System.Action', text)
+              if name.endswith('VanillaAutobattleResume.cs'):
+                  text = replace_one(text, 'private int resumeVerificationGeneration;', '''private int resumeVerificationGeneration;
+
+                  // Supervisor baseDirectory stores mutable settings, not shipped application files.
+                  internal static string AutobattleBuildProfileDirectory
+                  {
+                      get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds"); }
+                  }''')
+                  text = replace_one(text, 'Path.Combine(baseDirectory, "VanillaBuilds")', 'AutobattleBuildProfileDirectory')
+              if b'\r\n' in raw: text = text.replace('\n', '\r\n')
+              path.write_bytes(text.encode())
+          path = Path('Tests/VanillaAutobattleResumeTests.cs')
+          text = path.read_text()
+          text = replace_one(text, '            Test("X movement verifies the first attempt",', '''            Test("Resume profiles come from the application directory", BuildProfileDirectory);
+                      Test("X movement verifies the first attempt",''')
+          text = replace_one(text, '        private static readonly BindingFlags PrivateInstance', '''        private static void BuildProfileDirectory()
+                  {
+                      string expected = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds");
+                      Assert(string.Equals(VanillaReconnectSupervisor.AutobattleBuildProfileDirectory, expected,
+                          StringComparison.OrdinalIgnoreCase), "Verified profiles were resolved from the mutable user-data directory.");
+                  }
+
+                  private static readonly BindingFlags PrivateInstance''')
+          path.write_bytes(text.encode())
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Integration corrections failed.' }
+          git -c core.whitespace=cr-at-eol diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate diff failed validation.' }
       - name: Restore dependencies
         shell: powershell
         run: |
@@ -92,7 +134,7 @@ jobs:
           path: |
             dist/*.zip
             dist/*.sha256
-            dist/ui-layout-smoke/**
+            dist/ui-layout/**
             ${{ runner.temp }}/validated-source.zip
             ${{ runner.temp }}/autobattle-reviewed.patch
           retention-days: 7
