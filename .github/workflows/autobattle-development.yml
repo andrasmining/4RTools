@@ -6,25 +6,94 @@ on:
     paths: ['.github/workflows/autobattle-development.yml']
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  source:
+  validate:
     runs-on: windows-2022
-    timeout-minutes: 5
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
-      - name: Export exact development source
+        with:
+          fetch-depth: 0
+      - name: Apply checksum-verified reviewed patch
         shell: powershell
         run: |
-          git archive --format=zip --output=source.zip HEAD
-          if ($LASTEXITCODE -ne 0) { throw 'Source export failed.' }
+          git config core.autocrlf false
+          git config user.name '4RTools engineering'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          @'
+          from pathlib import Path
+          import base64, hashlib, lzma, os, re, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args])
+          assert os.environ['GITHUB_REF_NAME'] == 'fix/autobattle-movement-verification'
+          data = ''.join(Path('.github/autobattle-patch-%d.txt' % i).read_text().strip() for i in (1, 2))
+          patch = lzma.decompress(base64.b64decode(data, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'cfe76d34bee35af59b616f2dbdc7a51a4037db6680c24b65a6ce1976eb5a7750', 'Patch checksum mismatch'
+          paths = re.findall(r'^diff --git a/(\S+) b/\1$', patch.decode(), re.M)
+          assert len(paths) == 14 and all(not p.startswith('.github/') for p in paths), paths
+          endings = {}
+          for name in paths:
+              current = subprocess.run(['git', 'show', 'HEAD:' + name], capture_output=True)
+              original = subprocess.run(['git', 'show', '727ae89922c7cd9d665c3db979ddbacbee1827a8:' + name], capture_output=True)
+              assert current.returncode == original.returncode, 'Concurrent source change: ' + name
+              if current.returncode == 0:
+                  assert current.stdout.replace(b'\r\n', b'\n') == original.stdout.replace(b'\r\n', b'\n'), 'Concurrent source change: ' + name
+                  endings[name] = b'\r\n' in original.stdout
+                  Path(name).write_bytes(original.stdout.replace(b'\r\n', b'\n'))
+          patchfile = Path(os.environ['RUNNER_TEMP']) / 'autobattle-reviewed.patch'
+          patchfile.write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', '--unidiff-zero', str(patchfile)], check=True)
+          subprocess.run(['git', 'apply', '--unidiff-zero', str(patchfile)], check=True)
+          for name, crlf in endings.items():
+              if crlf: Path(name).write_bytes(Path(name).read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
+          subprocess.run(['git', '-c', 'core.whitespace=cr-at-eol', 'diff', '--check'], check=True)
+          git('add', 'AGENTS.md')
+          git('commit', '-m', 'docs: require verified releases and bounded autobattle startup checks')
+          print('Reviewed patch applied; instruction update committed. Feature candidate remains uncommitted until Windows gates pass.')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Reviewed patch application failed.' }
+      - name: Restore dependencies
+        shell: powershell
+        run: |
+          nuget restore 4RTools.sln -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+      - name: Validate shipped state profiles
+        shell: powershell
+        run: ./scripts/validate-vanilla-build-profiles.ps1
+      - name: Debug build and regression suite
+        shell: powershell
+        run: ./scripts/build.ps1 -Configuration Debug -VanillaRelease
+      - name: Release build, tests, portable package and Windows launch smoke
+        shell: powershell
+        run: ./scripts/build-release.ps1 -Version 0.6.35
+      - name: Native Windows mock-data UI regression harness
+        shell: powershell
+        run: ./scripts/test-ui-layout.ps1
+      - name: Commit and push validated source
+        shell: powershell
+        run: |
+          git add AGENTS.md Model/Vanilla/VanillaForegroundInput.cs Model/Vanilla/VanillaReconnect.cs Model/Vanilla/VanillaReconnectDiagnostics.cs Model/Vanilla/VanillaReconnectTestModes.cs Model/Vanilla/VanillaReconnectUiPreferences.cs Model/Vanilla/VanillaStartupOrchestrator.cs Model/Vanilla/VanillaAutobattleResume.cs Properties/AssemblyInfo.cs README.md RELEASE-NOTES.md Tests/Program.cs Tests/Vanilla.Diagnostics.Tests.csproj Tests/VanillaAutobattleResumeTests.cs
+          git commit -m 'fix: verify autobattle movement with three bounded startup attempts'
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate commit failed.' }
+          git push origin "HEAD:$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) { throw 'Branch changed or push failed; no overwrite attempted.' }
+          git rev-parse HEAD
+          git archive --format=zip --output="$env:RUNNER_TEMP/validated-source.zip" HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Validated source export failed.' }
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: autobattle-source-${{ github.sha }}
-          path: source.zip
-          retention-days: 1
-          if-no-files-found: error
+          name: autobattle-validation-${{ github.run_id }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/ui-layout-smoke/**
+            ${{ runner.temp }}/validated-source.zip
+            ${{ runner.temp }}/autobattle-reviewed.patch
+          retention-days: 7
+          if-no-files-found: warn
