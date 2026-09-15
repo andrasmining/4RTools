@@ -19,7 +19,7 @@ namespace _4RTools.Forms
         private TabControl primaryWorkspace;
         private TabPage primaryVanillaPage, primaryLegacyPage;
         private Panel legacySurface;
-        private readonly Label integratedUpdateStatus = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(12, 8, 0, 0) };
+        private readonly Label integratedUpdateStatus = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(10, 9, 4, 0) };
         private bool integratedVanillaReady, updateCheckRunning;
         private VanillaFleetMonitor integratedFleetMonitor;
         private VanillaFleetDashboardPanel integratedFleetDashboard;
@@ -104,12 +104,42 @@ namespace _4RTools.Forms
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 155));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            var header = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(0, 0, 0, 6) };
-            header.Controls.Add(new Label { Text = "Vanilla workspace", Font = new Font(Font.FontFamily, 11F, FontStyle.Bold), AutoSize = true, Margin = new Padding(4, 8, 14, 0) });
-            AddIntegratedButton(header, "OPEN DATA FOLDER", OpenDataFolder);
-            AddIntegratedButton(header, "CHECK FOR UPDATES", () => CheckForUpdates(false));
-            integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText + " - live state is read from Vanilla memory; settings persist in Windows user data.";
-            header.Controls.Add(integratedUpdateStatus);
+            var header = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = Padding.Empty,
+                Padding = new Padding(0, 0, 0, 6)
+            };
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            var headerActions = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                WrapContents = true,
+                Margin = Padding.Empty
+            };
+            headerActions.Controls.Add(new Label { Text = "Vanilla workspace", Font = new Font(Font.FontFamily, 11F, FontStyle.Bold), AutoSize = true, Margin = new Padding(4, 8, 14, 0) });
+            AddIntegratedButton(headerActions, "OPEN DATA FOLDER", OpenDataFolder);
+
+            var headerStatus = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Margin = Padding.Empty
+            };
+            AddIntegratedButton(headerStatus, "CHECK FOR UPDATES", () => CheckForUpdates(false));
+            integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText;
+            headerStatus.Controls.Add(integratedUpdateStatus);
+
+            header.Controls.Add(headerActions, 0, 0);
+            header.Controls.Add(headerStatus, 1, 0);
             root.Controls.Add(header, 0, 0);
 
             integratedFleetDashboard = new VanillaFleetDashboardPanel(integratedFleetMonitor, observeClients: !smokeTest) { Dock = DockStyle.Fill };
@@ -238,7 +268,7 @@ namespace _4RTools.Forms
         {
             if (updateCheckRunning || smokeTest) return;
             updateCheckRunning = true;
-            integratedUpdateStatus.Text = "Checking GitHub Releases...";
+            integratedUpdateStatus.Text = "Checking for updates...";
             try
             {
                 VanillaUpdateInfo update = await VanillaUpdater.CheckAsync();
@@ -248,7 +278,7 @@ namespace _4RTools.Forms
                     if (!startup) MessageBox.Show(this, "4RTools Vanilla " + VanillaUpdater.CurrentVersionText + " is the latest published release.", "Updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
-                integratedUpdateStatus.Text = "Update available: " + update.TagName;
+                integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText + " - update " + update.TagName + " available";
                 DialogResult answer = MessageBox.Show(this,
                     "4RTools Vanilla " + update.Version.ToString(3) + " is available. Download the verified GitHub Release and restart now?\n\nYour profiles and recovery settings are stored outside the application folder and will be preserved.",
                     "4RTools Vanilla update", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
@@ -261,7 +291,7 @@ namespace _4RTools.Forms
             }
             catch (Exception ex)
             {
-                integratedUpdateStatus.Text = startup ? "Update check unavailable - normal use continues." : "Update check failed.";
+                integratedUpdateStatus.Text = startup ? "Version " + VanillaUpdater.CurrentVersionText + " - update check unavailable." : "Version " + VanillaUpdater.CurrentVersionText + " - update check failed.";
                 if (!startup) MessageBox.Show(this, ex.Message, "Update check failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { updateCheckRunning = false; }
