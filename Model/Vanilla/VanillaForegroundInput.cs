@@ -17,9 +17,10 @@ namespace _4RTools.Model.Vanilla
     /// This does not inject into Vanilla/Gepard or modify game memory.
     ///
     /// A Vanilla process briefly owns a Gepard splash top-level window before its real game
-    /// window appears. Never bind input to that transient splash. Re-resolve the best visible
-    /// top-level window belonging to the same PID before every action so the input session
-    /// follows the process across the splash -> game-window transition.
+    /// window appears. Never bind input to that transient splash. Re-resolve the best top-level
+    /// window belonging to the same PID before every action so the input session follows the
+    /// process across splash -> game-window transitions and can restore an already-running
+    /// supervised client that is currently minimized/hidden.
     /// </summary>
     internal sealed class VanillaForegroundInput : IDisposable
     {
@@ -55,6 +56,8 @@ namespace _4RTools.Model.Vanilla
             public string ClassName;
             public string Title;
             public bool Visible;
+            public bool Iconic;
+            public bool KnownGame;
             public int Width;
             public int Height;
             public int Score;
@@ -75,6 +78,7 @@ namespace _4RTools.Model.Vanilla
         [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
         [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool ClientToScreen(IntPtr hwnd, ref POINT point);
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
@@ -111,21 +115,33 @@ namespace _4RTools.Model.Vanilla
                 || caption.IndexOf("GepardSplash", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        internal static int WindowCandidateScore(bool sameProcess, bool visible, int width, int height,
-            bool foreground, bool preferred, string className, string title)
+        internal static bool IsKnownVanillaGameWindow(string className, string title)
         {
-            if (!sameProcess || !visible || width < 200 || height < 120
-                || IsTransientBootstrapWindow(className, title)) return int.MinValue;
+            string cls = className ?? string.Empty;
+            string caption = title ?? string.Empty;
+            if (IsTransientBootstrapWindow(cls, caption)) return false;
+            if (caption.IndexOf("Launcher", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+            return cls.IndexOf("Vanilla MMO", StringComparison.OrdinalIgnoreCase) >= 0
+                || caption.IndexOf("Vanilla MMO", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static int WindowCandidateScore(bool sameProcess, bool visible, int width, int height,
+            bool foreground, bool preferred, string className, string title, bool iconic = false)
+        {
+            if (!sameProcess || IsTransientBootstrapWindow(className, title)) return int.MinValue;
+
+            bool knownGame = IsKnownVanillaGameWindow(className, title);
+            if (!knownGame && (!visible || width < 200 || height < 120)) return int.MinValue;
 
             int score = 100;
             if (preferred) score += 1000;
             if (foreground) score += 500;
-            string cls = className ?? string.Empty;
+            if (knownGame) score += 900;
+            if (visible) score += 100;
+            if (iconic) score += knownGame ? 50 : -50;
             string caption = title ?? string.Empty;
-            if (cls.IndexOf("Vanilla MMO", StringComparison.OrdinalIgnoreCase) >= 0) score += 400;
-            if (caption.IndexOf("Vanilla MMO", StringComparison.OrdinalIgnoreCase) >= 0) score += 400;
             if (caption.IndexOf("Launcher", StringComparison.OrdinalIgnoreCase) >= 0) score += preferred ? 200 : 20;
-            score += Math.Min(200, (width * height) / 10000);
+            if (width > 0 && height > 0) score += Math.Min(200, (width * height) / 10000);
             return score;
         }
 
@@ -370,7 +386,7 @@ namespace _4RTools.Model.Vanilla
 
             IntPtr foreground = GetForegroundWindow();
             var candidates = new List<WindowCandidate>();
-            var transient = new List<string>();
+            var observed = new List<string>();
             EnumWindows(delegate(IntPtr hwnd, IntPtr lParam)
             {
                 uint pid;
@@ -380,6 +396,8 @@ namespace _4RTools.Model.Vanilla
                 string cls = WindowClass(hwnd);
                 string title = WindowTitle(hwnd);
                 bool visible = IsWindowVisible(hwnd);
+                bool iconic = IsIconic(hwnd);
+                bool knownGame = IsKnownVanillaGameWindow(cls, title);
                 RECT rect;
                 int width = 0, height = 0;
                 if (GetClientRect(hwnd, out rect))
@@ -387,14 +405,12 @@ namespace _4RTools.Model.Vanilla
                     width = Math.Max(0, rect.Right - rect.Left);
                     height = Math.Max(0, rect.Bottom - rect.Top);
                 }
-                if (IsTransientBootstrapWindow(cls, title))
-                {
-                    transient.Add(DescribeWindow(hwnd) + " client=" + width + "x" + height);
-                    return true;
-                }
 
                 int score = WindowCandidateScore(true, visible, width, height, hwnd == foreground,
-                    preferredWindow != IntPtr.Zero && hwnd == preferredWindow, cls, title);
+                    preferredWindow != IntPtr.Zero && hwnd == preferredWindow, cls, title, iconic);
+                observed.Add(DescribeWindow(hwnd) + " visible=" + visible + " iconic=" + iconic
+                    + " client=" + width + "x" + height + " knownGame=" + knownGame + " score=" + score);
+
                 if (score != int.MinValue)
                 {
                     candidates.Add(new WindowCandidate
@@ -403,6 +419,8 @@ namespace _4RTools.Model.Vanilla
                         ClassName = cls,
                         Title = title,
                         Visible = visible,
+                        Iconic = iconic,
+                        KnownGame = knownGame,
                         Width = width,
                         Height = height,
                         Score = score
@@ -415,23 +433,57 @@ namespace _4RTools.Model.Vanilla
             if (best == null)
             {
                 window = IntPtr.Zero;
-                evidence = "no usable visible top-level window for PID " + process.Id
-                    + (transient.Count == 0 ? string.Empty : "; transient=[" + string.Join(" | ", transient) + "]");
+                evidence = "no usable top-level window for PID " + process.Id
+                    + (observed.Count == 0 ? "; no top-level windows enumerated" : "; observed=[" + string.Join(" | ", observed) + "]");
                 lastResolutionEvidence = evidence;
                 return false;
             }
 
             window = best.Handle;
+            if (best.KnownGame && (!best.Visible || best.Iconic || best.Width < 200 || best.Height < 120))
+            {
+                VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " restoring existing Vanilla game window before visual/input use: "
+                    + DescribeWindow(window) + "; visible=" + best.Visible + ", iconic=" + best.Iconic
+                    + ", client=" + best.Width + "x" + best.Height + ".");
+                ShowWindow(window, SW_RESTORE);
+                Thread.Sleep(140);
+
+                RECT restoredRect;
+                bool restoredVisible = IsWindowVisible(window);
+                bool restoredIconic = IsIconic(window);
+                int restoredWidth = 0, restoredHeight = 0;
+                if (GetClientRect(window, out restoredRect))
+                {
+                    restoredWidth = Math.Max(0, restoredRect.Right - restoredRect.Left);
+                    restoredHeight = Math.Max(0, restoredRect.Bottom - restoredRect.Top);
+                }
+                if (!restoredVisible || restoredIconic || restoredWidth < 200 || restoredHeight < 120)
+                {
+                    evidence = "known Vanilla game window found but restore is not ready yet: " + DescribeWindow(window)
+                        + "; visible=" + restoredVisible + ", iconic=" + restoredIconic
+                        + ", client=" + restoredWidth + "x" + restoredHeight
+                        + "; observed=[" + string.Join(" | ", observed) + "]";
+                    lastResolutionEvidence = evidence;
+                    return false;
+                }
+
+                best.Visible = restoredVisible;
+                best.Iconic = restoredIconic;
+                best.Width = restoredWidth;
+                best.Height = restoredHeight;
+            }
+
             evidence = "selected=" + DescribeWindow(best.Handle) + ", client=" + best.Width + "x" + best.Height
+                + ", visible=" + best.Visible + ", iconic=" + best.Iconic + ", knownGame=" + best.KnownGame
                 + ", score=" + best.Score + ", candidates=" + candidates.Count
-                + (transient.Count == 0 ? string.Empty : ", ignoredTransient=" + transient.Count);
+                + "; observed=[" + string.Join(" | ", observed) + "]";
             lastResolutionEvidence = evidence;
             return true;
         }
 
         private static bool IsUsableWindowForProcess(IntPtr hwnd, int processId)
         {
-            if (hwnd == IntPtr.Zero || !IsWindow(hwnd) || !IsWindowVisible(hwnd)) return false;
+            if (hwnd == IntPtr.Zero || !IsWindow(hwnd) || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return false;
             uint pid;
             GetWindowThreadProcessId(hwnd, out pid);
             if (pid != (uint)processId) return false;
