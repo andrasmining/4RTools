@@ -11,13 +11,14 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-// Runs the compiled production UI in its existing inert smoke mode. Reflection supplies
-// fictional account/fleet observations; no gameplay process, credentials or input is used.
+// Loads the production assembly in its inert smoke mode. Only fictional account/fleet
+// observations are supplied. No game process, credentials, email or input is used.
 internal static class UiLayoutHarness
 {
     private const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
     private static Assembly app;
     private static string output;
+    private static int caseNumber;
     private static readonly List<string> failures = new List<string>();
     private static readonly StringBuilder report = new StringBuilder();
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
@@ -38,6 +39,7 @@ internal static class UiLayoutHarness
         try
         {
             app = Assembly.LoadFrom(Path.GetFullPath(args[0]));
+            report.AppendLine("Assembly: " + app.GetName().Version + "; platform=" + Environment.OSVersion + "; pointerBytes=" + IntPtr.Size);
             CallStatic("_4RTools.Model.Vanilla.VanillaAppData", "InitializeAndMigrateLegacy", Path.GetDirectoryName(Path.GetFullPath(args[0])));
             CallStatic("_4RTools.Model.ProfileSingleton", "Create", "Default");
             CallStatic("_4RTools.Program", "LoadStockClients");
@@ -52,19 +54,29 @@ internal static class UiLayoutHarness
                 object recovery = Field(main, "integratedReconnectView");
                 Check(recovery != null, "Production Recovery form was not embedded by Container startup.");
                 SeedFleet(main);
-                RunCase(main, recovery, 1920, 1020, 2, 1F);
-                RunCase(main, recovery, 1920, 1020, 4, 1F);
-                RunCase(main, recovery, 1600, 900, 12, 1F);
-                RunCase(main, recovery, 1366, 768, 4, 1F);
-                RunCase(main, recovery, 1050, 700, 4, 1F);
-                RunCase(main, recovery, 1920, 1020, 40, 1F);
-                RunCase(main, recovery, 1920, 1020, 4, 1F);
-                RunCase(main, recovery, 1920, 1020, 4, 1.25F);
-                RunCase(main, recovery, 1366, 768, 4, 1.50F);
+                RunCase(main, recovery, 1920, 1020, 2, 1F, false);
+                RunCase(main, recovery, 1920, 1020, 4, 1F, false);
+                // Realistic Full-HD work area, allowing space for borders/title/taskbar.
+                RunCase(main, recovery, 1904, 981, 12, 1F, false);
+                RunCase(main, recovery, 1980, 1020, 4, 1F, false);
+                RunCase(main, recovery, 1600, 900, 12, 1F, false);
+                RunCase(main, recovery, 1366, 768, 4, 1F, false);
+                RunCase(main, recovery, 1050, 700, 4, 1F, false);
+                RunCase(main, recovery, 1920, 1020, 40, 1F, false);
+                RunCase(main, recovery, 1366, 768, 40, 1F, false);
+                RunCase(main, recovery, 1920, 1020, 4, 1.25F, false);
+                RunCase(main, recovery, 1920, 1020, 12, 1.50F, false);
+                RunCase(main, recovery, 1366, 768, 4, 1.50F, false);
+                RunCase(main, recovery, 1050, 700, 4, 1F, true);
+                RunCase(main, recovery, 1920, 1020, 4, 1F, true);
+                // Return from enlarged text/small windows to the initial size on the same instance.
+                RunCase(main, recovery, 1920, 1020, 4, 1F, false);
                 Call(main, "AssertSmokeBackgroundServicesInactive");
+                report.AppendLine("Background services: inactive; fleet polls=0; no game input or email enabled.");
             }
         }
         catch (Exception ex) { failures.Add("Harness exception: " + ex); }
+        report.AppendLine("Cases: " + caseNumber);
         report.AppendLine("Failures: " + failures.Count);
         foreach (string failure in failures) report.AppendLine("FAIL " + failure);
         File.WriteAllText(Path.Combine(output, "layout-report.txt"), report.ToString());
@@ -74,10 +86,8 @@ internal static class UiLayoutHarness
 
     private static void ResizeNativeViewport(Form main, int width, int height)
     {
-        // The hosted CI desktop can be 1024x768. Framework Form.SetBoundsCore silently
-        // caps the outer window to MaxWindowTrackSize, while its cached ClientSize can still
-        // report the requested Full-HD size. Size this test window natively, then verify both
-        // native rectangles and managed bounds. DrawToBitmap does not need a physical monitor.
+        // Standard hosted desktops may be 1024x768. Size only this test application's
+        // top-level viewport natively; all child layout is still the production code.
         RECT client, outer;
         if (!GetClientRect(main.Handle, out client) || !GetWindowRect(main.Handle, out outer))
             throw new InvalidOperationException("Could not measure the native test window.");
@@ -91,30 +101,48 @@ internal static class UiLayoutHarness
             throw new InvalidOperationException("Native viewport was not resized to " + width + "x" + height + ".");
     }
 
-    private static void RunCase(Form main, object recovery, int width, int height, int rows, float textScale)
+    private static void RunCase(Form main, object recovery, int width, int height, int rows, float textScale, bool notifications)
     {
-        string name = width + "x" + height + "-" + rows + "accounts-text" + (int)(textScale * 100);
+        caseNumber++;
+        string name = caseNumber.ToString("00") + "-" + width + "x" + height + "-" + rows + "accounts-text" + (int)(textScale * 100)
+            + (notifications ? "-notifications" : "");
         try
         {
             ResizeNativeViewport(main, width, height);
-            ((Control)recovery).Font = new Font("Segoe UI", 9F * textScale);
-            ((Label)Field(recovery, "testState")).Text = string.Empty;
+            Control view = (Control)recovery;
+            view.Font = new Font("Segoe UI", 9F * textScale);
             SeedAccounts(recovery, rows);
+            ((Label)Field(recovery, "testState")).Text = notifications ? "Save failed: sample error; details in debug log" : string.Empty;
+            ((Label)Field(recovery, "runState")).Text = notifications ? "STARTING" : "STOPPED";
+            ((Label)Field(main, "integratedUpdateStatus")).Text = notifications
+                ? "Version 0.6.33 - update check unavailable. Sample long status." : "Version 0.6.33 - up to date.";
             Pump();
             Call(main, "AssertSmokeBackgroundServicesInactive");
             DataGridView grid = (DataGridView)Field(recovery, "accounts");
             Control launcher = (Control)Field(recovery, "launchPath");
-            Control box = grid;
+            Control box = grid.Parent;
             while (box != null && !(box is GroupBox)) box = box.Parent;
             Control log = (Control)Field(recovery, "log");
+            Control left = (Control)Field(recovery, "responsiveLeft");
+            Control logBox = (Control)Field(recovery, "responsiveLogBox");
             report.AppendLine("CASE " + name + " actualClient=" + main.ClientSize + " outer=" + main.Size
+                + " recovery=" + view.Bounds + " parentClient=" + view.Parent.ClientSize
                 + " grid=" + BoundsIn(grid, main) + " launcher=" + BoundsIn(launcher, main) + " log=" + BoundsIn(log, main));
             Check(main.ClientSize == new Size(width, height), name + ": managed viewport differs from native size.");
-            Check(main.Width >= width && main.Height >= height, name + ": screenshot would be smaller than the requested viewport.");
+            Check(main.Width >= width && main.Height >= height, name + ": screenshot is smaller than requested viewport.");
+            Check(Math.Abs(view.Width - (view.Parent.ClientSize.Width - view.Parent.Padding.Horizontal)) <= 2,
+                name + ": embedded recovery form is not filling the parent width.");
             Check(grid.Rows.Count == rows, name + ": not all mock account profiles are rendered.");
             Check(FullyVisible(grid, main), name + ": account grid is clipped by an ancestor viewport.");
             Check(FullyVisible(log, main), name + ": log is clipped by an ancestor viewport.");
             Check(grid.Columns.Contains("RuntimePid") && grid.Columns.Contains("RuntimeStatus"), name + ": runtime columns missing.");
+            if (width >= 1600 && textScale <= 1.25F)
+            {
+                Check(BoundsIn(logBox, main).Left >= BoundsIn(left, main).Right,
+                    name + ": Full-HD recovery/log panes are stacked instead of side-by-side.");
+                double ratio = left.Width / (double)(left.Width + logBox.Width);
+                Check(ratio >= 0.64 && ratio <= 0.69, name + ": accounts/log split is not approximately 2:1: " + ratio);
+            }
             int totalWidth = 0;
             foreach (DataGridViewColumn column in grid.Columns)
             {
@@ -125,13 +153,12 @@ internal static class UiLayoutHarness
                 Check(cell.Width == column.Width && cell.Left >= 0 && cell.Right <= grid.ClientSize.Width,
                     name + ": column " + column.Name + " is off-screen or clipped.");
             }
-            Check(totalWidth <= grid.ClientSize.Width, name + ": column widths exceed the grid viewport.");
+            Check(totalWidth <= grid.ClientSize.Width, name + ": column widths exceed grid viewport.");
             Check(grid.Height >= grid.ColumnHeadersHeight + grid.RowTemplate.Height * 5,
                 name + ": fewer than four account rows plus one spare row can fit.");
             if (rows <= 4) Check(grid.DisplayedRowCount(false) == rows, name + ": an account row is not fully visible.");
 
-            Control strip = launcher.Parent;
-            while (strip.Parent != null && !object.ReferenceEquals(strip.Parent, box.Parent)) strip = strip.Parent;
+            Control strip = (Control)Field(recovery, "responsiveHeader");
             int lastBottom = Descendants(strip).Where(c => c.Visible && (c is Button || c is CheckBox || c is TextBox || c is Label))
                 .Select(c => BoundsIn(c, main).Bottom).DefaultIfEmpty(BoundsIn(launcher, main).Bottom).Max();
             int gap = BoundsIn(box, main).Top - lastBottom;
@@ -139,6 +166,11 @@ internal static class UiLayoutHarness
             Check(gap >= 0 && gap <= 16, name + ": dead space below launcher/actions: " + gap + "px.");
             foreach (Control control in Descendants(strip).Where(c => c.Visible && (c is Button || c is CheckBox || c is TextBox)))
                 Check(FullyVisible(control, main), name + ": action clipped: " + control.Text);
+            foreach (string caption in new[] { "Add", "Edit", "Remove" })
+            {
+                Button button = Descendants(view).OfType<Button>().FirstOrDefault(b => b.Visible && b.Text == caption);
+                Check(button != null && FullyVisible(button, main), name + ": account action clipped/missing: " + caption);
+            }
             foreach (string field in new[] { "globalDebugEnabled", "globalCopyDebug", "integratedUpdateStatus" })
             {
                 Control control = (Control)Field(main, field);
@@ -150,14 +182,20 @@ internal static class UiLayoutHarness
             {
                 grid.FirstDisplayedScrollingRowIndex = rows - 1;
                 Pump();
-                Check(grid.GetRowDisplayRectangle(rows - 1, true).Height > 0, name + ": final profile cannot be scrolled into view.");
+                Check(grid.GetRowDisplayRectangle(rows - 1, true).Height >= grid.Rows[rows - 1].Height,
+                    name + ": final account cannot be scrolled fully into view.");
                 grid.FirstDisplayedScrollingRowIndex = 0;
             }
-            Pump();
+            grid.CurrentCell = grid.Rows[Math.Min(1, rows - 1)].Cells[1];
+            object selected = grid.CurrentRow.Tag;
+            TabControl tabs = (TabControl)Field(main, "primaryWorkspace");
+            tabs.SelectedIndex = 1; Pump(); tabs.SelectedIndex = 0; Pump();
+            Check(object.Equals(grid.CurrentRow.Tag, selected), name + ": account selection lost when returning to Vanilla.");
             SaveScreenshot(main, Path.Combine(output, name + ".png"));
             Rectangle stable = BoundsIn(grid, main);
             Pump();
             Check(stable == BoundsIn(grid, main), name + ": layout moves after settling.");
+            Call(main, "AssertSmokeBackgroundServicesInactive");
         }
         catch (Exception ex)
         {
