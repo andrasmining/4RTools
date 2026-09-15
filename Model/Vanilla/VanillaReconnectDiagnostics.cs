@@ -104,7 +104,8 @@ namespace _4RTools.Model.Vanilla
             {
                 Runtime runtime;
                 if (!runtimes.TryGetValue(accountId, out runtime)) throw new ArgumentException("Unknown account.");
-                if (runtime.ScriptRunning) throw new InvalidOperationException("Another action is already running for this account.");
+                if (running || hardenedStartupRunning || OtherRecoveryOwner(runtime) != null || runtime.ScriptRunning)
+                    throw new InvalidOperationException("Stop the active startup/recovery action before running a diagnostic.");
                 if (step != VanillaReconnectTestStep.LauncherGameStart)
                 {
                     if (!runtime.ProcessId.HasValue) throw new InvalidOperationException("No Vanilla client is assigned to this selected account for the step test.");
@@ -183,7 +184,30 @@ namespace _4RTools.Model.Vanilla
                                 input.ClickNormalized(config.Anchors.GameStartX, config.Anchors.GameStartY);
                                 break;
                             case VanillaReconnectTestStep.ResumeHotkey:
-                                input.Chord(account.ResumeCtrl, account.ResumeAlt, account.ResumeShift, (Keys)account.ResumeKey);
+                                int resumeGeneration = Volatile.Read(ref resumeVerificationGeneration);
+                                Func<bool> resumeCancelled = () =>
+                                {
+                                    lock (gate)
+                                    {
+                                        Runtime current;
+                                        return DiagnosticCancelled(generation) || resumeGeneration != Volatile.Read(ref resumeVerificationGeneration)
+                                            || !runtimes.TryGetValue(accountId, out current) || current.ProcessId != discoveredPid.Value
+                                            || !current.Account.Enabled || !current.ScriptRunning;
+                                    }
+                                };
+                                VerifyAutobattleResumeAsync(account, discoveredPid.Value,
+                                    resumeCancelled, detail =>
+                                    {
+                                        lock (gate)
+                                        {
+                                            Runtime current;
+                                            if (DiagnosticCancelled(generation) || !runtimes.TryGetValue(accountId, out current)
+                                                || current.ProcessId != discoveredPid.Value) return;
+                                            SetStage(current, VanillaReconnectStage.VerifyingAutobattle, "Diagnostic: " + detail);
+                                        }
+                                        Log("TEST " + account.Label + ": " + detail);
+                                        RaiseUpdated();
+                                    }).GetAwaiter().GetResult();
                                 break;
                         }
                     }

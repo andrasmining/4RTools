@@ -28,6 +28,23 @@ namespace _4RTools.Model.Vanilla
         private readonly IntPtr preferredWindow;
         private IntPtr window;
         private string lastResolutionEvidence;
+        internal Func<bool> CancellationRequested { get; set; }
+        internal IntPtr Window
+        {
+            get
+            {
+                ThrowIfCancelled();
+                string evidence;
+                if (!TryRefreshWindow(out evidence)) throw new InvalidOperationException("Vanilla window unavailable: " + evidence);
+                return window;
+            }
+        }
+
+        private void ThrowIfCancelled()
+        {
+            if (CancellationRequested != null && CancellationRequested())
+                throw new OperationCanceledException("Vanilla input cancelled; no further keys sent.");
+        }
 
         [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
@@ -147,6 +164,7 @@ namespace _4RTools.Model.Vanilla
 
         public void Activate()
         {
+            ThrowIfCancelled();
             if (process.HasExited) throw new InvalidOperationException("Vanilla client exited.");
 
             IntPtr originalForeground = GetForegroundWindow();
@@ -158,6 +176,7 @@ namespace _4RTools.Model.Vanilla
 
             while (watch.ElapsedMilliseconds < ActivationTimeoutMs)
             {
+                ThrowIfCancelled();
                 if (process.HasExited) throw new InvalidOperationException("Vanilla client exited.");
 
                 string evidence;
@@ -331,22 +350,50 @@ namespace _4RTools.Model.Vanilla
         public void Chord(bool ctrl, bool alt, bool shift, Keys key)
         {
             Activate();
-            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CHORD " + ChordText(ctrl, alt, shift, key)
-                + " begin; target=" + DescribeWindow(window) + ", foreground=" + DescribeWindow(GetForegroundWindow()) + ".");
-            if (ctrl) SendKey(Keys.ControlKey, false);
-            if (alt) SendKey(Keys.Menu, false);
-            if (shift) SendKey(Keys.ShiftKey, false);
-            Thread.Sleep(80);
-            SendKey(key, false);
-            Thread.Sleep(85);
-            SendKey(key, true);
-            Thread.Sleep(60);
-            if (shift) SendKey(Keys.ShiftKey, true);
-            if (alt) SendKey(Keys.Menu, true);
-            if (ctrl) SendKey(Keys.ControlKey, true);
-            Thread.Sleep(90);
-            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CHORD " + ChordText(ctrl, alt, shift, key) + " complete; foreground="
-                + DescribeWindow(GetForegroundWindow()) + ".");
+            ChordInVerifiedForeground(ctrl, alt, shift, key);
+        }
+
+        // Resume takes its fresh baseline after Activate; do not refocus/sleep again before the chord.
+        internal void ChordInVerifiedForeground(bool ctrl, bool alt, bool shift, Keys key)
+        {
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CHORD " + ChordText(ctrl, alt, shift, key) + " begin.");
+            DispatchGuardedChord(ctrl, alt, shift, key, () =>
+            {
+                ThrowIfCancelled();
+                if (process.HasExited || window == IntPtr.Zero || GetForegroundWindow() != window
+                    || !IsUsableWindowForProcess(window, process.Id))
+                    throw new InvalidOperationException("Vanilla lost the verified foreground; hotkey stopped.");
+            }, SendKey, Thread.Sleep);
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CHORD " + ChordText(ctrl, alt, shift, key) + " complete.");
+        }
+
+        internal static void DispatchGuardedChord(bool ctrl, bool alt, bool shift, Keys key,
+            System.Action ensureAllowed, System.Action<Keys, bool> send, System.Action<int> pause)
+        {
+            var held = new Stack<Keys>();
+            Exception failure = null;
+            System.Action<Keys> down = value => { ensureAllowed(); send(value, false); held.Push(value); };
+            try
+            {
+                if (ctrl) down(Keys.ControlKey);
+                if (alt) down(Keys.Menu);
+                if (shift) down(Keys.ShiftKey);
+                pause(80);
+                down(key);
+                pause(85);
+            }
+            catch (Exception ex) { failure = ex; throw; }
+            finally
+            {
+                Exception releaseFailure = null;
+                while (held.Count > 0)
+                {
+                    try { send(held.Pop(), true); }
+                    catch (Exception ex) { releaseFailure = releaseFailure ?? ex; }
+                }
+                if (failure == null && releaseFailure != null) throw releaseFailure;
+            }
+            pause(150);
         }
 
         public void SelectAll() { Chord(true, false, false, Keys.A); }

@@ -150,6 +150,55 @@ actually complete. Do not stop merely because one desired field cannot be
 discovered: investigate other permitted reliable signals that can satisfy the
 same high-level requirement, without circumventing a blocked read or action.
 
+## Mandatory end-to-end completion and release
+
+For implementation tasks, the default deliverable is a usable, integrated,
+published release unless the user explicitly requests source-only work. A plan,
+local edit, commit, push, pull request, queued workflow, green compile, or draft
+release is NOT completion. Own implementation, tests, integration, versioning,
+packaging, publication, and verification in the current session. Inspect failed
+jobs, fix their causes, rerun the existing gates, and verify the final non-draft
+release, tag/source SHA, downloadable assets, checksums, and update discovery.
+Do not end with running CI, instructions for the user to build/release, or a
+promise of future/background work. Respect branch protection and permissions.
+For a genuine tool/permission/platform blocker, preserve completed work and
+report exactly what failed, what was completed, and what remains unverified.
+Never fabricate test, deployment, release, or in-game success.
+
+When asked to update project instructions first, provide the copyable block
+within the requested character limit before implementation, then persist the
+enduring policy here without deleting unrelated valid rules. This automation
+repository is `andrasmining/4RTools`; the archived `andrasmining/cinder-index`
+market dashboard is a different project and must not receive autobattle changes.
+
+## Required autobattle resume verification
+
+After stable gameplay, obtain a fresh verified X/Y baseline for the intended
+client immediately before its configured resume hotkey. Observe coordinates
+throughout the following 10 seconds: a change in X OR Y verifies movement.
+Do not compare only the beginning/end positions or require both axes to change.
+If no movement is observed, refocus the intended client, refresh its baseline,
+and retry. Recheck movement after refocusing and before another toggle.
+Allow THREE total hotkey attempts (initial send plus at most two retries), each
+with its own ten-second observation window. Stop immediately upon movement.
+After three unsuccessful windows, display/log failure and latch it for that
+attempt; a subsequent gameplay poll must not reset the retry budget. Sending a
+key is not verified resume, and movement is not proof of combat.
+
+Share one cancellable, nonblocking verifier across startup, recovery, and the
+resume diagnostic. Keep per-client identity and the serialized input lease
+through verification and minimization. Do not toggle adopted healthy clients.
+Display compact attempt/retry progress in the account row and details in logs.
+Use the existing read-only fingerprinted coordinate provider, not guessed
+offsets, screenshots of coordinates, or stale values. Missing/unverified/stale
+state is not zero or stillness. STOP, configuration/identity changes, map
+transitions, disconnects, failed reads, and lost focus must prevent late keys.
+Use monotonic time and ensure an old worker cannot complete a newer operation.
+Cover first/second/third success, three-window failure, single-axis/intermediate
+movement, deadline/refocus races, cancellation, stale/missing state, identity
+changes, lease isolation and input cleanup with deterministic regression tests.
+Keep existing Windows build, portable launch and mock-data UI gates intact.
+
 ## Required validation
 
 Test every meaningful change as far as available tooling permits. Appropriate
@@ -309,14 +358,13 @@ Vanilla supports up to two managed clients on this PC, but automated recovery UI
 input must be globally serialized. Never run launcher/proxy/login/server/character
 selection or resume-hotkey recovery workflows for two clients in parallel. One
 client owns the recovery lease from launcher start through confirmed gameplay and
-the one-shot resume hotkey; other clients remain queued until that client is
+bounded autobattle movement verification; other clients remain queued until that client is
 Online or its attempt fails/backoffs. Existing healthy clients must not be
 disturbed merely because another client is recovering.
 
 While the reconnect supervisor is running, healthy managed Vanilla clients are
 minimized by default and left running. Initial startup and recovery use the same
-serialized policy: finish one client through confirmed gameplay and its one-shot
-resume hotkey, minimize it, then allow the next queued client to start. If one
+serialized policy: finish one client through confirmed gameplay and verified autobattle movement, minimize it, then allow the next queued client to start. If one
 client disconnects later, keep every other healthy client minimized and untouched,
 recover only the affected client, and minimize that client again after successful
 return to gameplay. If a healthy supervised client is manually restored/on-screen,
@@ -324,7 +372,7 @@ the supervisor should minimize it again on its next observation cycle.
 
 Cold startup is stricter than merely holding a nominal recovery flag. Do not
 start the periodic multi-client supervisor until the startup orchestrator has
-finished the current enabled client through gameplay, one resume-hotkey send, and
+finished the current enabled client through gameplay, verified autobattle movement, and
 confirmed minimization. Only then may the next missing enabled account launch.
 If focus or visual recognition fails during cold startup, leave the current client
 running, stop/fail closed, and do not close it or advance to a later account.

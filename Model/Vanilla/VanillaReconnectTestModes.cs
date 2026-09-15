@@ -32,7 +32,8 @@ namespace _4RTools.Model.Vanilla
 
         internal static bool ShouldKeepClientMinimized(VanillaReconnectStage stage, VanillaVisualState visual)
         {
-            return stage == VanillaReconnectStage.Online || visual == VanillaVisualState.Gameplay;
+            return stage == VanillaReconnectStage.Online
+                || (stage == VanillaReconnectStage.WaitingForGameplay && visual == VanillaVisualState.Gameplay);
         }
 
         internal void RecordSupervisorLog(string text)

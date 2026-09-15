@@ -229,8 +229,9 @@ namespace _4RTools.Model.Vanilla
                     row.Cells["RuntimePid"].Value = runtime.ProcessId.HasValue ? runtime.ProcessId.Value.ToString() : "—";
                 if (accounts.Columns.Contains("RuntimeStatus"))
                 {
-                    string compact = runtime.Stage.ToString();
-                    if (runtime.VisualState != VanillaVisualState.Unknown && runtime.Stage != VanillaReconnectStage.Stopped)
+                    string compact = VanillaAutobattleStatus.Compact(runtime.Stage, runtime.Detail);
+                    if (runtime.VisualState != VanillaVisualState.Unknown && runtime.Stage != VanillaReconnectStage.Stopped
+                    && runtime.Stage != VanillaReconnectStage.VerifyingAutobattle)
                         compact += " · " + runtime.VisualState;
                     row.Cells["RuntimeStatus"].Value = compact;
                     row.Cells["RuntimeStatus"].ToolTipText = string.IsNullOrWhiteSpace(runtime.Detail)

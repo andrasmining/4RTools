@@ -22,6 +22,23 @@ remain marked **Unverified**, and dependent actions remain disabled. See
 [release notes](RELEASE-NOTES.md) for the exact tested build, verified fields,
 and actual live behavior; displaying a feature is not proof of its game effect.
 
+## Autobattle startup verification (0.6.35)
+
+New startup and recovery attempts verify movement after the configured resume
+hotkey. The companion samples the character's verified X/Y throughout a
+10-second window. Movement on either axis succeeds immediately. With no movement,
+it refocuses and checks again before retrying; there are three hotkey attempts
+in total, not three additional retries. Three unsuccessful windows produce a
+latched failure instead of repeated toggles on every supervisor poll.
+
+The existing account row shows verification/retry progress. STOP, stale or
+unavailable state, a changed process/session/map, or lost foreground focus stop
+further input. Already-running adopted clients are not toggled. Movement confirms
+only this startup check, not combat; fighting while stationary can fail it.
+The implementation uses the existing read-only, fingerprint-verified build
+profile and ordinary keyboard input. Live Vanilla/RDP verification remains
+separate from the automated Windows tests documented in the release notes.
+
 ## Portable application
 
 The release workflow produces

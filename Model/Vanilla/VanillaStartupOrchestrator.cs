@@ -11,7 +11,7 @@ namespace _4RTools.Model.Vanilla
     /// <summary>
     /// Strict cold-start orchestration for START SUPERVISOR.
     /// One client must complete launcher -> proxy -> login -> server -> character -> gameplay
-    /// -> one resume hotkey -> minimize before the next configured client may start.
+    /// -> verified autobattle movement -> minimize before the next configured client may start.
     /// </summary>
     public sealed partial class VanillaReconnectSupervisor
     {
@@ -30,9 +30,9 @@ namespace _4RTools.Model.Vanilla
             get { lock (gate) return hardenedStartupRunning; }
         }
 
-        internal static bool SequentialStartupMayAdvance(bool gameplayConfirmed, bool resumeSent, bool minimized, bool failed)
+        internal static bool SequentialStartupMayAdvance(bool gameplayConfirmed, bool movementVerified, bool minimized, bool failed)
         {
-            return gameplayConfirmed && resumeSent && minimized && !failed;
+            return gameplayConfirmed && movementVerified && minimized && !failed;
         }
 
         public void StartHardenedSequentialStartup(System.Action<bool, string> completed)
@@ -56,16 +56,17 @@ namespace _4RTools.Model.Vanilla
                 generation = Interlocked.Increment(ref hardenedStartupGeneration);
             }
 
-            Log("Sequential startup BEGIN: " + configured.Length + " enabled client(s). Client 2 is hard-blocked until client 1 has gameplay confirmed, resume sent once, and minimize confirmed.");
+            Log("Sequential startup BEGIN: " + configured.Length + " enabled client(s). Client 2 is hard-blocked until client 1 has gameplay confirmed, autobattle movement verified, and minimize confirmed.");
             VanillaDebugLog.Write("STARTUP", "BEGIN strict sequential startup for " + configured.Length + " client(s).");
             ThreadPool.QueueUserWorkItem(_ => HardenedStartupWorker(generation, configured, config, completed));
         }
 
         public void CancelHardenedSequentialStartup()
         {
-            Interlocked.Increment(ref hardenedStartupGeneration);
             lock (gate)
             {
+                Interlocked.Increment(ref hardenedStartupGeneration);
+                Interlocked.Increment(ref resumeVerificationGeneration);
                 hardenedStartupRunning = false;
                 foreach (Runtime runtime in runtimes.Values)
                 {
@@ -118,6 +119,7 @@ namespace _4RTools.Model.Vanilla
 
                         lock (gate)
                         {
+                            if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
                             runtime.ResumeSent = true; // never toggle an adopted already-running client.
                             runtime.HasBeenOnline = true;
                             runtime.ScriptRunning = false;
@@ -132,32 +134,35 @@ namespace _4RTools.Model.Vanilla
                     RunOneColdStart(generation, account, config, index + 1, accounts.Length);
                 }
 
-                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
-                lock (gate) hardenedStartupRunning = false;
-                Start();
+                lock (gate)
+                {
+                    if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                    hardenedStartupRunning = false;
+                    Start();
+                }
                 success = true;
-                result = "Sequential startup complete. Every enabled client reached gameplay, received its one-shot resume hotkey, and was minimized before the next client started. Continuous supervisor is ON.";
+                result = "Sequential startup complete. Every enabled client reached gameplay, completed autobattle movement verification (or was adopted without toggling), and was minimized before the next client started. Continuous supervisor is ON.";
                 Log(result);
                 VanillaDebugLog.Write("STARTUP", result);
             }
             catch (OperationCanceledException ex)
             {
                 result = ex.Message;
-                lock (gate) hardenedStartupRunning = false;
+                lock (gate) { if (!StartupCancelled(generation)) hardenedStartupRunning = false; }
                 Log("Sequential startup stopped: " + result);
                 VanillaDebugLog.Write("STARTUP", "STOPPED: " + result);
             }
             catch (Exception ex)
             {
                 result = ex.Message;
-                lock (gate) hardenedStartupRunning = false;
+                lock (gate) { if (!StartupCancelled(generation)) hardenedStartupRunning = false; }
                 Log("Sequential startup FAILED. Later queued clients were NOT started: " + result);
                 VanillaDebugLog.Write("STARTUP", "FAILED: " + ex);
             }
             finally
             {
                 RaiseUpdated();
-                if (completed != null)
+                if (completed != null && !StartupCancelled(generation))
                 {
                     try { completed(success, result ?? (success ? "Sequential startup completed." : "Sequential startup stopped.")); }
                     catch { }
@@ -173,12 +178,18 @@ namespace _4RTools.Model.Vanilla
                 throw new InvalidOperationException(account.Label + ": username/password is missing.");
 
             Runtime runtime;
+            int resumeGeneration;
             lock (gate)
             {
+                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                resumeGeneration = Interlocked.Increment(ref resumeVerificationGeneration);
                 runtime = runtimes[account.Id];
+                runtime.ResumeOperationGeneration = resumeGeneration;
                 runtime.ScriptRunning = true;
                 runtime.RecoveryOwned = true;
                 runtime.ResumeSent = false;
+                runtime.ResumeVerificationFailed = false;
+                runtime.ResumeFailureDetail = null;
                 runtime.HasBeenOnline = false;
                 runtime.NextRecoveryAt = null;
                 SetStage(runtime, VanillaReconnectStage.Launching,
@@ -241,40 +252,50 @@ namespace _4RTools.Model.Vanilla
                     VanillaDebugLog.Write("STARTUP", account.Label + ": character slot selected and GAME START clicked.");
 
                     WaitForGameplayStable(input, pid.Value, generation, 60000, account.Label + " post-character");
-                    BriefPause(generation, 260);
-                    input.Activate();
-                    BriefPause(generation, 100);
-                    input.Chord(account.ResumeCtrl, account.ResumeAlt, account.ResumeShift, (Keys)account.ResumeKey);
-                    Log(account.Label + ": gameplay confirmed; resume hotkey " + account.HotkeyText + " sent once with focus verified.");
-                    VanillaDebugLog.Write("INPUT", account.Label + ": resume hotkey " + account.HotkeyText + " sent once after stable gameplay.");
+                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: Preparing autobattle verification 1/3");
+                    VerifyAutobattleResumeAsync(account, pid.Value,
+                        () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
+                        detail => ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: " + detail))
+                        .GetAwaiter().GetResult();
                 }
 
+                if (StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration))
+                    throw new OperationCanceledException("Sequential startup cancelled.");
                 bool minimized = KeepAssignedClientMinimized(account.Id);
                 if (!SequentialStartupMayAdvance(true, true, minimized, false))
                     throw new InvalidOperationException(account.Label + ": could not confirm minimization; next client was NOT started.");
 
                 lock (gate)
                 {
+                    if (StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration))
+                        throw new OperationCanceledException("Sequential startup cancelled.");
                     runtime.ResumeSent = true;
                     runtime.HasBeenOnline = true;
                     runtime.ScriptRunning = false;
                     runtime.RecoveryOwned = false;
                     runtime.RecoveryFailures = 0;
                     runtime.NextRecoveryAt = null;
-                    SetStage(runtime, VanillaReconnectStage.Online, "Sequential startup complete: gameplay + resume + minimized");
+                    SetStage(runtime, VanillaReconnectStage.Online, "Sequential startup complete: gameplay + movement verified + minimized");
                 }
                 RaiseUpdated();
                 Log(account.Label + ": COMPLETE + MINIMIZED. Only now may the next account start.");
-                VanillaDebugLog.Write("STARTUP", account.Label + ": gate released after gameplay + resume + minimize.");
+                VanillaDebugLog.Write("STARTUP", account.Label + ": gate released after gameplay + verified movement + minimize.");
             }
-            catch
+            catch (Exception ex)
             {
                 lock (gate)
                 {
-                    runtime.ScriptRunning = false;
-                    runtime.RecoveryOwned = false;
-                    SetStage(runtime, VanillaReconnectStage.Error,
-                        "Sequential startup failed; current client left running; later clients blocked");
+                    Runtime current;
+                    if (runtimes.TryGetValue(account.Id, out current) && ReferenceEquals(runtime, current)
+                        && runtime.ResumeOperationGeneration == resumeGeneration && runtime.ScriptRunning)
+                    {
+                        runtime.ScriptRunning = false;
+                        runtime.RecoveryOwned = false;
+                        runtime.ResumeVerificationFailed = true;
+                        runtime.ResumeFailureDetail = "Sequential startup failed; later clients blocked: " + ex.Message;
+                        SetStage(runtime, ex is OperationCanceledException ? VanillaReconnectStage.Stopped : VanillaReconnectStage.Error,
+                            runtime.ResumeFailureDetail);
+                    }
                 }
                 RaiseUpdated();
                 // Never close a newly created client because a transient visual/focus check failed.
@@ -478,7 +499,7 @@ namespace _4RTools.Model.Vanilla
             if (hardenedSupervisorButtonsInstalled) return;
             hardenedSupervisorButtonsInstalled = true;
             ReplaceSupervisorButton(this, "START SUPERVISOR", "START SUPERVISOR", StartSupervisorHardened,
-                "Cold-start enabled clients strictly one at a time. A client must reach gameplay, receive its resume hotkey once, and be minimized before another client can start.");
+                "Cold-start enabled clients strictly one at a time. A client must reach gameplay, verify autobattle movement (up to three 10-second attempts), and be minimized before another client can start.");
             ReplaceSupervisorButton(this, "STOP", "STOP", StopSupervisorHardened,
                 "Stop continuous supervision and cancel any in-progress serialized startup. Running Vanilla clients are left open.");
         }

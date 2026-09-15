@@ -1,26 +1,17 @@
-# 4RTools Vanilla 0.6.34
+# 4RTools Vanilla 0.6.35
 
-## Responsive recovery workspace
+## Verified autobattle startup and recovery
 
-- The embedded Recovery & relog view follows the actual parent viewport instead of being capped at a previous desktop width. Full-HD layouts retain the requested two-thirds accounts / one-third log split.
-- All nine account columns fit inside the visible table at the tested sizes. On, Slot, Resume, Password, Proxy and PID use compact measured widths; Account, Username and Status share the remaining space. Long values and detailed recovery state remain available through hover text.
-- Account-column sizing reserves the scrollbar and both painted grid edges. Large lists no longer put the Status column under the vertical scrollbar or create an unnecessary horizontal scrollbar. This correction was reproduced by a failing native regression test before the fix, then verified with the same checks after the fix.
-- The launcher/actions strip is measured from its visible controls. The large unused area beneath it is removed, and controls wrap when necessary rather than extending off-screen.
-- The Accounts section uses the remaining pane height, reserves at least four rows plus a spare row's breathing room, and scrolls internally for larger saved-profile lists. Existing unlimited saved profiles / maximum two enabled clients behavior is preserved.
-- Update/version information stays right-aligned and can reflow below the left header actions on narrow windows. A new multiline update/error message no longer clips on its first display.
-- Live-client cards retain visible location and activity together on the final row. Card height respects font metrics instead of hiding fields to meet an arbitrary compact height.
-- Account actions, automatic saving, normal taskbar minimization, the global debug controls and the existing TESTS menu are retained. Help remains in hover text rather than explanatory paragraphs in the workspace.
+- Startup, recovery and the resume diagnostic now share a bounded movement verifier. After the configured hotkey, fresh validated X/Y samples are observed throughout a 10-second window; a change on either axis succeeds immediately, including movement that returns to its initial position later.
+- No movement triggers another focused hotkey attempt, with a fresh baseline and a final movement check after refocusing. There are **three total attempts** (initial send plus two retries), not three extra retries. After the third unsuccessful window, the account reports failure and later gameplay polls cannot restart the same retry budget.
+- Cold startup holds the current client's input lease until movement verification and minimization complete. Later queued clients do not launch after a failed cold start. Continuous recovery likewise keeps input serialized through verification. Already-running adopted clients remain untoggled.
+- The existing account status column shows compact verification/retry progress, with detailed reasons in hover text and logs. Automatic minimization excludes a client while verification is still in progress.
+- STOP, configuration changes, replaced processes/sessions/characters, map transitions, dead characters, unknown or stale coordinates, failed reads and loss of foreground focus prevent additional keys. Monotonic deadlines and operation generations prevent clock changes or an old worker from restarting or completing a newer attempt. Modified chord dispatch releases held keys even when cancellation or an input error interrupts it.
+- The verified, fingerprint-matched read-only state provider and existing X/Y/map mappings are reused. No game-memory writes, offset guesses, packet actions, injections or security bypasses are introduced. Existing settings, profile storage, two-active-client limit, packaging and updater behavior are preserved.
+- Repository policy now explicitly requires end-to-end ownership through a published, verified release rather than stopping at a commit, push or queued workflow.
 
-## Validation
+## Validation and limits
 
-The existing standard Windows GitHub Actions runners build and test both Debug and Release. The release is packaged, checksum-verified and launched in the existing inert portable smoke test. Publication is also gated on the native Windows mock-data UI harness in `scripts/test-ui-layout.ps1`.
+Publication requires the existing standard Windows runner gates: shipped-profile validation, Debug and Release builds with the full offline regression suite, portable ZIP construction and checksum verification, inert Windows executable launch smoke test, and all 18 native mock-data UI scenarios. New deterministic tests cover the three-attempt state machine, timing, movement, cancellation, state validity, client/operation isolation, failure latching, account progress and held-key cleanup. No test needs a live game process or real account credentials.
 
-The UI harness instantiates the production application controls, supplies fictional account/runtime/fleet data, resizes the actual window, renders PNG screenshots and checks geometry. Its 18 scenarios cover 1920x1020, 1904x981, 1980x1020, 1600x900, 1366x768 and 1050x700 client areas; 2, 4, 12 and 40 saved profiles; normal, 125% and 150% recovery text sizes; long status messages; scrolling to the final account; selection retention across tab changes; and repeated shrink/grow transitions. Large-list checks also cover 150% text, the narrow stacked workspace and returning from a scrolled list to four accounts.
-
-Assertions cover every account column against the actual unobscured viewport, absence of unnecessary horizontal scrollbars, ancestor containment, the Full-HD 2:1 split, four visible account rows plus breathing room, toolbar spacing, live-card text, update/debug controls and stable settled bounds. Column checks are repeated after scrolling and tab changes. Screenshots and a geometry report are retained as workflow artifacts for inspection. Failures stop publication rather than being treated as a successful compile.
-
-The final production-code candidate passed all 18 UI scenarios with zero failures, and its Full-HD, large-list, narrow-window and enlarged-text screenshots were inspected before the release version was advanced. The release workflow independently reruns the checks before publishing.
-
-These are native Windows **mock-data UI** checks, not live Vanilla/Gepard startup or a connection to the user's RDP session. The harness keeps live process observation, input, recovery, email alerts and update requests inactive. Text-size scenarios do not claim to emulate every physical monitor/DPI configuration. No paid testing service or additional infrastructure is required.
-
-Existing legacy NuGet audit/compiler warnings are not hidden; dependency upgrades are outside this layout release. Recovery orchestration, gameplay-memory mappings, administrator requirements and game-input semantics are unchanged by these presentation fixes.
+These automated Windows build, package and mock-data UI checks are **not live Vanilla/Gepard gameplay or RDP testing**. The new movement check has not been exercised against a live game client in this development session. Movement is not proof of combat or of why the character moved; conversely, a character fighting while stationary for all three windows can fail this deliberately movement-based check. Existing legacy dependency/compiler warnings remain visible and are not suppressed by this patch.

@@ -19,7 +19,7 @@ namespace _4RTools.Model.Vanilla
     public enum VanillaReconnectStage
     {
         Stopped, WaitingForClient, Launching, WaitingForWindow, LoggingIn, SelectingCharacter,
-        WaitingForGameplay, Online, AcknowledgingPopup, NeedsConfiguration, Backoff, Error
+        WaitingForGameplay, Online, AcknowledgingPopup, NeedsConfiguration, Backoff, Error, VerifyingAutobattle
     }
 
     public sealed class VanillaReconnectAccount
@@ -510,6 +510,9 @@ namespace _4RTools.Model.Vanilla
             public int RecoveryFailures;
             public bool ScriptRunning;
             public bool ResumeSent;
+            public int ResumeOperationGeneration;
+            public bool ResumeVerificationFailed;
+            public string ResumeFailureDetail;
             public bool RecoveryOwned;
             public bool HasBeenOnline;
         }
@@ -564,6 +567,15 @@ namespace _4RTools.Model.Vanilla
             var copy = value.Clone(); copy.Validate();
             lock (gate)
             {
+                Interlocked.Increment(ref resumeVerificationGeneration);
+                foreach (var active in runtimes.Values.Where(r => r.Stage == VanillaReconnectStage.VerifyingAutobattle))
+                {
+                    active.ScriptRunning = false;
+                    active.RecoveryOwned = false;
+                    active.ResumeVerificationFailed = true;
+                    active.ResumeFailureDetail = "Settings changed during autobattle verification; no further hotkeys sent";
+                    SetStage(active, VanillaReconnectStage.Error, active.ResumeFailureDetail);
+                }
                 settings = copy;
                 RebuildRuntimes();
                 if (save) store.Save(settings);
@@ -594,6 +606,9 @@ namespace _4RTools.Model.Vanilla
         {
             lock (gate)
             {
+                Interlocked.Increment(ref resumeVerificationGeneration);
+                Interlocked.Increment(ref hardenedStartupGeneration);
+                hardenedStartupRunning = false;
                 running = false;
                 timer?.Change(Timeout.Infinite, Timeout.Infinite);
                 foreach (var runtime in runtimes.Values)
@@ -737,13 +752,15 @@ namespace _4RTools.Model.Vanilla
                 {
                     runtime.LoginLikeSince = null;
                     runtime.HasBeenOnline = true;
+                    if (runtime.ResumeVerificationFailed)
+                    {
+                        SetStage(runtime, VanillaReconnectStage.Error, runtime.ResumeFailureDetail);
+                        return;
+                    }
                     if (!runtime.GameplaySince.HasValue) runtime.GameplaySince = now;
                     if (!runtime.ResumeSent && (now - runtime.GameplaySince.Value).TotalMilliseconds >= Math.Max(1500, settings.StageDelayMs))
                     {
-                        SendResume(runtime);
-                        runtime.ResumeSent = true;
-                        ResetRecoverySuccessLocked(runtime);
-                        SetStage(runtime, VanillaReconnectStage.Online, "Gameplay detected; Autobattle resume hotkey sent once");
+                        QueueVerifiedResume(runtime);
                     }
                     else if (runtime.ResumeSent)
                     {
@@ -761,6 +778,7 @@ namespace _4RTools.Model.Vanilla
                         CloseForRecovery(runtime, p, now, "Disconnect/logged-out modal detected after gameplay", false);
                         return;
                     }
+                    if (OtherRecoveryOwner(runtime) != null) return;
                     if (!runtime.LastPopup.HasValue || (now - runtime.LastPopup.Value).TotalMilliseconds >= settings.PopupCooldownMs)
                     {
                         using (var input = new VanillaTargetedInput(runtime.ProcessId.Value)) { input.Activate(); input.Press(Keys.Enter); }
@@ -800,6 +818,8 @@ namespace _4RTools.Model.Vanilla
                     if (runtime.LastLaunch.HasValue && (now - runtime.LastLaunch.Value).TotalMilliseconds >= settings.GepardWaitMs)
                         QueueLogin(runtime, true, "New client reached initial login window");
                 }
+                else if (runtime.ResumeVerificationFailed)
+                    SetStage(runtime, VanillaReconnectStage.Error, runtime.ResumeFailureDetail);
                 else SetStage(runtime, runtime.Stage == VanillaReconnectStage.Online ? VanillaReconnectStage.Online : VanillaReconnectStage.WaitingForGameplay,
                     "Window state is unknown; no recovery input sent");
             }
@@ -809,15 +829,6 @@ namespace _4RTools.Model.Vanilla
                 else SetStage(runtime, VanillaReconnectStage.Backoff, "Probe failed: " + ex.Message);
             }
             finally { p?.Dispose(); }
-        }
-
-        private void SendResume(Runtime runtime)
-        {
-            using (var input = new VanillaForegroundInput(runtime.ProcessId.Value))
-            {
-                input.Chord(runtime.Account.ResumeCtrl, runtime.Account.ResumeAlt, runtime.Account.ResumeShift, (Keys)runtime.Account.ResumeKey);
-            }
-            Log(runtime.Account.Label + ": sent resume hotkey " + runtime.Account.HotkeyText + ".");
         }
 
         private bool CanLaunch(Runtime runtime, int aliveCount, DateTimeOffset now)
@@ -905,8 +916,9 @@ namespace _4RTools.Model.Vanilla
         {
             runtime.ProcessId = pid;
             // Never toggle Autobattle merely because 4RTools adopted an already-running client.
-            // A fresh launch or a relog sequence explicitly arms the one-shot resume hotkey.
+            // Only a genuine fresh launch/relog arms a new bounded resume verification.
             runtime.ResumeSent = !freshLaunch;
+            if (freshLaunch) { runtime.ResumeVerificationFailed = false; runtime.ResumeFailureDetail = null; }
             runtime.RecoveryOwned = freshLaunch || runtime.RecoveryOwned;
             if (freshLaunch) runtime.HasBeenOnline = false;
             runtime.LoginLikeSince = runtime.GameplaySince = null;
@@ -939,6 +951,8 @@ namespace _4RTools.Model.Vanilla
             runtime.RecoveryOwned = true;
             runtime.LastRecovery = now;
             runtime.ResumeSent = false;
+            runtime.ResumeVerificationFailed = false;
+            runtime.ResumeFailureDetail = null;
             SetStage(runtime, VanillaReconnectStage.LoggingIn, reason);
             int pid = runtime.ProcessId.Value;
             var account = runtime.Account.Clone();
@@ -1396,6 +1410,7 @@ namespace _4RTools.Model.Vanilla
         {
             lock (gate)
             {
+                Interlocked.Increment(ref resumeVerificationGeneration);
                 if (disposed) return;
                 disposed = true;
                 running = false;

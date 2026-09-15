@@ -62,6 +62,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += VanillaAuthPatternTests.Run();
             failed += VanillaSessionLogTests.Run();
             failed += VanillaReconnectRegressionTests.Run();
+            failed += VanillaAutobattleResumeTests.Run();
             failed += VanillaTemporaryActionTests.Run();
             failed += VanillaMemoryScannerTests.Run();
             failed += ProcessObservationContextTests.Run();
