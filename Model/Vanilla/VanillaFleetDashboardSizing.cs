@@ -8,6 +8,7 @@ namespace _4RTools.Forms
     {
         private bool vanillaFleetSizingApplied;
         private System.Windows.Forms.Timer vanillaMemoryAccessDiagnosticTimer;
+        private readonly ToolTip vanillaFleetHelp = new ToolTip { ShowAlways = true, AutoPopDelay = 30000 };
 
         private void ApplyVanillaFleetSizing()
         {
@@ -16,15 +17,16 @@ namespace _4RTools.Forms
 
             UpdateVanillaFleetHeight();
             SizeChanged += (s, e) => UpdateVanillaFleetHeight();
-            ConfigureFleetLabels(integratedFleetDashboard);
+            ConfigureFleetPresentation(integratedFleetDashboard);
             StartMemoryAccessDiagnostics();
         }
 
         internal static int PreferredFleetDashboardHeight(int availableClientHeight)
         {
-            if (availableClientHeight < 820) return 128;
-            if (availableClientHeight < 950) return 138;
-            return 145;
+            if (availableClientHeight < 760) return 96;
+            if (availableClientHeight < 900) return 104;
+            if (availableClientHeight < 1050) return 112;
+            return 120;
         }
 
         private void UpdateVanillaFleetHeight()
@@ -54,6 +56,7 @@ namespace _4RTools.Forms
                 try { vanillaMemoryAccessDiagnosticTimer?.Stop(); } catch { }
                 try { vanillaMemoryAccessDiagnosticTimer?.Dispose(); } catch { }
                 vanillaMemoryAccessDiagnosticTimer = null;
+                try { vanillaFleetHelp.Dispose(); } catch { }
             };
         }
 
@@ -66,22 +69,50 @@ namespace _4RTools.Forms
             });
         }
 
-        private static void ConfigureFleetLabels(Control root)
+        private void ConfigureFleetPresentation(Control root)
         {
             foreach (Control child in root.Controls)
             {
                 var layout = child as TableLayoutPanel;
+                if (layout != null && layout.RowCount == 2 && layout.ColumnCount == 2)
+                {
+                    // The second row used to show explanatory prose such as "Live values are read...".
+                    // Keep that documentation on hover instead and give the vertical space back to the workspace.
+                    foreach (Control item in layout.Controls)
+                    {
+                        if (layout.GetRow(item) != 1) continue;
+                        Label helper = item as Label;
+                        if (helper == null) continue;
+                        helper.Visible = false;
+                        helper.Margin = Padding.Empty;
+                        vanillaFleetHelp.SetToolTip(root,
+                            "The two cards show read-only values from the verified Vanilla build profile. Location and activity appear when their mappings are available. Observation errors are available on the affected client card.");
+                    }
+                    while (layout.RowStyles.Count < 2) layout.RowStyles.Add(new RowStyle());
+                    layout.RowStyles[1].SizeType = SizeType.Absolute;
+                    layout.RowStyles[1].Height = 0;
+                }
+
                 if (layout != null && layout.Parent is GroupBox && layout.RowCount == 5)
                 {
                     while (layout.RowStyles.Count < 5) layout.RowStyles.Add(new RowStyle());
                     layout.RowStyles[0].SizeType = SizeType.AutoSize;
                     layout.RowStyles[1].SizeType = SizeType.AutoSize;
                     layout.RowStyles[2].SizeType = SizeType.Absolute;
-                    layout.RowStyles[2].Height = 8;
+                    layout.RowStyles[2].Height = 7;
                     layout.RowStyles[3].SizeType = SizeType.Absolute;
-                    layout.RowStyles[3].Height = 22;
+                    layout.RowStyles[3].Height = 20;
                     layout.RowStyles[4].SizeType = SizeType.Percent;
                     layout.RowStyles[4].Height = 100;
+
+                    GroupBox card = layout.Parent as GroupBox;
+                    if (card != null)
+                    {
+                        card.Padding = new Padding(7);
+                        card.Margin = new Padding(3);
+                        vanillaFleetHelp.SetToolTip(card,
+                            "Read-only Vanilla client status. Hover the activity/error line for detailed observation errors.");
+                    }
 
                     foreach (Control item in layout.Controls)
                     {
@@ -95,7 +126,7 @@ namespace _4RTools.Forms
                         label.TextAlign = ContentAlignment.TopLeft;
                     }
                 }
-                if (child.HasChildren) ConfigureFleetLabels(child);
+                if (child.HasChildren) ConfigureFleetPresentation(child);
             }
         }
     }
