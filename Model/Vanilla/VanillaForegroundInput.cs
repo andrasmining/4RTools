@@ -1,9 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -14,12 +14,18 @@ namespace _4RTools.Model.Vanilla
     /// <summary>
     /// Ordinary Windows foreground input for reconnect/login diagnostics.
     /// This does not inject into Vanilla/Gepard or modify game memory.
+    ///
+    /// A Vanilla process briefly owns a Gepard splash top-level window before its real game
+    /// window appears. Never bind input to that transient splash. Re-resolve the best visible
+    /// top-level window belonging to the same PID before every action so the input session
+    /// follows the process across the splash -> game-window transition.
     /// </summary>
     internal sealed class VanillaForegroundInput : IDisposable
     {
         private readonly Process process;
         private readonly IntPtr preferredWindow;
         private IntPtr window;
+        private string lastResolutionEvidence;
 
         [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
@@ -42,6 +48,19 @@ namespace _4RTools.Model.Vanilla
             public UIntPtr dwExtraInfo;
         }
 
+        private sealed class WindowCandidate
+        {
+            public IntPtr Handle;
+            public string ClassName;
+            public string Title;
+            public bool Visible;
+            public int Width;
+            public int Height;
+            public int Score;
+        }
+
+        private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
         private const uint INPUT_MOUSE = 0;
         private const uint INPUT_KEYBOARD = 1;
         private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
@@ -49,7 +68,10 @@ namespace _4RTools.Model.Vanilla
         private const uint KEYEVENTF_KEYUP = 0x0002;
         private const uint KEYEVENTF_UNICODE = 0x0004;
         private const uint KEYEVENTF_SCANCODE = 0x0008;
+        private const int SW_RESTORE = 9;
+        private const int ActivationTimeoutMs = 12000;
 
+        [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
         [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
@@ -74,35 +96,133 @@ namespace _4RTools.Model.Vanilla
         {
             process = Process.GetProcessById(processId);
             this.preferredWindow = preferredWindow;
-            RefreshWindow();
+            string evidence;
+            TryRefreshWindow(out evidence);
             VanillaDebugLog.Write("INPUT", "Input session created for PID=" + processId + ", window=" + DescribeWindow(window)
-                + ", preferred=" + DescribeWindow(preferredWindow) + ".");
+                + ", preferred=" + DescribeWindow(preferredWindow) + ", resolver=" + evidence + ".");
+        }
+
+        internal static bool IsTransientBootstrapWindow(string className, string title)
+        {
+            string cls = className ?? string.Empty;
+            string caption = title ?? string.Empty;
+            return cls.IndexOf("Gepard_Splash", StringComparison.OrdinalIgnoreCase) >= 0
+                || caption.IndexOf("GepardSplash", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static int WindowCandidateScore(bool sameProcess, bool visible, int width, int height,
+            bool foreground, bool preferred, string className, string title)
+        {
+            if (!sameProcess || !visible || width < 200 || height < 120
+                || IsTransientBootstrapWindow(className, title)) return int.MinValue;
+
+            int score = 100;
+            if (preferred) score += 1000;
+            if (foreground) score += 500;
+            string cls = className ?? string.Empty;
+            string caption = title ?? string.Empty;
+            if (cls.IndexOf("Vanilla MMO", StringComparison.OrdinalIgnoreCase) >= 0) score += 400;
+            if (caption.IndexOf("Vanilla MMO", StringComparison.OrdinalIgnoreCase) >= 0) score += 400;
+            if (caption.IndexOf("Launcher", StringComparison.OrdinalIgnoreCase) >= 0) score += preferred ? 200 : 20;
+            score += Math.Min(200, (width * height) / 10000);
+            return score;
         }
 
         public void Activate()
         {
-            RefreshWindow();
-            IntPtr before = GetForegroundWindow();
-            for (int attempt = 0; attempt < 5; attempt++)
+            if (process.HasExited) throw new InvalidOperationException("Vanilla client exited.");
+
+            IntPtr originalForeground = GetForegroundWindow();
+            IntPtr previousTarget = window;
+            Stopwatch watch = Stopwatch.StartNew();
+            int focusAttempt = 0;
+            long nextWaitingLogAt = 0;
+            string lastEvidence = null;
+
+            while (watch.ElapsedMilliseconds < ActivationTimeoutMs)
             {
-                ShowWindow(window, 9);
-                BringWindowToTop(window);
-                SetForegroundWindow(window);
-                Thread.Sleep(90);
+                if (process.HasExited) throw new InvalidOperationException("Vanilla client exited.");
+
+                string evidence;
+                if (!TryRefreshWindow(out evidence))
+                {
+                    lastEvidence = evidence;
+                    if (watch.ElapsedMilliseconds >= nextWaitingLogAt)
+                    {
+                        VanillaDebugLog.Write("FOCUS", "PID=" + process.Id
+                            + " waiting for interactive Vanilla window; elapsedMs=" + watch.ElapsedMilliseconds
+                            + "; " + evidence + ". No input sent.");
+                        nextWaitingLogAt = watch.ElapsedMilliseconds + 1000;
+                    }
+                    Thread.Sleep(120);
+                    continue;
+                }
+
+                if (window != previousTarget)
+                {
+                    VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " window transition: "
+                        + DescribeWindow(previousTarget) + " -> " + DescribeWindow(window)
+                        + "; resolver=" + evidence + ".");
+                    previousTarget = window;
+                    focusAttempt = 0;
+                }
+
                 IntPtr current = GetForegroundWindow();
                 if (current == window)
                 {
-                    VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus OK attempt=" + (attempt + 1)
-                        + ", target=" + DescribeWindow(window) + ", before=" + DescribeWindow(before) + ".");
+                    VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus already correct; target="
+                        + DescribeWindow(window) + ", elapsedMs=" + watch.ElapsedMilliseconds + ".");
                     return;
                 }
-                VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus attempt=" + (attempt + 1)
-                    + " not yet target; foreground=" + DescribeWindow(current) + ", target=" + DescribeWindow(window) + ".");
+
+                // If Windows has already foregrounded another suitable top-level window from the
+                // same PID (the exact splash -> game transition seen in live logs), adopt it.
+                if (IsUsableWindowForProcess(current, process.Id))
+                {
+                    IntPtr old = window;
+                    window = current;
+                    VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " adopted same-process foreground window "
+                        + DescribeWindow(window) + " instead of stale/secondary " + DescribeWindow(old) + ".");
+                    return;
+                }
+
+                focusAttempt++;
+                ShowWindow(window, SW_RESTORE);
+                BringWindowToTop(window);
+                SetForegroundWindow(window);
+                Thread.Sleep(90);
+                current = GetForegroundWindow();
+                if (current == window)
+                {
+                    VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus OK attempt=" + focusAttempt
+                        + ", target=" + DescribeWindow(window) + ", before=" + DescribeWindow(originalForeground)
+                        + ", elapsedMs=" + watch.ElapsedMilliseconds + ".");
+                    return;
+                }
+
+                // Re-check the foreground PID before considering this a failed focus attempt. A
+                // Gepard splash can disappear while SetForegroundWindow is in flight and the game
+                // window can become foreground at exactly this point.
+                if (IsUsableWindowForProcess(current, process.Id))
+                {
+                    IntPtr old = window;
+                    window = current;
+                    VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus transitioned to same-process game window "
+                        + DescribeWindow(window) + " while targeting " + DescribeWindow(old) + "; accepting transition.");
+                    return;
+                }
+
+                VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus attempt=" + focusAttempt
+                    + " not yet target; foreground=" + DescribeWindow(current) + ", target=" + DescribeWindow(window)
+                    + ", elapsedMs=" + watch.ElapsedMilliseconds + ".");
+                Thread.Sleep(110);
             }
+
             IntPtr after = GetForegroundWindow();
-            VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus FAILED; foreground=" + DescribeWindow(after)
-                + ", target=" + DescribeWindow(window) + ". No input sent.");
-            throw new InvalidOperationException("Windows did not give focus to the selected Vanilla window. No input was sent.");
+            VanillaDebugLog.Write("FOCUS", "PID=" + process.Id + " focus FAILED after " + watch.ElapsedMilliseconds
+                + " ms; foreground=" + DescribeWindow(after) + ", target=" + DescribeWindow(window)
+                + ", resolver=" + (lastEvidence ?? lastResolutionEvidence ?? "unknown") + ". No input sent.");
+            throw new InvalidOperationException("The selected Vanilla process did not expose a usable foreground game window in time. No input was sent.");
         }
 
         public void ClickNormalized(double x, double y, bool requireForeground = true)
@@ -112,21 +232,20 @@ namespace _4RTools.Model.Vanilla
 
         public string ClickNormalizedWithDiagnostics(double x, double y, bool requireForeground = true)
         {
-            RefreshWindow();
-            IntPtr foregroundBefore = GetForegroundWindow();
-            if (requireForeground)
-            {
-                Activate();
-            }
+            if (requireForeground) Activate();
             else
             {
-                ShowWindow(window, 9);
+                string evidence;
+                if (!TryRefreshWindow(out evidence))
+                    throw new InvalidOperationException("Selected window is not ready for mouse input: " + evidence);
+                ShowWindow(window, SW_RESTORE);
                 BringWindowToTop(window);
                 SetForegroundWindow(window);
                 Thread.Sleep(120);
             }
             if (x < 0 || x > 1 || y < 0 || y > 1) throw new ArgumentOutOfRangeException("Normalized coordinates must be within 0..1.");
 
+            IntPtr foregroundBefore = GetForegroundWindow();
             RECT rect;
             if (!GetClientRect(window, out rect)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot read Vanilla client area.");
             int width = Math.Max(1, rect.Right - rect.Left), height = Math.Max(1, rect.Bottom - rect.Top);
@@ -190,7 +309,7 @@ namespace _4RTools.Model.Vanilla
         public void Press(Keys key)
         {
             Activate();
-            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " KEY " + key + " press.");
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " KEY " + key + " press; foreground=" + DescribeWindow(GetForegroundWindow()) + ".");
             SendKey(key, false);
             Thread.Sleep(70);
             SendKey(key, true);
@@ -200,7 +319,8 @@ namespace _4RTools.Model.Vanilla
         public void Chord(bool ctrl, bool alt, bool shift, Keys key)
         {
             Activate();
-            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CHORD " + ChordText(ctrl, alt, shift, key) + " begin.");
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " CHORD " + ChordText(ctrl, alt, shift, key)
+                + " begin; target=" + DescribeWindow(window) + ", foreground=" + DescribeWindow(GetForegroundWindow()) + ".");
             if (ctrl) SendKey(Keys.ControlKey, false);
             if (alt) SendKey(Keys.Menu, false);
             if (shift) SendKey(Keys.ShiftKey, false);
@@ -230,7 +350,8 @@ namespace _4RTools.Model.Vanilla
         {
             if (text == null) return;
             Activate();
-            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " typing text length=" + text.Length + " (content intentionally not logged).");
+            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " typing text length=" + text.Length + " (content intentionally not logged). target="
+                + DescribeWindow(window) + ".");
             foreach (char c in text)
             {
                 SendUnicode(c, false);
@@ -238,6 +359,91 @@ namespace _4RTools.Model.Vanilla
                 Thread.Sleep(22);
             }
             Thread.Sleep(80);
+        }
+
+        private bool TryRefreshWindow(out string evidence)
+        {
+            evidence = null;
+            if (process.HasExited)
+            {
+                window = IntPtr.Zero;
+                evidence = "process exited";
+                return false;
+            }
+            process.Refresh();
+
+            IntPtr foreground = GetForegroundWindow();
+            var candidates = new List<WindowCandidate>();
+            var transient = new List<string>();
+            EnumWindows(delegate(IntPtr hwnd, IntPtr lParam)
+            {
+                uint pid;
+                GetWindowThreadProcessId(hwnd, out pid);
+                if (pid != (uint)process.Id) return true;
+
+                string cls = WindowClass(hwnd);
+                string title = WindowTitle(hwnd);
+                bool visible = IsWindowVisible(hwnd);
+                RECT rect;
+                int width = 0, height = 0;
+                if (GetClientRect(hwnd, out rect))
+                {
+                    width = Math.Max(0, rect.Right - rect.Left);
+                    height = Math.Max(0, rect.Bottom - rect.Top);
+                }
+                if (IsTransientBootstrapWindow(cls, title))
+                {
+                    transient.Add(DescribeWindow(hwnd) + " client=" + width + "x" + height);
+                    return true;
+                }
+
+                int score = WindowCandidateScore(true, visible, width, height, hwnd == foreground,
+                    preferredWindow != IntPtr.Zero && hwnd == preferredWindow, cls, title);
+                if (score != int.MinValue)
+                {
+                    candidates.Add(new WindowCandidate
+                    {
+                        Handle = hwnd,
+                        ClassName = cls,
+                        Title = title,
+                        Visible = visible,
+                        Width = width,
+                        Height = height,
+                        Score = score
+                    });
+                }
+                return true;
+            }, IntPtr.Zero);
+
+            WindowCandidate best = candidates.OrderByDescending(c => c.Score).FirstOrDefault();
+            if (best == null)
+            {
+                window = IntPtr.Zero;
+                evidence = "no usable visible top-level window for PID " + process.Id
+                    + (transient.Count == 0 ? string.Empty : "; transient=[" + string.Join(" | ", transient) + "]");
+                lastResolutionEvidence = evidence;
+                return false;
+            }
+
+            window = best.Handle;
+            evidence = "selected=" + DescribeWindow(best.Handle) + ", client=" + best.Width + "x" + best.Height
+                + ", score=" + best.Score + ", candidates=" + candidates.Count
+                + (transient.Count == 0 ? string.Empty : ", ignoredTransient=" + transient.Count);
+            lastResolutionEvidence = evidence;
+            return true;
+        }
+
+        private static bool IsUsableWindowForProcess(IntPtr hwnd, int processId)
+        {
+            if (hwnd == IntPtr.Zero || !IsWindow(hwnd) || !IsWindowVisible(hwnd)) return false;
+            uint pid;
+            GetWindowThreadProcessId(hwnd, out pid);
+            if (pid != (uint)processId) return false;
+            string cls = WindowClass(hwnd), title = WindowTitle(hwnd);
+            if (IsTransientBootstrapWindow(cls, title)) return false;
+            RECT rect;
+            if (!GetClientRect(hwnd, out rect)) return false;
+            return rect.Right - rect.Left >= 200 && rect.Bottom - rect.Top >= 120;
         }
 
         private void SendKey(Keys key, bool up)
@@ -277,14 +483,6 @@ namespace _4RTools.Model.Vanilla
             if (sent != inputs.Length) throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows SendInput did not send the complete input sequence.");
         }
 
-        private void RefreshWindow()
-        {
-            if (process.HasExited) throw new InvalidOperationException("Vanilla client exited.");
-            process.Refresh();
-            window = preferredWindow != IntPtr.Zero && IsWindow(preferredWindow) ? preferredWindow : process.MainWindowHandle;
-            if (window == IntPtr.Zero || !IsWindow(window)) throw new InvalidOperationException("Vanilla client window is not ready.");
-        }
-
         private static string ChordText(bool ctrl, bool alt, bool shift, Keys key)
         {
             var text = new StringBuilder();
@@ -301,21 +499,33 @@ namespace _4RTools.Model.Vanilla
             catch { return 0; }
         }
 
+        private static string WindowTitle(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return string.Empty;
+            var text = new StringBuilder(256);
+            try { GetWindowText(hwnd, text, text.Capacity); } catch { }
+            return Clean(text.ToString());
+        }
+
+        private static string WindowClass(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return string.Empty;
+            var text = new StringBuilder(128);
+            try { GetClassName(hwnd, text, text.Capacity); } catch { }
+            return Clean(text.ToString());
+        }
+
         private static string DescribeWindow(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero) return "none";
             uint pid;
             GetWindowThreadProcessId(hwnd, out pid);
-            var title = new StringBuilder(256);
-            var cls = new StringBuilder(128);
-            try { GetWindowText(hwnd, title, title.Capacity); } catch { }
-            try { GetClassName(hwnd, cls, cls.Capacity); } catch { }
-            return string.Format("0x{0:X} pid={1} class='{2}' title='{3}'", hwnd.ToInt64(), pid, Clean(cls.ToString()), Clean(title.ToString()));
+            return string.Format("0x{0:X} pid={1} class='{2}' title='{3}'", hwnd.ToInt64(), pid, WindowClass(hwnd), WindowTitle(hwnd));
         }
 
         private static string Clean(string text)
         {
-            if (string.IsNullOrEmpty(text)) return "";
+            if (string.IsNullOrEmpty(text)) return string.Empty;
             return text.Replace("\r", " ").Replace("\n", " ").Trim();
         }
 
