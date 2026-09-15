@@ -27,6 +27,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Sequential startup advances only after gameplay resume and minimize", HardenedStartupAdvanceGate);
             Test("Gepard splash is never an interactive input target", GepardSplashIsTransient);
             Test("Real Vanilla game window outranks generic windows", GameWindowCandidateRanking);
+            Test("Minimized Vanilla game window stays eligible for restore", MinimizedGameWindowCandidate);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -194,6 +195,18 @@ namespace Vanilla.Diagnostics.Tests
                 "TThorForm", "Vanilla MMO Launcher");
             Assert(game > generic, "Actual game window must outrank a generic same-process top-level window.");
             Assert(preferredLauncher > generic, "Explicit launcher window must remain usable for GAME START input.");
+        }
+
+        private static void MinimizedGameWindowCandidate()
+        {
+            int minimizedGame = VanillaForegroundInput.WindowCandidateScore(true, false, 0, 0, false, false,
+                "Vanilla MMO | Gepard Shield 3.0 (^-_-^)", "Vanilla MMO | Gepard Shield 3.0 (^-_-^)", true);
+            int hiddenGeneric = VanillaForegroundInput.WindowCandidateScore(true, false, 0, 0, false, false,
+                "SomeWindowClass", "SomeWindow", true);
+            Assert(minimizedGame != int.MinValue,
+                "A known minimized Vanilla gameplay window must remain eligible so it can be restored for verification/input.");
+            Assert(hiddenGeneric == int.MinValue,
+                "An arbitrary hidden/minimized same-process window must not become an automation target.");
         }
 
         private static void PersistentDataMigration()
