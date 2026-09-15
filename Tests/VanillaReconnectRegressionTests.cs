@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Reflection;
 using Newtonsoft.Json;
+using _4RTools.Forms;
 using _4RTools.Model.Vanilla;
 
 namespace Vanilla.Diagnostics.Tests
@@ -28,6 +29,8 @@ namespace Vanilla.Diagnostics.Tests
             Test("Gepard splash is never an interactive input target", GepardSplashIsTransient);
             Test("Real Vanilla game window outranks generic windows", GameWindowCandidateRanking);
             Test("Minimized Vanilla game window stays eligible for restore", MinimizedGameWindowCandidate);
+            Test("Recovery runtime panels use wide Full-HD layout", ResponsiveRecoveryBreakpoint);
+            Test("Fleet strip stays compact across common desktop heights", ResponsiveFleetHeight);
             Console.WriteLine("Reconnect regressions: {0} passed; {1} failed. No live process was controlled.", passed, failed);
             return failed;
         }
@@ -207,6 +210,26 @@ namespace Vanilla.Diagnostics.Tests
                 "A known minimized Vanilla gameplay window must remain eligible so it can be restored for verification/input.");
             Assert(hiddenGeneric == int.MinValue,
                 "An arbitrary hidden/minimized same-process window must not become an automation target.");
+        }
+
+        private static void ResponsiveRecoveryBreakpoint()
+        {
+            Assert(!VanillaReconnectForm.UseWideRecoveryLayout(1100),
+                "Narrow recovery layouts should stack status/log vertically.");
+            Assert(VanillaReconnectForm.UseWideRecoveryLayout(1250),
+                "Full-HD recovery content should use side-by-side status/log panels.");
+            Assert(VanillaReconnectForm.UseWideRecoveryLayout(1800),
+                "Wide desktop recovery layout unexpectedly fell back to stacked panels.");
+        }
+
+        private static void ResponsiveFleetHeight()
+        {
+            Assert(Container.PreferredFleetDashboardHeight(760) == 128,
+                "Small desktop should use compact fleet height.");
+            Assert(Container.PreferredFleetDashboardHeight(900) == 138,
+                "Typical constrained RDP height should use medium fleet height.");
+            Assert(Container.PreferredFleetDashboardHeight(1020) == 145,
+                "Full-HD class desktop should not reserve the old oversized 225px fleet strip.");
         }
 
         private static void PersistentDataMigration()
