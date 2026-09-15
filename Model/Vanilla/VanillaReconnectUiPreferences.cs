@@ -57,14 +57,22 @@ namespace _4RTools.Model.Vanilla
     {
         private bool simplifiedRecoveryUiInstalled;
         private bool autosaveSuppress;
+        private bool refreshingAccountCatalogGrid;
         private System.Windows.Forms.Timer autosaveTimer;
         private System.Windows.Forms.Timer saveToastTimer;
         private string pendingSaveMessage = "Saved";
+        private VanillaAccountCatalogStore accountCatalogStore;
+        private List<VanillaReconnectAccount> accountCatalog;
 
         internal void InstallSimplifiedRecoveryUi()
         {
             if (simplifiedRecoveryUiInstalled || IsDisposed) return;
             simplifiedRecoveryUiInstalled = true;
+
+            accountCatalogStore = new VanillaAccountCatalogStore();
+            accountCatalog = accountCatalogStore.Load(settings.Accounts);
+            VanillaAccountCatalogStore.NormalizeEnabledLimit(accountCatalog);
+            SynchronizeSupervisorAccountsFromCatalog();
 
             launchArgs.Text = string.Empty;
             launchArgs.Visible = false;
@@ -85,13 +93,14 @@ namespace _4RTools.Model.Vanilla
             InstallMinimalAccountButtons();
             SynchronizeDerivedUiValues();
             HookAutosave();
-            RefreshAccountSupplementalColumns();
+            RefreshAccountGridFromCatalog();
+            supervisor.Updated += AccountRuntimeUpdated;
             ShowSaveToast("Auto-save on", false);
         }
 
         private void InstallAccountColumns()
         {
-            foreach (VanillaReconnectAccount account in settings.Accounts)
+            foreach (VanillaReconnectAccount account in accountCatalog ?? Enumerable.Empty<VanillaReconnectAccount>())
                 VanillaAccountProxyPreferences.Ensure(account.Id, settings.Proxy);
 
             if (!accounts.Columns.Contains("AccountProxy"))
@@ -125,12 +134,73 @@ namespace _4RTools.Model.Vanilla
                 });
             }
             help.SetToolTip(accounts,
-                "Saved Vanilla account profiles. Double-click or Edit to change credentials, slot, proxy and hotkey. At most two profiles may be enabled at once. Runtime PID/status is shown here; hover Status for full detail.");
+                "Saved Vanilla account profiles. Double-click or Edit to change credentials, slot, proxy and hotkey. Any number may be saved; at most two may be enabled. Runtime PID/status is shown here; hover Status for full detail.");
+        }
+
+        private void AccountRuntimeUpdated()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke((MethodInvoker)RefreshAccountSupplementalColumns); } catch { }
+                return;
+            }
+            RefreshAccountSupplementalColumns();
+        }
+
+        private void RefreshAccountGridFromCatalog()
+        {
+            if (IsDisposed || accounts.IsDisposed || accountCatalog == null) return;
+            string selectedId = accounts.SelectedRows.Count > 0 ? accounts.SelectedRows[0].Tag as string : null;
+            bool oldSuppress = autosaveSuppress;
+            autosaveSuppress = true;
+            refreshingAccountCatalogGrid = true;
+            try
+            {
+                accounts.Rows.Clear();
+                foreach (VanillaReconnectAccount account in accountCatalog)
+                {
+                    int row = accounts.Rows.Add(account.Enabled ? "Yes" : "No", account.Label, account.UserName,
+                        account.CharacterSlot, account.HotkeyText,
+                        string.IsNullOrWhiteSpace(account.ProtectedPassword) ? "Not set" : "Encrypted");
+                    accounts.Rows[row].Tag = account.Id;
+                    if (!string.IsNullOrWhiteSpace(selectedId)
+                        && string.Equals(selectedId, account.Id, StringComparison.OrdinalIgnoreCase))
+                        accounts.Rows[row].Selected = true;
+                }
+            }
+            finally
+            {
+                refreshingAccountCatalogGrid = false;
+                autosaveSuppress = oldSuppress;
+            }
+            RefreshAccountSupplementalColumnsCore();
+        }
+
+        private bool AccountGridMatchesCatalog()
+        {
+            if (accountCatalog == null || accounts.Rows.Count != accountCatalog.Count) return false;
+            for (int i = 0; i < accountCatalog.Count; i++)
+            {
+                string id = accounts.Rows[i].Tag as string;
+                if (!string.Equals(id, accountCatalog[i].Id, StringComparison.OrdinalIgnoreCase)) return false;
+            }
+            return true;
         }
 
         private void RefreshAccountSupplementalColumns()
         {
-            if (IsDisposed || accounts.IsDisposed) return;
+            if (IsDisposed || accounts.IsDisposed || accountCatalog == null) return;
+            if (!refreshingAccountCatalogGrid && !AccountGridMatchesCatalog())
+            {
+                RefreshAccountGridFromCatalog();
+                return;
+            }
+            RefreshAccountSupplementalColumnsCore();
+        }
+
+        private void RefreshAccountSupplementalColumnsCore()
+        {
             IReadOnlyList<VanillaReconnectStatus> statuses;
             try { statuses = supervisor.Statuses(); }
             catch { statuses = new List<VanillaReconnectStatus>(); }
@@ -150,7 +220,7 @@ namespace _4RTools.Model.Vanilla
                     if (accounts.Columns.Contains("RuntimeStatus"))
                     {
                         row.Cells["RuntimeStatus"].Value = "Idle";
-                        row.Cells["RuntimeStatus"].ToolTipText = "No runtime state is currently assigned.";
+                        row.Cells["RuntimeStatus"].ToolTipText = "Saved profile is not currently part of the active supervisor configuration.";
                     }
                     continue;
                 }
@@ -170,10 +240,44 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        // Existing callers use this name after Add/Edit; keep it as a narrow compatibility wrapper.
+        private VanillaReconnectAccount SelectedCatalogAccount()
+        {
+            if (accountCatalog == null || accounts.SelectedRows.Count == 0) return null;
+            string id = accounts.SelectedRows[0].Tag as string;
+            return accountCatalog.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void SynchronizeSupervisorAccountsFromCatalog()
+        {
+            if (settings == null || accountCatalog == null || accountCatalog.Count == 0) return;
+            var active = accountCatalog.Where(a => a.Enabled).Take(2).Select(a => a.Clone()).ToList();
+            if (active.Count == 0)
+            {
+                VanillaReconnectAccount placeholder = accountCatalog[0].Clone();
+                placeholder.Enabled = false;
+                active.Add(placeholder);
+            }
+            settings.Accounts = active;
+            settings.MaxClients = Math.Max(1, Math.Min(2, active.Count(a => a.Enabled)));
+            VanillaReconnectAccount firstEnabled = active.FirstOrDefault(a => a.Enabled);
+            if (firstEnabled != null)
+                settings.Proxy = VanillaAccountProxyPreferences.Get(firstEnabled.Id, settings.Proxy);
+        }
+
+        private void PersistCatalogAndRefresh(string message)
+        {
+            if (accountCatalogStore == null || accountCatalog == null) return;
+            VanillaAccountCatalogStore.NormalizeEnabledLimit(accountCatalog);
+            accountCatalogStore.Save(accountCatalog);
+            SynchronizeSupervisorAccountsFromCatalog();
+            RefreshAccountGridFromCatalog();
+            QueueAutoSave(message);
+        }
+
+        // Existing callers use this name after Add/Edit; keep it as a compatibility wrapper.
         private void RefreshAccountProxyColumn()
         {
-            RefreshAccountSupplementalColumns();
+            RefreshAccountGridFromCatalog();
         }
 
         private void HookAutosave()
@@ -191,8 +295,6 @@ namespace _4RTools.Model.Vanilla
             startWithApp.CheckedChanged += (s, e) => QueueAutoSave("Startup saved");
             autoRecover.CheckedChanged += (s, e) => QueueAutoSave("Auto relog saved");
             visualWatchdog.CheckedChanged += (s, e) => QueueAutoSave("Visual watchdog saved");
-            accounts.RowsAdded += (s, e) => { SynchronizeDerivedUiValues(); QueueAutoSave("Account changes saved"); };
-            accounts.RowsRemoved += (s, e) => { SynchronizeDerivedUiValues(); QueueAutoSave("Account changes saved"); };
             accounts.CellDoubleClick += (s, e) =>
             {
                 if (e.RowIndex >= 0) EditAccountMinimal();
@@ -218,15 +320,16 @@ namespace _4RTools.Model.Vanilla
             if (autosaveSuppress || IsDisposed) return;
             try
             {
+                if (accountCatalogStore != null && accountCatalog != null)
+                    accountCatalogStore.Save(accountCatalog);
+                SynchronizeSupervisorAccountsFromCatalog();
                 SynchronizeDerivedUiValues();
                 ReadTop();
                 settings.LaunchArguments = string.Empty;
-                settings.MaxClients = Math.Max(1, Math.Min(2, settings.Accounts.Count(a => a.Enabled)));
-                VanillaReconnectAccount selected = SelectedAccount();
-                if (selected != null) settings.Proxy = VanillaAccountProxyPreferences.Get(selected.Id, settings.Proxy);
+                SynchronizeSupervisorAccountsFromCatalog();
                 supervisor.Apply(settings, true);
-                VanillaDebugLog.Write("SETTINGS", "Auto-saved recovery UI. profiles=" + settings.Accounts.Count
-                    + ", enabledAccounts=" + settings.Accounts.Count(a => a.Enabled)
+                VanillaDebugLog.Write("SETTINGS", "Auto-saved recovery UI. profiles=" + (accountCatalog == null ? 0 : accountCatalog.Count)
+                    + ", enabledAccounts=" + (accountCatalog == null ? 0 : accountCatalog.Count(a => a.Enabled))
                     + ", launcher='" + settings.LaunchExecutable + "', autoRecover=" + settings.AutoRecover
                     + ", visualWatchdog=" + settings.VisualWatchdog + ".");
                 RefreshAccountSupplementalColumns();
@@ -241,7 +344,8 @@ namespace _4RTools.Model.Vanilla
 
         internal void SynchronizeDerivedUiValues()
         {
-            int rawEnabled = settings == null || settings.Accounts == null ? 0 : settings.Accounts.Count(a => a.Enabled);
+            int rawEnabled = accountCatalog == null ? (settings == null || settings.Accounts == null ? 0 : settings.Accounts.Count(a => a.Enabled))
+                : accountCatalog.Count(a => a.Enabled);
             int managedCount = Math.Max(1, Math.Min(2, rawEnabled));
             autosaveSuppress = true;
             try
@@ -286,6 +390,7 @@ namespace _4RTools.Model.Vanilla
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            try { supervisor.Updated -= AccountRuntimeUpdated; } catch { }
             try { autosaveTimer?.Stop(); autosaveTimer?.Dispose(); } catch { }
             try { saveToastTimer?.Stop(); saveToastTimer?.Dispose(); } catch { }
             base.OnFormClosed(e);
