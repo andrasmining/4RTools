@@ -21,7 +21,7 @@ namespace _4RTools.Model.Vanilla
             RemoveButton("Run login now (selected)");
         }
 
-        private void ReplaceAccountButton(string text, Action action)
+        private void ReplaceAccountButton(string text, System.Action action)
         {
             Button existing = FindButton(this, text);
             if (existing == null || existing.Parent == null) return;
