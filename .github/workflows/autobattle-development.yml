@@ -1,0 +1,30 @@
+name: Autobattle development validation
+
+on:
+  push:
+    branches: [fix/autobattle-movement-verification]
+    paths: ['.github/workflows/autobattle-development.yml']
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  source:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Export exact development source
+        shell: powershell
+        run: |
+          git archive --format=zip --output=source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source export failed.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: autobattle-source-${{ github.sha }}
+          path: source.zip
+          retention-days: 1
+          if-no-files-found: error
