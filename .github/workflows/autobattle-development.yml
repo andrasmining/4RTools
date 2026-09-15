@@ -6,7 +6,7 @@ on:
     paths: ['.github/workflows/autobattle-development.yml']
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -20,63 +20,13 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 35
     steps:
-      - name: Preserve repository bytes before checkout
+      - name: Preserve repository bytes
         shell: powershell
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Recover reviewed source and fix integration
-        shell: powershell
-        run: |
-          git config user.name '4RTools engineering'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          @'
-          from pathlib import Path
-          import base64, hashlib, lzma, os, re, subprocess
-          def git(*args):
-              return subprocess.check_output(['git', *args])
-          assert os.environ['GITHUB_REF_NAME'] == 'fix/autobattle-movement-verification'
-          data = ''.join(Path('.github/autobattle-patch-%d.txt' % i).read_text().strip() for i in (1, 2))
-          patch = lzma.decompress(base64.b64decode(data, validate=True))
-          assert hashlib.sha256(patch).hexdigest() == 'cfe76d34bee35af59b616f2dbdc7a51a4037db6680c24b65a6ce1976eb5a7750'
-          paths = re.findall(r'^diff --git a/(\S+) b/\1$', patch.decode(), re.M)
-          assert len(paths) == 14 and all(not p.startswith('.github/') for p in paths)
-          endings = {}
-          for name in paths:
-              current = subprocess.run(['git', 'show', 'HEAD:' + name], capture_output=True)
-              original = subprocess.run(['git', 'show', '727ae89922c7cd9d665c3db979ddbacbee1827a8:' + name], capture_output=True)
-              assert current.returncode == original.returncode, 'Concurrent source change: ' + name
-              if current.returncode == 0:
-                  assert current.stdout == original.stdout, 'Concurrent source change: ' + name
-                  endings[name] = b'\r\n' in original.stdout
-                  Path(name).write_bytes(original.stdout.replace(b'\r\n', b'\n'))
-          patchfile = Path(os.environ['RUNNER_TEMP']) / 'autobattle-reviewed.patch'
-          patchfile.write_bytes(patch)
-          subprocess.run(['git', 'apply', '--check', '--unidiff-zero', str(patchfile)], check=True)
-          subprocess.run(['git', 'apply', '--unidiff-zero', str(patchfile)], check=True)
-          for name in ['Model/Vanilla/VanillaAutobattleResume.cs', 'Model/Vanilla/VanillaForegroundInput.cs']:
-              path = Path(name)
-              text = path.read_text()
-              text = re.sub(r'(?<![\w.])Action\b', 'System.Action', text)
-              if name.endswith('VanillaAutobattleResume.cs'):
-                  old = 'Path.Combine(baseDirectory, "VanillaBuilds")'
-                  assert text.count(old) == 1
-                  text = text.replace(old, 'AutobattleBuildProfileDirectory')
-                  old = 'private int resumeVerificationGeneration;'
-                  assert text.count(old) == 1
-                  text = text.replace(old, old + '\n\n        // Shipped build profiles live beside the executable, never in mutable user data.\n        internal static string AutobattleBuildProfileDirectory\n        {\n            get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VanillaBuilds"); }\n        }')
-              path.write_bytes(text.encode('utf-8'))
-          for name, crlf in endings.items():
-              if crlf:
-                  path = Path(name)
-                  path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
-          git('add', '--', *paths)
-          subprocess.run(['git', '-c', 'core.whitespace=cr-at-eol', 'diff', '--cached', '--check'], check=True)
-          git('archive', '--format=zip', '--output=' + str(Path(os.environ['RUNNER_TEMP']) / 'candidate-source.zip'), git('write-tree').decode().strip())
-          print(git('diff', '--cached', '--stat').decode())
-          '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw 'Reviewed source recovery failed.' }
+          persist-credentials: false
       - name: Restore dependencies
         shell: powershell
         run: |
@@ -94,17 +44,20 @@ jobs:
       - name: Native Windows mock-data UI regression harness
         shell: powershell
         run: ./scripts/test-ui-layout.ps1
-      - name: Commit validated source and remove obsolete patch payloads
+      - name: Collect source and validation evidence
+        if: always()
         shell: powershell
         run: |
-          git rm .github/autobattle-patch-1.txt .github/autobattle-patch-2.txt
-          if ($LASTEXITCODE -ne 0) { throw 'Patch cleanup failed.' }
-          git commit -m 'fix: verify autobattle movement with three bounded startup attempts'
-          if ($LASTEXITCODE -ne 0) { throw 'Validated source commit failed.' }
-          git push origin "HEAD:$env:GITHUB_REF_NAME"
-          if ($LASTEXITCODE -ne 0) { throw 'Branch advanced; no overwrite attempted.' }
-          git bundle create "$env:RUNNER_TEMP/validated-source.bundle" --all
-          if ($LASTEXITCODE -ne 0) { throw 'Validated source export failed.' }
+          New-Item -ItemType Directory -Path dist/evidence -Force | Out-Null
+          git bundle create dist/evidence/validated-source.bundle --all
+          if ($LASTEXITCODE -ne 0) { throw 'Source export failed.' }
+          git status --short | Out-File dist/evidence/worktree-status.txt -Encoding utf8
+          git rev-parse HEAD | Out-File dist/evidence/source-commit.txt -Encoding utf8
+          $cache = Join-Path $env:LOCALAPPDATA '4RTools-Engineering'
+          foreach ($folder in @('builds', 'portable-tests')) {
+            $source = Join-Path $cache $folder
+            if (Test-Path $source) { Copy-Item $source dist/evidence -Recurse -Force }
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -113,8 +66,6 @@ jobs:
             dist/*.zip
             dist/*.sha256
             dist/ui-layout/**
-            ${{ runner.temp }}/candidate-source.zip
-            ${{ runner.temp }}/validated-source.bundle
-            ${{ env.LOCALAPPDATA }}/4RTools-Engineering/builds/**/*.log
+            dist/evidence/**
           retention-days: 7
-          if-no-files-found: warn
+          if-no-files-found: error
