@@ -23,6 +23,9 @@ namespace _4RTools.Forms
             IntegrateMemoryDiscovery();
             IntegrateWeightAlerts();
             InstallGlobalDebugUi();
+            // Debug controls are inserted into the top header during OnShown. Compact only after
+            // those final controls exist so Full-HD/RDP does not reserve a large empty auto-size row.
+            CompactIntegratedHeader();
         }
 
         private void IntegrateMemoryDiscovery()
