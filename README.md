@@ -1,178 +1,93 @@
-<p align="center">
-  <img src="/assets/images/combo-tools.png">
-</p>
-
 # 4RTools Vanilla
 
-An independent fork of [4RTools](https://github.com/4RTools/4RTools) that adds
-Vanilla MMO to the original application. The familiar **Ragnarok Client** list,
-**Profile** selector, Autopot, spammers, macros, timers, and buff controls remain
-the main interface. Vanilla state access uses the read-only integration. The
-**Vanilla** tab includes **Open diagnostics** and **Smart Teleport and extra
-rules**; the latter opens an owned window sharing the selected client session.
-
-Vanilla's own Autobattle remains responsible for finding monsters, movement,
-and combat. The extension supplies conditional ordinary hotkeys around it.
-
-**Current validation:** the original window detects and selects Vanilla, displays
-the observed character name, and reads HP **456/456** and SP **113/113** from
-matching module-relative candidates. Repeated stable reads have succeeded;
-controlled changes and lifecycle checks are still required. These observations
-remain marked **Unverified**, and dependent actions remain disabled. See
-[release notes](RELEASE-NOTES.md) for the exact tested build, verified fields,
-and actual live behavior; displaying a feature is not proof of its game effect.
-
-## Autobattle startup verification (0.6.35)
-
-New startup and recovery attempts verify movement after the configured resume
-hotkey. The companion samples the character's verified X/Y throughout a
-10-second window. Movement on either axis succeeds immediately. With no movement,
-it refocuses and checks again before retrying; there are three hotkey attempts
-in total, not three additional retries. Three unsuccessful windows produce a
-latched failure instead of repeated toggles on every supervisor poll.
-
-The existing account row shows verification/retry progress. STOP, stale or
-unavailable state, a changed process/session/map, or lost foreground focus stop
-further input. Already-running adopted clients are not toggled. Movement confirms
-only this startup check, not combat; fighting while stationary can fail it.
-The implementation uses the existing read-only, fingerprint-verified build
-profile and ordinary keyboard input. Live Vanilla/RDP verification remains
-separate from the automated Windows tests documented in the release notes.
+An independent fork of 4RTools for Vanilla MMO. The **Vanilla** workspace is the
+primary interface; the **Original 4RTools** tab remains available for compatibility.
+Vanilla's own Autobattle controls movement and combat. This fork adds read-only
+state observation and ordinary, client-targeted keyboard/mouse input around it.
 
 ## Portable application
 
-The release workflow produces
-`dist/4RTools-Vanilla-v0.2.0-portable.zip` and its unpacked folder. Extract the
-whole folder and run **4RTools-Vanilla.exe**. Keep the EXE and its `.config`
-together. The package includes the license, third-party notices, instructions,
-version information, and SHA256 checksums.
+Use the portable ZIP attached to the latest GitHub Release. Extract the entire
+`4RTools-Vanilla-v<version>` folder and run **4RTools-Vanilla.exe**, keeping its
+configuration and `VanillaBuilds` folder together. The application targets x86
+and requires Windows with Microsoft .NET Framework 4.7.2 or a later 4.x runtime.
+Visual Studio, Git, NuGet and the source tree are not required on the user's PC.
+The application requests administrator privileges to match elevated clients.
 
-The application targets x86 and needs Windows with Microsoft .NET Framework
-4.7.2 or a later 4.x runtime. Windows 10 x64 is the local validation environment;
-Windows 11 x64 has not yet been tested on a separate machine. No Visual Studio,
-Git, NuGet, SDK, or source tree is required to use the portable application.
+Minimizing keeps the application on the Windows taskbar; it does not hide the
+main window exclusively in the system tray. Closing the main window exits it.
 
-Run the EXE to open the original 4RTools window. Select your Vanilla instance in
-**Ragnarok Client**, choose your **Profile**, and configure the existing feature
-tabs as usual. In **Vanilla**, use **Smart Teleport and extra rules** for the
-additional settings or **Open diagnostics** to inspect state. The application
-starts OFF. Additional rules start with dry-run enabled and have an emergency
-stop key, **Pause** by default. Original and extra automation cannot run together.
+User data lives under `%LOCALAPPDATA%\4RTools Vanilla`, outside versioned release
+folders. Upgrades preserve compatible profiles and recovery settings. Passwords
+use Windows DPAPI and must be entered separately for each Windows user/machine.
+Release packages contain no personal profiles, passwords or mutable user-data
+folders. See the included `README.txt`, `VERSION.txt` and `RELEASE-NOTES.md`.
 
-Original settings remain in `Profile/`; additional automation settings use
-`Profiles/`. Both are relative to the application folder. The distribution does
-not contain personal development profiles. The new `0.2.0` artifact uses its own
-folder, preserving the previous `0.1.0` release and any settings within it.
+## Workspace and recovery
 
-Known build definitions are local, so the application can identify supported
-client builds offline. Unrecognized builds, stale data, and unavailable required
-fields stop dependent automation. Users do not enter offsets or process IDs to
-make an unknown build appear supported.
+The compact top area shows up to two observed clients, including character name,
+HP/SP, location and activity when the corresponding state is valid. Recovery,
+automation, temporary actions, alerts, memory finding, diagnostics and data/update
+settings share the same workspace. Debug controls stay on the left of the header;
+update controls and version status stay on the right.
 
-## Vanilla integration
+Any number of account profiles can be saved, with at most **two enabled clients**
+at once. Recovery settings auto-save. Proxy selection belongs to each account,
+including cold startup, recovery and diagnostic input. Startup and recovery are
+serialized; a healthy client is not restarted or toggled merely because another
+client needs recovery.
 
-- Vanilla process enumeration in the original Ragnarok Client selector.
-- Reuse of original feature controls and configuration through the read-only
-  Vanilla state provider; individual features require their corresponding
-  gameplay data to be verified.
-- Read-only connection, executable fingerprint, architecture checks, optional
-  state observations, timestamps, diagnostics, and snapshot export.
-- Stable buffered readouts and state cells updated only when their values change.
-- Smart Idle teleport with separate no-target and no-combat timers, cooldown,
-  grace period, and optional coordinate-based stuck recovery.
-- Explicit Fixed Interval mode with the available state checks and its own
-  interval. It cannot guarantee combat avoidance when combat state is unknown.
-- SP threshold recovery with a configurable key/wait/click sequence, cooldown,
-  out-of-combat option, and Test Once.
-- An additional-rule editor for timed, HP/SP, status present/missing, no-target,
-  no-combat, and stationary conditions, with per-rule sequences and cooldowns.
-- Dry-run, global ON/OFF, emergency stop, disconnect handling, and validated
-  portable settings. Original and extra automation are mutually exclusive, and
-  only one extra action sequence runs at a time.
+### Autobattle movement verification
 
-The rules require independently verified state. Features listed here describe
-the implementation; their actual live validation is recorded in
-[RELEASE-NOTES.md](RELEASE-NOTES.md). The Vanilla integration does not write game memory,
-inject code, manipulate packets, or bypass Gepard. A blocked operation is
-reported and stopped.
+For a freshly started or recovered client, the configured resume hotkey is followed
+by a **10-second observation window** using fresh, verified X/Y readings. A change
+on either axis confirms movement immediately. Without movement, the intended
+client is focused again and movement is rechecked before another hotkey is sent.
+There are **three total attempts: the first press and at most two retries**.
 
-## Original 4RTools
+After three unsuccessful windows the account enters an explicit failed state;
+later observations do not silently restart the same budget. Cold startup does not
+advance to the next account after failure. A failed or interrupted startup is not
+subsequently adopted as a healthy client. The explicit Resume hotkey diagnostic
+can perform a new bounded verification; only success clears the failed latch.
+Already-running healthy clients are adopted without toggling Autobattle.
 
-The original 4RTools interface is the application opened at normal startup.
-Vanilla is integrated into its existing client selection and read methods;
-other servers retain their existing support. The fork does not use the upstream
-self-updater to replace its executable.
+STOP, settings changes, replaced clients/sessions, map changes, death, failed reads,
+stale observations and lost input ownership prevent further automated input.
+Progress and failures appear in account status and logs. Movement confirms only
+movement: it is not proof of combat, and a character fighting without moving can
+fail this deliberately position-based check.
 
-Upstream 4RTools is an all-in-one tool for **Ragnarök Online** servers, providing
-Autopot, skill spam, macro songs, and other configurable actions. These are
-upstream features; listing them does not imply they have been tested against
-Vanilla with this modified release.
+## State validity and boundaries
 
-<img src='assets/images/ragnarok-icon.png' width='40'>
+Shipped build profiles are matched to the executable fingerprint. The current
+profile records independently verified HP/SP, character name, carried weight,
+X/Y and map observations. Unsupported or unknown fields are not treated as valid
+zero, idle or no-target states. Target/combat/status-dependent rules remain gated
+by their required evidence; enabling a UI option does not verify its game effect.
 
-### Upstream features
+Vanilla memory access is read-only. The fork does not write game memory, inject
+code, manipulate packets, modify game files or bypass Gepard. A blocked read or
+action stops that operation rather than using an invasive alternate access path.
+Stock 4RTools support must not be interpreted as blanket approval of every fork
+feature. Current release notes distinguish implementation, automated validation
+and actual live-game validation.
 
-- [x] ON/OFF Button (with shortcut key)
-- [x] Autopot
-- [x] Autobuff status
-- [x] Manage Profiles
-- [x] AHK Spammer
-- [x] Auto Refresh Spammer
-- [x] Autobuff Stuffs
-- [x] Autobuff skills
-- [x] Song Macro
-- [x] Macro Switch/Macro Chain
-- [x] ATK x DEF Mode switch
+## Engineering and release validation
 
-## Build and release engineering
+The existing Windows build scripts restore dependencies, build Debug/Release and
+run the offline regression suite. Portable packaging checks x86/version metadata,
+licenses, payload checksums and a relocated inert executable launch. The native
+mock-data UI harness covers 18 scenarios, including Full-HD/RDP-sized layouts,
+smaller windows, enlarged text and large saved-account lists.
 
-Maintainers can use the existing Visual Studio 2022 solution or the repository
-PowerShell scripts. These steps are not required to run a portable release.
-
-```powershell
-# Restore, rebuild Release and Debug, and run offline tests.
-& .\scripts\build.ps1
-
-# Build/test the explicit x86 fork release configuration.
-& .\scripts\build.ps1 -VanillaRelease
-
-# Rebuild/test Release, package, verify a relocated launch, and create checksums.
-& .\scripts\build-release.ps1
-```
-
-MSBuild and a .NET desktop build environment are needed only for development.
-The build script uses the existing .NET Framework 4.7.2 target and a pinned
-Microsoft reference package if the targeting pack is missing. NuGet dependencies
-are restored at build time and embedded with Costura/Fody. Application data is
-relative to the executable folder; caches and validation logs are separate.
-
-The release script requires a matching executable version and packages only the
-intended executable/config, tracked client build definitions, and distribution
-assets. It creates a new ZIP, verifies checksums, and launches an extracted copy
-inside the repository. `-Replace` preserves any old release folder and profiles
-under `dist/.previous/` before publishing the replacement.
-
-[The diagnostics engineering report](docs/vanilla-diagnostics.md) records the
-earlier baseline audit and read-only investigation. Current behavior and release
-validation take precedence in [the release notes](RELEASE-NOTES.md).
+The release workflow runs these gates before publication, then downloads the
+public release assets and verifies their hashes and source identity against the
+tested package. Automated tests and mock UI rendering are not a live Vanilla or
+Gepard gameplay test. See `RELEASE-NOTES.md` for the precise validation limits.
 
 ## Attribution and license
 
-This fork is independent of upstream 4RTools and Vanilla MMO. The unchanged
-[MIT license](LICENSE) includes `Copyright (c) 2022 4RTools`. Third-party runtime
-components retain their own [licenses and notices](packaging/THIRD-PARTY-NOTICES.txt).
-
-Upstream community links:
-
-- [Website](https://www.4rtools.com.br/)
-- [Discord](https://discord.gg/HRWvG5ut)
-
-### References
-
-https://github.com/k1ngJ/dtAP
-
-### Upstream collaborators
-
-<a href="https://github.com/4RTools/4RTools/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=4RTools/4RTools" />
-</a>
+This fork is independent of upstream 4RTools and Vanilla MMO. The MIT license
+retains `Copyright (c) 2022 4RTools`. Distributed third-party notices are included
+in `packaging/THIRD-PARTY-NOTICES.txt` and every portable release.
