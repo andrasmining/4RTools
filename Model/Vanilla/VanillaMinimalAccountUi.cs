@@ -42,48 +42,45 @@ namespace _4RTools.Model.Vanilla
 
         private void AddAccountMinimal()
         {
+            if (accountCatalog == null) return;
             var account = new VanillaReconnectAccount
             {
-                Label = "Client " + (settings.Accounts.Count + 1),
-                Enabled = settings.Accounts.Count(a => a.Enabled) < 2
+                Label = "Client " + (accountCatalog.Count + 1),
+                Enabled = accountCatalog.Count(a => a.Enabled) < 2
             };
             VanillaProxyRoute route = settings.Proxy;
             using (var dialog = new VanillaMinimalAccountDialog(supervisor, account, route))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
                 if (!CanAcceptEnabledState(dialog.Account, null)) return;
-                settings.Accounts.Add(dialog.Account);
+                accountCatalog.Add(dialog.Account);
                 VanillaAccountProxyPreferences.Set(dialog.Account.Id, dialog.ProxyRoute);
-                RefreshAccounts();
-                RefreshAccountProxyColumn();
-                QueueAutoSave("Account added");
+                PersistCatalogAndRefresh("Account added");
             }
         }
 
         private void EditAccountMinimal()
         {
-            VanillaReconnectAccount selected = SelectedAccount();
+            VanillaReconnectAccount selected = SelectedCatalogAccount();
             if (selected == null) return;
             VanillaProxyRoute route = VanillaAccountProxyPreferences.Get(selected.Id, settings.Proxy);
             using (var dialog = new VanillaMinimalAccountDialog(supervisor, selected.Clone(), route))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
                 if (!CanAcceptEnabledState(dialog.Account, selected.Id)) return;
-                int index = settings.Accounts.FindIndex(a => a.Id == selected.Id);
+                int index = accountCatalog.FindIndex(a => string.Equals(a.Id, selected.Id, StringComparison.OrdinalIgnoreCase));
                 if (index < 0) return;
-                settings.Accounts[index] = dialog.Account;
+                accountCatalog[index] = dialog.Account;
                 VanillaAccountProxyPreferences.Set(dialog.Account.Id, dialog.ProxyRoute);
                 settings.Proxy = dialog.ProxyRoute;
-                RefreshAccounts();
-                RefreshAccountProxyColumn();
-                QueueAutoSave("Account saved");
+                PersistCatalogAndRefresh("Account saved");
             }
         }
 
         private bool CanAcceptEnabledState(VanillaReconnectAccount candidate, string replacingId)
         {
             if (candidate == null || !candidate.Enabled) return true;
-            int otherEnabled = settings.Accounts.Count(a => a.Enabled
+            int otherEnabled = (accountCatalog ?? new List<VanillaReconnectAccount>()).Count(a => a.Enabled
                 && (string.IsNullOrWhiteSpace(replacingId) || !string.Equals(a.Id, replacingId, StringComparison.OrdinalIgnoreCase)));
             if (otherEnabled < 2) return true;
             MessageBox.Show(this,
@@ -94,18 +91,16 @@ namespace _4RTools.Model.Vanilla
 
         private void RemoveAccountMinimal()
         {
-            VanillaReconnectAccount selected = SelectedAccount();
-            if (selected == null) return;
-            if (settings.Accounts.Count <= 1)
+            VanillaReconnectAccount selected = SelectedCatalogAccount();
+            if (selected == null || accountCatalog == null) return;
+            if (accountCatalog.Count <= 1)
             {
                 MessageBox.Show(this, "Keep at least one account profile.", "Accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            settings.Accounts.RemoveAll(a => a.Id == selected.Id);
+            accountCatalog.RemoveAll(a => string.Equals(a.Id, selected.Id, StringComparison.OrdinalIgnoreCase));
             VanillaAccountProxyPreferences.Remove(selected.Id);
-            RefreshAccounts();
-            RefreshAccountProxyColumn();
-            QueueAutoSave("Account removed");
+            PersistCatalogAndRefresh("Account removed");
         }
     }
 
