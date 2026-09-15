@@ -1,17 +1,74 @@
 # 4RTools Vanilla 0.6.35
 
-## Verified autobattle startup and recovery
+## Autobattle startup and recovery
 
-- Startup, recovery and the resume diagnostic now share a bounded movement verifier. After the configured hotkey, fresh validated X/Y samples are observed throughout a 10-second window; a change on either axis succeeds immediately, including movement that returns to its initial position later.
-- No movement triggers another focused hotkey attempt, with a fresh baseline and a final movement check after refocusing. There are **three total attempts** (initial send plus two retries), not three extra retries. After the third unsuccessful window, the account reports failure and later gameplay polls cannot restart the same retry budget.
-- Cold startup holds the current client's input lease until movement verification and minimization complete. Later queued clients do not launch after a failed cold start. Continuous recovery likewise keeps input serialized through verification. Already-running adopted clients remain untoggled.
-- The existing account status column shows compact verification/retry progress, with detailed reasons in hover text and logs. Automatic minimization excludes a client while verification is still in progress.
-- STOP, configuration changes, replaced processes/sessions/characters, map transitions, dead characters, unknown or stale coordinates, failed reads and loss of foreground focus prevent additional keys. Monotonic deadlines and operation generations prevent clock changes or an old worker from restarting or completing a newer attempt. Modified chord dispatch releases held keys even when cancellation or an input error interrupts it.
-- The verified, fingerprint-matched read-only state provider and existing X/Y/map mappings are reused. No game-memory writes, offset guesses, packet actions, injections or security bypasses are introduced. Existing settings, profile storage, two-active-client limit, packaging and updater behavior are preserved.
-- Repository policy now explicitly requires end-to-end ownership through a published, verified release rather than stopping at a commit, push or queued workflow.
+Startup, recovery and the Resume hotkey diagnostic share one bounded movement
+verifier. After the configured hotkey, fresh verified X/Y readings are observed
+throughout a 10-second window. A change on either axis succeeds immediately.
+Without movement, the intended client is focused and checked again before a
+retry. There are **three total attempts: the initial press and two retries**.
+The third unsuccessful window produces an explicit failure; later gameplay
+polls do not restart the same budget.
 
-## Validation and limits
+Cold startup holds the current client's recovery lease until movement verification
+and minimization are complete. A failed cold start blocks later accounts. Healthy
+already-running clients are adopted without toggling Autobattle. Failed or
+interrupted startup is not silently adopted as healthy; a successful explicit
+Resume hotkey diagnostic clears its failed latch.
 
-Publication requires the existing standard Windows runner gates: shipped-profile validation, Debug and Release builds with the full offline regression suite, portable ZIP construction and checksum verification, inert Windows executable launch smoke test, and all 18 native mock-data UI scenarios. New deterministic tests cover the three-attempt state machine, timing, movement, cancellation, state validity, client/operation isolation, failure latching, account progress and held-key cleanup. No test needs a live game process or real account credentials.
+Compact account status displays the current verification/retry attempt. Detailed
+failure reasons remain available in hover text and logs. A verifying client is
+not automatically minimized before verification finishes.
 
-These automated Windows build, package and mock-data UI checks are **not live Vanilla/Gepard gameplay or RDP testing**. The new movement check has not been exercised against a live game client in this development session. Movement is not proof of combat or of why the character moved; conversely, a character fighting while stationary for all three windows can fail this deliberately movement-based check. Existing legacy dependency/compiler warnings remain visible and are not suppressed by this patch.
+## Lifecycle and recovery repairs
+
+- STOP and configuration changes invalidate pending startup, recovery and diagnostic
+  workers. Old callbacks cannot revive an operation after STOP/START or overwrite
+  a replacement client's status. A cancelled login cannot close the replacement
+  client as a side effect of its failure cleanup.
+- A rejected diagnostic request no longer invalidates the running diagnostic while
+  leaving its input lease occupied. Explicit resume diagnostics record their real
+  success/failure instead of leaving an obsolete failed latch behind.
+- Final client minimization checks the exact runtime/PID under the ownership lock.
+  Foreground input is serialized; cancellation and target ownership are checked
+  before clicks, key presses and each typed character. Chord cleanup releases held
+  keys after cancellation or input failure.
+- Recovery and diagnostic proxy selection use the account's proxy, as cold startup
+  already did. Shipped read-only build profiles are loaded beside the executable,
+  not from the mutable user-data directory.
+- Unknown/stale observations, failed reads, map/session/character changes, dead
+  characters and lost input ownership stop verification safely. Existing trusted
+  X/Y/map mappings are reused; no memory writes, offset guesses, packet actions,
+  injection or protection bypasses are introduced.
+
+## Repository and packaging
+
+The outdated README and packaged quick start now describe the actual Vanilla-first
+workspace, auto-saved account settings, taskbar minimization, persistent data and
+movement verification. Repository policy explicitly requires verified release
+publication, integration into main and removal of completed task branches.
+Temporary recovery/patch infrastructure is removed after validation.
+
+The release workflow verifies the published tag against its tested source commit,
+downloads the public ZIP and checksum, and compares the downloaded bytes with the
+Windows-tested package. It exports the verification report and source identity.
+Licenses, notices, existing user configuration and the two-active-client limit
+are preserved.
+
+## Validation and limitations
+
+Publication is gated on shipped-profile validation, Debug and Release compilation,
+the complete offline regression suite, portable-package checksums and x86/version
+checks, an inert Windows executable launch, and 18 native mock-data UI scenarios.
+The autobattle suite includes 47 deterministic cases covering movement, timing,
+three-attempt exhaustion, state validity, cancellation, client/operation isolation,
+failure latching, diagnostic lifecycle, safe adoption and held-key cleanup. The
+new lifecycle regressions are reproduced before applying their implementation
+fixes, then required to pass with the full suite.
+
+These automated Windows build, package and mock-data UI checks are **not live
+Vanilla/Gepard gameplay or RDP testing**. This release has not been exercised
+against a live game client in this engineering session. Movement proves only
+movement, not combat or its cause. Conversely, a character fighting while
+stationary for all three windows can fail this deliberately movement-based check.
+Legacy dependency/compiler warnings remain visible; they are not suppressed.
