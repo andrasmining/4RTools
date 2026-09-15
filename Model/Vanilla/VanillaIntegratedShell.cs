@@ -53,9 +53,9 @@ namespace _4RTools.Forms
         private void ExpandForIntegratedWorkspace()
         {
             Rectangle area = Screen.FromControl(this).WorkingArea;
-            int width = Math.Max(980, area.Width - 16);
+            int width = Math.Max(1000, area.Width - 16);
             int height = Math.Max(680, area.Height - 16);
-            MinimumSize = new Size(Math.Min(980, width), Math.Min(680, height));
+            MinimumSize = new Size(Math.Min(1000, width), Math.Min(680, height));
             Size = new Size(Math.Min(1600, width), Math.Min(1000, height));
             StartPosition = FormStartPosition.CenterScreen;
             if (!smokeTest) WindowState = FormWindowState.Maximized;
