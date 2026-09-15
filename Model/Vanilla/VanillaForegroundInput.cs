@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -175,8 +176,6 @@ namespace _4RTools.Model.Vanilla
                     return;
                 }
 
-                // If Windows has already foregrounded another suitable top-level window from the
-                // same PID (the exact splash -> game transition seen in live logs), adopt it.
                 if (IsUsableWindowForProcess(current, process.Id))
                 {
                     IntPtr old = window;
@@ -200,9 +199,6 @@ namespace _4RTools.Model.Vanilla
                     return;
                 }
 
-                // Re-check the foreground PID before considering this a failed focus attempt. A
-                // Gepard splash can disappear while SetForegroundWindow is in flight and the game
-                // window can become foreground at exactly this point.
                 if (IsUsableWindowForProcess(current, process.Id))
                 {
                     IntPtr old = window;
