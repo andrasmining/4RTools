@@ -39,7 +39,26 @@ namespace _4RTools.Forms
         private void UpdateVanillaFleetHeight()
         {
             if (integratedFleetDashboard == null || integratedFleetDashboard.IsDisposed) return;
-            int dashboardHeight = PreferredFleetDashboardHeight(ClientSize.Height);
+            // A compact strip must still contain its text. Font metrics, not just screen
+            // height, determine the minimum; location/activity must never disappear.
+            int contentHeight = 0;
+            foreach (TableLayoutPanel outer in integratedFleetDashboard.Controls.OfType<TableLayoutPanel>())
+            foreach (GroupBox card in outer.Controls.OfType<GroupBox>())
+            {
+                TableLayoutPanel layout = card.Controls.OfType<TableLayoutPanel>().FirstOrDefault();
+                if (layout == null) continue;
+                int rowsHeight = 0;
+                for (int row = 0; row < 4; row++)
+                {
+                    int r = row;
+                    int measured = layout.Controls.Cast<Control>().Where(c => layout.GetRow(c) == r)
+                        .Select(c => (r == 2 ? 4 : c.Font.Height) + c.Margin.Vertical).DefaultIfEmpty(0).Max();
+                    rowsHeight += measured + (r == 2 ? 2 : 0);
+                }
+                contentHeight = Math.Max(contentHeight, rowsHeight + card.Font.Height + card.Padding.Vertical
+                    + card.Margin.Vertical + outer.Padding.Vertical + 8);
+            }
+            int dashboardHeight = Math.Max(PreferredFleetDashboardHeight(ClientSize.Height), contentHeight);
             integratedFleetDashboard.MinimumSize = new Size(0, dashboardHeight);
             integratedFleetDashboard.Height = dashboardHeight;
             var host = integratedFleetDashboard.Parent as TableLayoutPanel;
@@ -81,7 +100,12 @@ namespace _4RTools.Forms
                 bool stacked = NaturalFlowWidth(actions) + statusWidth + 8 > width;
                 int actionWidth = stacked ? width : Math.Max(1, width - statusWidth);
                 int actionHeight = MeasuredFlowHeight(actions, actionWidth);
-                int statusHeight = MeasuredFlowHeight(statusGroup, statusWidth);
+                // The label may have just changed from one to multiple lines. Its old Bounds
+                // still describe the previous text until layout completes; measure the new
+                // preferred text height too, otherwise the first long status is clipped.
+                int statusHeight = Math.Max(MeasuredFlowHeight(statusGroup, statusWidth),
+                    statusGroup.Controls.Cast<Control>().Where(c => c.Visible)
+                        .Select(c => c.GetPreferredSize(Size.Empty).Height + c.Margin.Vertical).DefaultIfEmpty(0).Max());
                 int firstHeight = stacked ? actionHeight : Math.Max(actionHeight, statusHeight);
                 int secondHeight = stacked ? statusHeight : 0;
 
@@ -164,8 +188,7 @@ namespace _4RTools.Forms
                         if (helper == null) continue;
                         helper.Visible = false;
                         helper.Margin = Padding.Empty;
-                        vanillaFleetHelp.SetToolTip(root,
-                            "Read-only values from the verified Vanilla build profile. Hover a client card for observation details.");
+                        vanillaFleetHelp.SetToolTip(root, "Read-only values from the verified Vanilla build profile. Hover a client card for observation details.");
                     }
                     while (layout.RowStyles.Count < 2) layout.RowStyles.Add(new RowStyle());
                     layout.RowStyles[1].SizeType = SizeType.Absolute;
@@ -173,28 +196,35 @@ namespace _4RTools.Forms
                 }
                 if (layout != null && layout.Parent is GroupBox && layout.RowCount == 5)
                 {
+                    // Keep location and activity on the same final row, like HP and SP.
+                    // Reuse both original labels, including their error tooltips and updates.
+                    Control location = layout.GetControlFromPosition(0, 3);
+                    Control activity = layout.GetControlFromPosition(0, 4);
+                    if (location != null && activity != null)
+                    {
+                        layout.SetColumnSpan(location, 1);
+                        layout.SetColumnSpan(activity, 1);
+                        layout.SetCellPosition(activity, new TableLayoutPanelCellPosition(1, 3));
+                    }
                     while (layout.RowStyles.Count < 5) layout.RowStyles.Add(new RowStyle());
                     layout.RowStyles[0].SizeType = SizeType.AutoSize;
                     layout.RowStyles[1].SizeType = SizeType.AutoSize;
                     layout.RowStyles[2].SizeType = SizeType.Absolute;
-                    layout.RowStyles[2].Height = 7;
+                    layout.RowStyles[2].Height = 6;
                     layout.RowStyles[3].SizeType = SizeType.Absolute;
-                    layout.RowStyles[3].Height = 20;
-                    layout.RowStyles[4].SizeType = SizeType.Percent;
-                    layout.RowStyles[4].Height = 100;
-                    GroupBox card = layout.Parent as GroupBox;
-                    if (card != null)
-                    {
-                        card.Padding = new Padding(7);
-                        card.Margin = new Padding(3);
-                        vanillaFleetHelp.SetToolTip(card, "Read-only Vanilla client status. Hover the activity/error line for details.");
-                    }
+                    layout.RowStyles[3].Height = layout.Font.Height + 4;
+                    layout.RowStyles[4].SizeType = SizeType.Absolute;
+                    layout.RowStyles[4].Height = 0;
+                    GroupBox card = (GroupBox)layout.Parent;
+                    card.Padding = new Padding(6, 3, 6, 3);
+                    card.Margin = new Padding(3, 2, 3, 2);
+                    vanillaFleetHelp.SetToolTip(card, "Read-only Vanilla client status. Hover the activity/error line for details.");
                     foreach (Control item in layout.Controls)
                     {
-                        var label = item as Label;
-                        if (label == null) continue;
-                        int row = layout.GetRow(label);
-                        if (row != 3 && row != 4) continue;
+                        item.Margin = new Padding(3, 1, 3, 1);
+                        if (layout.GetRow(item) == 2) item.Height = 4;
+                        Label label = item as Label;
+                        if (label == null || layout.GetRow(label) != 3) continue;
                         label.AutoSize = false;
                         label.Dock = DockStyle.Fill;
                         label.AutoEllipsis = true;
