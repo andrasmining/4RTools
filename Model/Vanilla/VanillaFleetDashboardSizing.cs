@@ -16,7 +16,11 @@ namespace _4RTools.Forms
             vanillaFleetSizingApplied = true;
 
             UpdateVanillaFleetHeight();
-            SizeChanged += (s, e) => UpdateVanillaFleetHeight();
+            SizeChanged += (s, e) =>
+            {
+                UpdateVanillaFleetHeight();
+                CompactIntegratedHeader();
+            };
             ConfigureFleetPresentation(integratedFleetDashboard);
             StartMemoryAccessDiagnostics();
         }
@@ -42,6 +46,37 @@ namespace _4RTools.Forms
                 host.RowStyles[1].SizeType = SizeType.Absolute;
                 host.RowStyles[1].Height = dashboardHeight;
             }
+        }
+
+        /// <summary>
+        /// The integrated header previously reported an oversized preferred height through nested
+        /// auto-size/fill panels, leaving a large blank band above the client cards. Measure the
+        /// actual visible controls and pin only the header row to that need. Narrow layouts may use
+        /// two wrapped lines; normal Full-HD remains a single compact line.
+        /// </summary>
+        private void CompactIntegratedHeader()
+        {
+            if (integratedFleetDashboard == null || integratedFleetDashboard.IsDisposed) return;
+            var host = integratedFleetDashboard.Parent as TableLayoutPanel;
+            if (host == null || host.RowStyles.Count == 0) return;
+            Control header = host.GetControlFromPosition(0, 0);
+            if (header == null) return;
+
+            int availableWidth = Math.Max(400, host.ClientSize.Width - host.Padding.Horizontal);
+            int preferred = 30;
+            foreach (Control child in header.Controls)
+            {
+                if (!child.Visible) continue;
+                Size wanted = child.GetPreferredSize(new Size(availableWidth, 0));
+                preferred = System.Math.Max(preferred, wanted.Height + child.Margin.Vertical + header.Padding.Vertical);
+            }
+            int maximum = availableWidth < 1100 ? 68 : 42;
+            int height = System.Math.Max(32, System.Math.Min(maximum, preferred));
+
+            header.AutoSize = false;
+            header.Height = height;
+            host.RowStyles[0].SizeType = SizeType.Absolute;
+            host.RowStyles[0].Height = height;
         }
 
         private void StartMemoryAccessDiagnostics()
@@ -76,8 +111,6 @@ namespace _4RTools.Forms
                 var layout = child as TableLayoutPanel;
                 if (layout != null && layout.RowCount == 2 && layout.ColumnCount == 2)
                 {
-                    // The second row used to show explanatory prose such as "Live values are read...".
-                    // Keep that documentation on hover instead and give the vertical space back to the workspace.
                     foreach (Control item in layout.Controls)
                     {
                         if (layout.GetRow(item) != 1) continue;
