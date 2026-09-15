@@ -6,10 +6,14 @@ The Vanilla workspace is functionally dense, so keep its visible UI deliberately
 
 - Optimize first for ordinary Full-HD / RDP work areas around 1920x1080 and 1980x1020, while retaining graceful scrolling below that size. Do not design around 2K/4K space.
 - Prefer adaptive layout based on current client width/height instead of large fixed panels or fixed whitespace.
-- Spend vertical space on interactive data and controls, especially the account table and runtime status/log areas. Keep the always-visible fleet strip compact.
+- Spend vertical space on interactive data and controls, especially the account table and log. Keep the always-visible fleet strip compact.
 - Do not show explanatory paragraphs, security implementation notes, or other documentation inline when a tooltip/hover description is sufficient. Normal-state helper prose should be hidden; visible text should be state, data, action, warning, or error information.
 - Keep related controls on one compact row at Full-HD when practical and allow wrapping only as a responsive fallback.
 - Launcher input should be only as wide as useful; do not let it consume the whole row.
+- On normal desktop widths, the Recovery & relog tab should use approximately two thirds of its width for launcher/actions/accounts and one third for the reconnect log. Stack only on genuinely narrow windows.
+- Do not keep a separate large recovery-status panel when the same state can be expressed beside the corresponding account. Put compact PID/state information in the account table and keep verbose detail in hover text/logging.
+- The account table is the primary recovery-management surface. Reserve room for at least four account rows plus roughly one empty-row worth of breathing room. Let it consume available vertical space and show all saved profiles that fit; use an internal vertical scrollbar only when the profile list exceeds the available pane.
+- Any number of account profiles may be saved persistently, but at most two profiles may be enabled/actively supervised at once. Preserve the existing two-active-client recovery/runtime limit.
 - Account-specific settings belong in the account row/edit dialog. Proxy is account-specific and visible in the table; edit it through the account editor. Do not add a second selected-account proxy control below the table.
 - Do not expose redundant one-off actions such as a separate `Run login now` button when the normal supervisor/test flow already owns login/recovery behavior.
 - Preserve hover documentation for controls and panels so functionality remains discoverable without making the default workspace visually busy.
