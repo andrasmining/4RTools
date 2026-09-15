@@ -107,6 +107,7 @@ namespace _4RTools.Forms
                 RowCount = 3,
                 ColumnCount = 1
             };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 145));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -173,6 +174,9 @@ namespace _4RTools.Forms
                 Enabled = !smokeTest
             };
             vanillaRecoveryPage = WorkspacePage("Recovery & relog");
+            // Recovery owns scrolling inside its responsive root. A second scrolling parent
+            // can retain an old virtual width and prevent the embedded form from shrinking.
+            vanillaRecoveryPage.AutoScroll = false;
             vanillaRulesPage = WorkspacePage("Automation");
             vanillaTemporaryPage = WorkspacePage("Temporary actions");
             vanillaDiagnosticsPage = WorkspacePage("Diagnostics");
@@ -254,9 +258,14 @@ namespace _4RTools.Forms
         {
             form.TopLevel = false;
             form.FormBorderStyle = FormBorderStyle.None;
-            form.Dock = DockStyle.Fill;
-            form.ShowInTaskbar = false;
             form.MinimumSize = Size.Empty;
+            // Embedded forms are controls, not independently sized desktop windows. Explicit
+            // bounds prevent Framework's desktop MaxWindowTrackSize from capping their width.
+            form.MaximumSize = new Size(32767, 32767);
+            form.AutoSize = false;
+            form.Dock = DockStyle.Fill;
+            form.Margin = Padding.Empty;
+            form.ShowInTaskbar = false;
             form.AutoScroll = true;
         }
 
@@ -370,11 +379,15 @@ namespace _4RTools.Model.Vanilla
         {
             TopLevel = false;
             FormBorderStyle = FormBorderStyle.None;
-            Dock = DockStyle.Fill;
-            ShowInTaskbar = false;
             MinimumSize = Size.Empty;
+            MaximumSize = new Size(32767, 32767);
+            AutoSize = false;
+            Dock = DockStyle.Fill;
+            Margin = Padding.Empty;
+            ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            AutoScroll = true;
+            AutoScroll = false;
+            AutoScrollMinSize = Size.Empty;
         }
     }
 }
