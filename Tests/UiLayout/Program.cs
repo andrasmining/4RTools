@@ -178,6 +178,14 @@ internal static class UiLayoutHarness
             }
             foreach (Button button in Descendants(main).OfType<Button>().Where(b => b.Visible && b.Text == "CHECK FOR UPDATES"))
                 Check(FullyVisible(button, main), name + ": update button is clipped.");
+            Control fleet = (Control)Field(main, "integratedFleetDashboard");
+            foreach (Label label in Descendants(fleet).OfType<Label>().Where(c => c.Visible))
+            {
+                Check(label.Height >= label.Font.Height && FullyVisible(label, main),
+                    name + ": live-card text is clipped: " + label.Text + " bounds=" + BoundsIn(label, main));
+            }
+            Check(Descendants(fleet).OfType<Label>().Count(c => c.Visible && c.Text.StartsWith("Activity:")) == 2,
+                name + ": both live-card activity fields must remain visible.");
             if (rows > grid.DisplayedRowCount(false))
             {
                 grid.FirstDisplayedScrollingRowIndex = rows - 1;
