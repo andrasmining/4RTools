@@ -8,6 +8,7 @@ namespace _4RTools.Forms
     public partial class Container
     {
         private bool globalDebugUiInstalled;
+        private bool taskbarMinimizeGuard;
         private CheckBox globalDebugEnabled;
         private Button globalCopyDebug;
         private System.Windows.Forms.Timer globalDebugSnapshotTimer;
@@ -19,11 +20,17 @@ namespace _4RTools.Forms
             globalDebugUiInstalled = true;
             _4RTools.Model.Vanilla.VanillaDebugLog.Initialize();
 
-            Button updates = FindControlByText<Button>(this, "CHECK FOR UPDATES");
-            if (updates != null && updates.Parent != null)
+            // The main product window must remain a normal taskbar window. The legacy container
+            // resize handler hides minimized forms for tray-only behavior, so this later handler
+            // immediately reverses that hide while preserving the Minimized state.
+            ShowInTaskbar = true;
+            Resize += KeepMainWindowInTaskbar;
+
+            Button anchor = FindControlByText<Button>(this, "OPEN DATA FOLDER");
+            if (anchor != null && anchor.Parent != null)
             {
-                Control parent = updates.Parent;
-                int index = parent.Controls.GetChildIndex(updates);
+                Control parent = anchor.Parent;
+                int index = parent.Controls.GetChildIndex(anchor);
 
                 globalDebugEnabled = new CheckBox
                 {
@@ -36,8 +43,8 @@ namespace _4RTools.Forms
                 {
                     _4RTools.Model.Vanilla.VanillaDebugLog.SetEnabled(globalDebugEnabled.Checked);
                     integratedUpdateStatus.Text = globalDebugEnabled.Checked
-                        ? "Debug log ON - detailed app/recovery/startup diagnostics are being recorded."
-                        : "Debug log OFF.";
+                        ? "Version " + _4RTools.Model.Vanilla.VanillaUpdater.CurrentVersionText + " - debug log ON."
+                        : "Version " + _4RTools.Model.Vanilla.VanillaUpdater.CurrentVersionText + " - debug log OFF.";
                 };
 
                 globalCopyDebug = new Button
@@ -74,8 +81,23 @@ namespace _4RTools.Forms
             {
                 try { globalDebugSnapshotTimer?.Stop(); globalDebugSnapshotTimer?.Dispose(); } catch { }
                 globalDebugSnapshotTimer = null;
+                try { Resize -= KeepMainWindowInTaskbar; } catch { }
             };
             WriteGlobalDebugSnapshot();
+        }
+
+        private void KeepMainWindowInTaskbar(object sender, EventArgs e)
+        {
+            if (smokeTest || WindowState != FormWindowState.Minimized || taskbarMinimizeGuard) return;
+            taskbarMinimizeGuard = true;
+            try
+            {
+                ShowInTaskbar = true;
+                if (!Visible) Show();
+                if (WindowState != FormWindowState.Minimized) WindowState = FormWindowState.Minimized;
+                _4RTools.Model.Vanilla.VanillaDebugLog.Write("UI", "Main 4RTools window minimized to taskbar; tray-only hiding suppressed.");
+            }
+            finally { taskbarMinimizeGuard = false; }
         }
 
         private void CopyGlobalDebugLog()
@@ -85,7 +107,7 @@ namespace _4RTools.Forms
                 string reconnect = integratedReconnectSupervisor == null ? null : integratedReconnectSupervisor.LogPath;
                 string contents = _4RTools.Model.Vanilla.VanillaDebugLog.BuildClipboardBundle(reconnect);
                 Clipboard.SetText(string.IsNullOrWhiteSpace(contents) ? "(debug log is empty)" : contents);
-                integratedUpdateStatus.Text = "Debug log copied to clipboard.";
+                integratedUpdateStatus.Text = "Version " + _4RTools.Model.Vanilla.VanillaUpdater.CurrentVersionText + " - debug log copied.";
                 _4RTools.Model.Vanilla.VanillaDebugLog.Write("UI", "Global debug bundle copied to clipboard.");
             }
             catch (Exception ex)
