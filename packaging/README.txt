@@ -1,82 +1,74 @@
 4RTools Vanilla
 ==============
 
-This is an independent extension of 4RTools, not an official upstream or
-Vanilla MMO release. Copyright (c) 2022 4RTools. See LICENSE.
+Independent fork of 4RTools, not an official upstream or Vanilla MMO release.
+Copyright (c) 2022 4RTools. See LICENSE and THIRD-PARTY-NOTICES.txt.
 
-Vanilla's documentation lists 4R Tools as supported. This fork keeps Gepard
-intact: it does not disable, bypass, patch, hide from, or interfere with
-Gepard Shield. Vanilla-specific recovery uses ordinary window input and
-read-only observation where applicable.
+Starting the application
+-----------------------
+Extract the entire release folder and run 4RTools-Vanilla.exe. Keep its .config
+and VanillaBuilds folder beside it. Windows with Microsoft .NET Framework 4.7.2
+or a later 4.x runtime is required. The application targets x86, supports x64
+Windows and requests administrator privileges to match elevated game clients.
+No Visual Studio, Git, NuGet, SDK or source tree is needed to run the package.
 
-One application window
-----------------------
-Run 4RTools-Vanilla.exe. Vanilla is the first main feature tab and contains one
-integrated workspace with Recovery & relog, Automation rules, Diagnostics, and
-Data & updates. The old separate reconnect-manager window and second tray icon
-are no longer used. Minimize the main 4RTools window to use its normal tray icon;
-closing the main window exits the application.
+Vanilla is the primary workspace. Original 4RTools remains a compatibility tab.
+Minimizing keeps the main window on the Windows taskbar; it does not hide it
+exclusively in the system tray. Closing the main window exits the application.
 
-Recovery quick start
---------------------
-1. Set Launcher EXE to Vanilla Launcher.exe or patcher.exe.
-2. Leave Proxy on Tokyo unless you intentionally use another route.
-3. Configure one or two account profiles with username, password, character slot,
-   and the resume hotkey used by Vanilla Autobattle.
-4. Save and test the steps individually when calibrating a client/UI change.
-5. Enable Auto relaunch/relogin. Enable Start supervisor with 4RTools when you
-   want monitoring to begin automatically whenever 4RTools starts.
+Recovery and Autobattle
+-----------------------
+Set the Launcher path, then add account profiles with credentials, character
+slot, per-account proxy and the resume hotkey configured for Vanilla Autobattle.
+Settings auto-save; there is no separate Save button. Any number of profiles may
+be stored, but at most two accounts may be enabled and managed simultaneously.
 
-Passwords are protected with Windows DPAPI and are never written to logs. DPAPI
-protection is tied to the current Windows user/machine, so passwords must still
-be entered once on each PC.
+START completes one client's startup before advancing to the next. After the
+resume hotkey, fresh verified X/Y readings are checked for movement for 10
+seconds. Movement on either axis succeeds. Otherwise the client is focused and
+checked again before retrying. The limit is THREE TOTAL hotkey attempts: the
+initial press and two retries, each with its own 10-second observation window.
 
-Persistent configuration
-------------------------
-User configuration is deliberately outside the versioned application folder.
-The default data root is:
+After the final unsuccessful window, the account reports failure rather than
+retrying forever. Later accounts do not start after a failed cold startup. A
+failed or interrupted client is not silently treated as healthy. The explicit
+Resume hotkey diagnostic performs a new bounded verification; success clears
+the failed state. Healthy already-running clients are adopted without toggling.
+
+STOP and changes to the active configuration cancel pending input. Unknown or
+stale coordinates, failed reads, loss of input ownership, client/session changes,
+map transitions and dead characters stop the verification safely. Detailed
+reasons and attempt progress are available in status and logs. A character that
+fights without moving can fail this movement-only test; motion is not proof of
+combat or proof of what caused it.
+
+Normal recovery minimizes a successfully verified client and leaves other
+healthy clients untouched. Proxy/login/startup/recovery input is serialized.
+Vanilla's own Autobattle remains responsible for movement and combat.
+
+Persistent configuration and updates
+------------------------------------
+User data is stored outside the versioned release folder under:
 
   %LOCALAPPDATA%\4RTools Vanilla\
 
-It contains one Profiles root:
+Compatible old profile/settings data is migrated without deleting the original
+copy. The release ZIP contains no personal profiles, recovery credentials or
+mutable user-data folders. Passwords are protected with Windows DPAPI, are not
+logged and must be entered separately on each Windows user/machine.
 
-  Profiles\Stock\          original 4RTools profiles
-  Profiles\Vanilla\        Vanilla automation-rule profiles
-  VanillaReconnect\        recovery accounts/settings (reconnect.json)
-  Logs\                    reconnect/automation/update logs
-  supported_servers.json   locally added original-4RTools server definitions
+CHECK FOR UPDATES and version status are at the right of the Vanilla header.
+The updater verifies the downloaded ZIP checksum and its payload manifest before
+applying an update. The Data & updates page displays the actual paths in use.
 
-The release ZIP contains none of those user-data folders. On first run, 0.6.1
-migrates compatible data from the current application directory and from nearby
-older sibling folders named 4RTools-Vanilla-v*. Sibling version folders are kept
-as rollback backups. This means you can unzip 0.6.1 beside 0.6.0 and retain the
-same local configuration automatically on that Windows user/PC.
+Validation and integrity
+------------------------
+VERSION.txt records the version, architecture, source commit and build status.
+RELEASE-NOTES.md distinguishes automated Windows build, regression, package and
+mock-data UI validation from actual live Vanilla/Gepard gameplay testing.
+SHA256SUMS.txt lists the payload hashes; the release ZIP has an adjacent .sha256
+file. A passing build or mock UI test does not prove live-game behavior.
 
-Automatic updates
------------------
-Every normal startup checks the latest GitHub Release for this fork. If a newer
-release exists, 4RTools offers to download and restart into it. Before applying
-an update it verifies the release ZIP SHA-256 file and every file listed in the
-packaged SHA256SUMS.txt manifest. User data is outside the install directory, so
-updating application files does not replace profiles, recovery accounts, or
-DPAPI-protected passwords.
-
-The Data & updates page shows the exact paths in use and provides Open Data
-Folder and Check for Updates controls.
-
-Requirements
-------------
-Windows 10 or Windows 11 with Microsoft .NET Framework 4.7.2 or a later 4.x
-runtime. The application targets x86 and can run on x64 Windows. No Visual
-Studio, Git, NuGet, SDK, or source tree is required to use it.
-
-Release identity and integrity
-------------------------------
-VERSION.txt records the fork version, architecture, source commit, and build
-validation. RELEASE-NOTES.md records feature and validation details.
-SHA256SUMS.txt lists packaged payload hashes and the ZIP has an adjacent .sha256
-file. Versioned ZIPs are published by verified GitHub Releases and are not
-committed to the source tree.
-
-The MIT license for 4RTools is in LICENSE. Embedded third-party dependencies
-have their own licenses/notices in THIRD-PARTY-NOTICES.txt.
+Vanilla observation remains read-only. No game-memory writes, injections,
+packet manipulation, game-file changes or Gepard bypasses are performed.
+Unknown observations are never reinterpreted as valid gameplay state.
