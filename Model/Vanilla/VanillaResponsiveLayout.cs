@@ -20,6 +20,7 @@ namespace _4RTools.Model.Vanilla
         private GroupBox responsiveAccountBox;
         private GroupBox responsiveStatusBox;
         private GroupBox responsiveLogBox;
+        private ContextMenuStrip responsiveTestsMenu;
 
         internal void ScheduleResponsiveRecoveryLayout()
         {
@@ -63,7 +64,7 @@ namespace _4RTools.Model.Vanilla
                 responsiveRoot.Padding = new Padding(5);
                 responsiveRoot.Margin = Padding.Empty;
                 responsiveRoot.AutoScroll = true;
-                responsiveRoot.AutoScrollMinSize = new Size(900, 470);
+                responsiveRoot.AutoScrollMinSize = new Size(900, 440);
                 responsiveRoot.RowStyles.Clear();
                 responsiveRoot.RowCount = 4;
                 responsiveRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -106,9 +107,11 @@ namespace _4RTools.Model.Vanilla
             Button browse = FindButton(this, "Browse...") ?? FindButton(this, "Browseâ€¦");
             Button start = FindButton(this, "START SUPERVISOR");
             Button stop = FindButton(this, "STOP");
-            Button network = FindButton(this, "ARM MANUAL NETWORK-DROP TEST");
             GroupBox diagnostics = FindGroupBoxStarting(this, "Startup tests and selected-client diagnostics");
             Label info = FindLabelStarting(this, "Passwords are encrypted");
+
+            // Preserve test status before detaching the old diagnostics group.
+            if (testState.Parent != null) testState.Parent.Controls.Remove(testState);
 
             top.SuspendLayout();
             try
@@ -117,12 +120,11 @@ namespace _4RTools.Model.Vanilla
                 top.RowStyles.Clear();
                 top.ColumnStyles.Clear();
                 top.ColumnCount = 1;
-                top.RowCount = 2;
+                top.RowCount = 1;
                 top.Dock = DockStyle.Top;
                 top.AutoSize = true;
                 top.Margin = Padding.Empty;
                 top.Padding = Padding.Empty;
-                top.RowStyles.Add(new RowStyle(SizeType.AutoSize));
                 top.RowStyles.Add(new RowStyle(SizeType.AutoSize));
                 top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
@@ -137,22 +139,22 @@ namespace _4RTools.Model.Vanilla
                 });
 
                 launchPath.Dock = DockStyle.None;
-                launchPath.Width = 310;
+                launchPath.Width = 300;
                 launchPath.Margin = new Padding(0, 3, 4, 3);
                 mainRow.Controls.Add(launchPath);
                 if (browse != null)
                 {
                     browse.AutoSize = true;
-                    browse.Margin = new Padding(0, 2, 8, 2);
+                    browse.Margin = new Padding(0, 2, 7, 2);
                     mainRow.Controls.Add(browse);
                 }
 
                 startWithApp.Text = "Start with 4RTools";
                 autoRecover.Text = "Auto relog";
                 visualWatchdog.Text = "Visual watchdog";
-                startWithApp.Margin = new Padding(0, 7, 10, 0);
-                autoRecover.Margin = new Padding(0, 7, 10, 0);
-                visualWatchdog.Margin = new Padding(0, 7, 10, 0);
+                startWithApp.Margin = new Padding(0, 7, 9, 0);
+                autoRecover.Margin = new Padding(0, 7, 9, 0);
+                visualWatchdog.Margin = new Padding(0, 7, 9, 0);
                 mainRow.Controls.Add(startWithApp);
                 mainRow.Controls.Add(autoRecover);
                 mainRow.Controls.Add(visualWatchdog);
@@ -171,38 +173,21 @@ namespace _4RTools.Model.Vanilla
                     stop.Margin = new Padding(2);
                     mainRow.Controls.Add(stop);
                 }
-                runState.Margin = new Padding(8, 7, 0, 0);
+
+                Button tests = BuildTestsMenuButton();
+                mainRow.Controls.Add(tests);
+
+                runState.Margin = new Padding(7, 7, 0, 0);
                 mainRow.Controls.Add(runState);
+                testState.Margin = new Padding(7, 7, 0, 0);
+                mainRow.Controls.Add(testState);
                 top.Controls.Add(mainRow, 0, 0);
 
                 if (diagnostics != null)
                 {
-                    diagnostics.Text = "Tests";
-                    diagnostics.Dock = DockStyle.Top;
-                    diagnostics.Height = 50;
-                    diagnostics.MinimumSize = new Size(0, 46);
-                    diagnostics.Margin = new Padding(0, 2, 0, 2);
-                    diagnostics.Padding = new Padding(4, 2, 4, 3);
-                    FlowLayoutPanel diagnosticRow = diagnostics.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
-                    if (diagnosticRow != null)
-                    {
-                        diagnosticRow.Dock = DockStyle.Fill;
-                        diagnosticRow.AutoSize = false;
-                        diagnosticRow.WrapContents = true;
-                        diagnosticRow.Padding = Padding.Empty;
-                        diagnosticRow.Margin = Padding.Empty;
-                        if (network != null)
-                        {
-                            network.Text = "NETWORK DROP TEST";
-                            network.Margin = new Padding(3);
-                            diagnosticRow.Controls.Add(network);
-                        }
-                        testState.Margin = new Padding(8, 7, 0, 0);
-                        diagnosticRow.Controls.Add(testState);
-                    }
-                    top.Controls.Add(diagnostics, 0, 1);
+                    diagnostics.Visible = false;
+                    diagnostics.Height = 0;
                 }
-
                 if (info != null)
                 {
                     info.Visible = false;
@@ -211,6 +196,43 @@ namespace _4RTools.Model.Vanilla
                 }
             }
             finally { top.ResumeLayout(true); }
+        }
+
+        private Button BuildTestsMenuButton()
+        {
+            if (responsiveTestsMenu != null)
+            {
+                try { responsiveTestsMenu.Dispose(); } catch { }
+            }
+            responsiveTestsMenu = new ContextMenuStrip();
+            AddTestMenuItem("Test selected client", TestSelectedClientOnly);
+            AddTestMenuItem("Test all clients", TestAllClientsKeepOpen);
+            responsiveTestsMenu.Items.Add(new ToolStripSeparator());
+            AddTestMenuItem("1 - Game start", () => RunSelectedStep(VanillaReconnectTestStep.LauncherGameStart));
+            AddTestMenuItem("2 - Proxy", () => RunSelectedStep(VanillaReconnectTestStep.ProxySelection));
+            AddTestMenuItem("3 - Fill user/password", () => RunSelectedStep(VanillaReconnectTestStep.FillCredentials));
+            AddTestMenuItem("4 - Submit login", () => RunSelectedStep(VanillaReconnectTestStep.SubmitCredentials));
+            AddTestMenuItem("5 - Server", () => RunSelectedStep(VanillaReconnectTestStep.SelectGameServer));
+            AddTestMenuItem("6 - Character", () => RunSelectedStep(VanillaReconnectTestStep.SelectCharacter));
+            AddTestMenuItem("7 - Resume hotkey", () => RunSelectedStep(VanillaReconnectTestStep.ResumeHotkey));
+            responsiveTestsMenu.Items.Add(new ToolStripSeparator());
+            AddTestMenuItem("Network-drop test", ArmManualNetworkDropTest);
+            AddTestMenuItem("Stop current test", StopCurrentTest);
+
+            var button = new Button { Text = "TESTS ▾", AutoSize = true, Margin = new Padding(2) };
+            button.Click += (s, e) => responsiveTestsMenu.Show(button, new Point(0, button.Height));
+            help.SetToolTip(button, "Startup/recovery diagnostics and individual startup-step tests.");
+            Disposed += (s, e) =>
+            {
+                try { responsiveTestsMenu?.Dispose(); } catch { }
+                responsiveTestsMenu = null;
+            };
+            return button;
+        }
+
+        private void AddTestMenuItem(string text, System.Action action)
+        {
+            responsiveTestsMenu.Items.Add(text, null, (s, e) => action());
         }
 
         private void ApplyResponsiveHeights()
@@ -316,7 +338,7 @@ namespace _4RTools.Model.Vanilla
                     responsiveLogBox.Margin = new Padding(4, 0, 0, 0);
                     responsiveBottom.Controls.Add(responsiveStatusBox, 0, 0);
                     responsiveBottom.Controls.Add(responsiveLogBox, 1, 0);
-                    responsiveRoot.AutoScrollMinSize = new Size(900, 470);
+                    responsiveRoot.AutoScrollMinSize = new Size(900, 440);
                 }
                 else
                 {
@@ -329,7 +351,7 @@ namespace _4RTools.Model.Vanilla
                     responsiveLogBox.Margin = new Padding(0, 3, 0, 0);
                     responsiveBottom.Controls.Add(responsiveStatusBox, 0, 0);
                     responsiveBottom.Controls.Add(responsiveLogBox, 0, 1);
-                    responsiveRoot.AutoScrollMinSize = new Size(900, 590);
+                    responsiveRoot.AutoScrollMinSize = new Size(900, 560);
                 }
             }
             finally { responsiveBottom.ResumeLayout(true); }
