@@ -19,13 +19,39 @@ namespace _4RTools.Model.Vanilla
 
         internal static VanillaProxyRoute Get(string accountId, VanillaProxyRoute fallback)
         {
+            VanillaProxyRoute value;
+            return TryGet(accountId, out value) ? value : fallback;
+        }
+
+        internal static bool TryGet(string accountId, out VanillaProxyRoute value)
+        {
+            value = default(VanillaProxyRoute);
+            if (string.IsNullOrWhiteSpace(accountId)) return false;
+            lock (Gate)
+            {
+                EnsureLoaded();
+                return cache.Proxies.TryGetValue(accountId, out value);
+            }
+        }
+
+        /// <summary>
+        /// Seeds an account that predates per-account proxy settings exactly once. This freezes
+        /// the previous shared proxy choice into the account so later account edits/recovery do
+        /// not accidentally inherit another account's compatibility fallback.
+        /// </summary>
+        internal static VanillaProxyRoute Ensure(string accountId, VanillaProxyRoute fallback)
+        {
             if (string.IsNullOrWhiteSpace(accountId)) return fallback;
             lock (Gate)
             {
                 EnsureLoaded();
                 VanillaProxyRoute value;
-                return cache.Proxies.TryGetValue(accountId, out value) ? value : fallback;
+                if (cache.Proxies.TryGetValue(accountId, out value)) return value;
+                cache.Proxies[accountId] = fallback;
+                SaveLocked();
             }
+            VanillaDebugLog.Write("SETTINGS", "Account proxy initialized from legacy shared setting: accountId=" + accountId + ", proxy=" + fallback + ".");
+            return fallback;
         }
 
         internal static void Set(string accountId, VanillaProxyRoute value)
