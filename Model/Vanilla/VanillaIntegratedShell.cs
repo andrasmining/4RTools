@@ -19,7 +19,7 @@ namespace _4RTools.Forms
         private TabControl primaryWorkspace;
         private TabPage primaryVanillaPage, primaryLegacyPage;
         private Panel legacySurface;
-        private readonly Label integratedUpdateStatus = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(10, 9, 4, 0) };
+        private readonly Label integratedUpdateStatus = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(10, 8, 4, 0) };
         private bool integratedVanillaReady, updateCheckRunning;
         private VanillaFleetMonitor integratedFleetMonitor;
         private VanillaFleetDashboardPanel integratedFleetDashboard;
@@ -53,10 +53,10 @@ namespace _4RTools.Forms
         private void ExpandForIntegratedWorkspace()
         {
             Rectangle area = Screen.FromControl(this).WorkingArea;
-            int width = Math.Min(1600, Math.Max(1180, area.Width - 30));
-            int height = Math.Min(1050, Math.Max(780, area.Height - 30));
-            MinimumSize = new Size(Math.Min(1120, width), Math.Min(740, height));
-            Size = new Size(width, height);
+            int width = Math.Max(980, area.Width - 16);
+            int height = Math.Max(680, area.Height - 16);
+            MinimumSize = new Size(Math.Min(980, width), Math.Min(680, height));
+            Size = new Size(Math.Min(1600, width), Math.Min(1000, height));
             StartPosition = FormStartPosition.CenterScreen;
             if (!smokeTest) WindowState = FormWindowState.Maximized;
         }
@@ -81,11 +81,11 @@ namespace _4RTools.Forms
             primaryWorkspace = new TabControl
             {
                 Dock = DockStyle.Fill,
-                Padding = new Point(18, 7),
-                Font = new Font(Font.FontFamily, 10F, FontStyle.Bold)
+                Padding = new Point(14, 6),
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
             };
-            primaryVanillaPage = new TabPage("Vanilla") { Padding = new Padding(8), UseVisualStyleBackColor = true };
-            primaryLegacyPage = new TabPage("Original 4RTools") { Padding = new Padding(4), UseVisualStyleBackColor = true };
+            primaryVanillaPage = new TabPage("Vanilla") { Padding = new Padding(4), UseVisualStyleBackColor = true, AutoScroll = false };
+            primaryLegacyPage = new TabPage("Original 4RTools") { Padding = new Padding(4), UseVisualStyleBackColor = true, AutoScroll = true };
             primaryLegacyPage.Controls.Add(legacySurface);
             primaryWorkspace.TabPages.Add(primaryVanillaPage);
             primaryWorkspace.TabPages.Add(primaryLegacyPage);
@@ -99,9 +99,16 @@ namespace _4RTools.Forms
             integratedReconnectSupervisor = new VanillaReconnectSupervisor(VanillaAppData.RootDirectory);
             integratedFleetMonitor = new VanillaFleetMonitor(AppDomain.CurrentDomain.BaseDirectory);
 
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(8), RowCount = 3, ColumnCount = 1 };
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(5),
+                Margin = Padding.Empty,
+                RowCount = 3,
+                ColumnCount = 1
+            };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 155));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 145));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             var header = new TableLayoutPanel
@@ -111,7 +118,7 @@ namespace _4RTools.Forms
                 ColumnCount = 2,
                 RowCount = 1,
                 Margin = Padding.Empty,
-                Padding = new Padding(0, 0, 0, 6)
+                Padding = new Padding(0, 0, 0, 3)
             };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -121,9 +128,16 @@ namespace _4RTools.Forms
                 Dock = DockStyle.Fill,
                 AutoSize = true,
                 WrapContents = true,
-                Margin = Padding.Empty
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
-            headerActions.Controls.Add(new Label { Text = "Vanilla workspace", Font = new Font(Font.FontFamily, 11F, FontStyle.Bold), AutoSize = true, Margin = new Padding(4, 8, 14, 0) });
+            headerActions.Controls.Add(new Label
+            {
+                Text = "Vanilla workspace",
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                AutoSize = true,
+                Margin = new Padding(3, 7, 12, 0)
+            });
             AddIntegratedButton(headerActions, "OPEN DATA FOLDER", OpenDataFolder);
 
             var headerStatus = new FlowLayoutPanel
@@ -132,7 +146,8 @@ namespace _4RTools.Forms
                 WrapContents = false,
                 FlowDirection = FlowDirection.LeftToRight,
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Margin = Padding.Empty
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
             AddIntegratedButton(headerStatus, "CHECK FOR UPDATES", () => CheckForUpdates(false));
             integratedUpdateStatus.Text = "Version " + VanillaUpdater.CurrentVersionText;
@@ -142,15 +157,26 @@ namespace _4RTools.Forms
             header.Controls.Add(headerStatus, 1, 0);
             root.Controls.Add(header, 0, 0);
 
-            integratedFleetDashboard = new VanillaFleetDashboardPanel(integratedFleetMonitor, observeClients: !smokeTest) { Dock = DockStyle.Fill };
+            integratedFleetDashboard = new VanillaFleetDashboardPanel(integratedFleetMonitor, observeClients: !smokeTest)
+            {
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 2, 0, 2)
+            };
             root.Controls.Add(integratedFleetDashboard, 0, 1);
 
-            vanillaWorkspace = new TabControl { Dock = DockStyle.Fill, Padding = new Point(16, 7), Font = new Font(Font.FontFamily, 9F, FontStyle.Regular), Enabled = !smokeTest };
-            vanillaRecoveryPage = new TabPage("Recovery & relog") { Padding = new Padding(6) };
-            vanillaRulesPage = new TabPage("Automation") { Padding = new Padding(6) };
-            vanillaTemporaryPage = new TabPage("Temporary actions") { Padding = new Padding(6) };
-            vanillaDiagnosticsPage = new TabPage("Diagnostics") { Padding = new Padding(6) };
-            vanillaAboutPage = new TabPage("Data & updates") { Padding = new Padding(12) };
+            vanillaWorkspace = new TabControl
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Point(12, 5),
+                Margin = Padding.Empty,
+                Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+                Enabled = !smokeTest
+            };
+            vanillaRecoveryPage = WorkspacePage("Recovery & relog");
+            vanillaRulesPage = WorkspacePage("Automation");
+            vanillaTemporaryPage = WorkspacePage("Temporary actions");
+            vanillaDiagnosticsPage = WorkspacePage("Diagnostics");
+            vanillaAboutPage = WorkspacePage("Data & updates");
             vanillaWorkspace.TabPages.AddRange(new[] { vanillaRecoveryPage, vanillaRulesPage, vanillaTemporaryPage, vanillaDiagnosticsPage, vanillaAboutPage });
             vanillaWorkspace.SelectedIndexChanged += (s, e) =>
             {
@@ -171,6 +197,16 @@ namespace _4RTools.Forms
 
             if (!smokeTest && integratedReconnectSupervisor.Settings.StartWith4RTools && !integratedReconnectSupervisor.IsRunning)
                 integratedReconnectSupervisor.Start();
+        }
+
+        private static TabPage WorkspacePage(string text)
+        {
+            return new TabPage(text)
+            {
+                Padding = new Padding(4),
+                UseVisualStyleBackColor = true,
+                AutoScroll = true
+            };
         }
 
         private void EnsureAutomationEmbedded()
@@ -194,7 +230,11 @@ namespace _4RTools.Forms
         {
             if (smokeTest) return;
             if (integratedTemporaryActions != null && !integratedTemporaryActions.IsDisposed) return;
-            integratedTemporaryActions = new VanillaTemporaryActionsPanel(AppDomain.CurrentDomain.BaseDirectory);
+            integratedTemporaryActions = new VanillaTemporaryActionsPanel(AppDomain.CurrentDomain.BaseDirectory)
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true
+            };
             vanillaTemporaryPage.Controls.Add(integratedTemporaryActions);
             integratedTemporaryActions.BringToFront();
         }
@@ -217,11 +257,19 @@ namespace _4RTools.Forms
             form.Dock = DockStyle.Fill;
             form.ShowInTaskbar = false;
             form.MinimumSize = Size.Empty;
+            form.AutoScroll = true;
         }
 
         private void BuildAboutPage()
         {
-            var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = false };
+            var panel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(6)
+            };
             panel.Controls.Add(new Label { AutoSize = true, Font = new Font(Font, FontStyle.Bold), Text = "Persistent data" });
             panel.Controls.Add(PathLabel("Data root", VanillaAppData.RootDirectory));
             panel.Controls.Add(PathLabel("Original 4R profiles", VanillaAppData.StockProfilesDirectory));
@@ -230,17 +278,17 @@ namespace _4RTools.Forms
             panel.Controls.Add(PathLabel("Logs", VanillaAppData.LogsDirectory));
             panel.Controls.Add(new Label
             {
-                AutoSize = true, MaximumSize = new Size(1200, 0), Margin = new Padding(3, 12, 3, 10), ForeColor = Color.DimGray,
+                AutoSize = true, MaximumSize = new Size(1100, 0), Margin = new Padding(3, 10, 3, 8), ForeColor = Color.DimGray,
                 Text = "The Vanilla workspace is the primary product surface. Up to two running clients are observed read-only at the top at all times. Original 4RTools remains in the secondary legacy tab. Compatible data is migrated into this persistent Windows-user data location. Passwords remain Windows-DPAPI protected for this Windows user/PC."
             });
-            var buttons = new FlowLayoutPanel { AutoSize = true };
+            var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = true };
             AddIntegratedButton(buttons, "OPEN DATA FOLDER", OpenDataFolder);
             AddIntegratedButton(buttons, "CHECK FOR UPDATES", () => CheckForUpdates(false));
             AddIntegratedButton(buttons, "OPEN GITHUB RELEASES", () => Process.Start("https://github.com/andrasmining/4RTools/releases"));
             panel.Controls.Add(buttons);
             panel.Controls.Add(new Label
             {
-                AutoSize = true, MaximumSize = new Size(1200, 0), Margin = new Padding(3, 12, 3, 3),
+                AutoSize = true, MaximumSize = new Size(1100, 0), Margin = new Padding(3, 10, 3, 3),
                 Text = "Updates are checked at every normal startup. A newer verified GitHub Release is offered for download; its ZIP checksum and packaged SHA256SUMS manifest are verified before 4RTools restarts into the new version."
             });
             vanillaAboutPage.Controls.Add(panel);
@@ -248,12 +296,12 @@ namespace _4RTools.Forms
 
         private static Label PathLabel(string caption, string path)
         {
-            return new Label { AutoSize = true, MaximumSize = new Size(1250, 0), Text = caption + ":  " + path, Margin = new Padding(3, 6, 3, 0) };
+            return new Label { AutoSize = true, MaximumSize = new Size(1100, 0), Text = caption + ":  " + path, Margin = new Padding(3, 5, 3, 0) };
         }
 
         private static void AddIntegratedButton(Control parent, string text, System.Action action)
         {
-            var button = new Button { Text = text, AutoSize = true, Margin = new Padding(4) };
+            var button = new Button { Text = text, AutoSize = true, Margin = new Padding(3) };
             button.Click += (s, e) => action();
             parent.Controls.Add(button);
         }
@@ -326,6 +374,7 @@ namespace _4RTools.Model.Vanilla
             ShowInTaskbar = false;
             MinimumSize = Size.Empty;
             StartPosition = FormStartPosition.Manual;
+            AutoScroll = true;
         }
     }
 }
