@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using _4RTools.Model.Vanilla;
@@ -48,12 +49,6 @@ namespace _4RTools.Forms
             }
         }
 
-        /// <summary>
-        /// The integrated header previously reported an oversized preferred height through nested
-        /// auto-size/fill panels, leaving a large blank band above the client cards. Measure the
-        /// actual visible controls and pin only the header row to that need. Narrow layouts may use
-        /// two wrapped lines; normal Full-HD remains a single compact line.
-        /// </summary>
         private void CompactIntegratedHeader()
         {
             if (integratedFleetDashboard == null || integratedFleetDashboard.IsDisposed) return;
@@ -68,10 +63,10 @@ namespace _4RTools.Forms
             {
                 if (!child.Visible) continue;
                 Size wanted = child.GetPreferredSize(new Size(availableWidth, 0));
-                preferred = System.Math.Max(preferred, wanted.Height + child.Margin.Vertical + header.Padding.Vertical);
+                preferred = Math.Max(preferred, wanted.Height + child.Margin.Vertical + header.Padding.Vertical);
             }
             int maximum = availableWidth < 1100 ? 68 : 42;
-            int height = System.Math.Max(32, System.Math.Min(maximum, preferred));
+            int height = Math.Max(32, Math.Min(maximum, preferred));
 
             header.AutoSize = false;
             header.Height = height;
