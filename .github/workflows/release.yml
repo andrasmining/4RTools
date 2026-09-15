@@ -41,7 +41,11 @@ jobs:
         shell: powershell
         run: '& .\scripts\validate-vanilla-build-profiles.ps1'
 
-      - name: Build, test, package and smoke-test
+      - name: Build and test Debug
+        shell: powershell
+        run: '& .\scripts\build.ps1 -Configuration Debug -VanillaRelease'
+
+      - name: Build, test, package and smoke-test Release
         shell: powershell
         run: '& .\scripts\build-release.ps1 -Version $env:VERSION'
 
@@ -87,7 +91,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Failed to refresh assets for $tag." }
           }
           else {
-            & gh release create $tag $zip $checksum --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "4RTools Vanilla $env:VERSION" --generate-notes
+            & gh release create $tag $zip $checksum --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "4RTools Vanilla $env:VERSION" --notes-file RELEASE-NOTES.md
             if ($LASTEXITCODE -ne 0) { throw "Failed to publish $tag." }
           }
 

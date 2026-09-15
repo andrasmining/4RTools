@@ -1,20 +1,23 @@
-# 4RTools Vanilla 0.6.10
+# 4RTools Vanilla 0.6.33
 
-This release moves the project decisively toward a Vanilla-first two-client companion while preserving the original 4RTools UI as a secondary compatibility surface.
+## Responsive recovery workspace
 
-- **Vanilla is the primary workspace.** `Original 4RTools` remains available as the second top-level tab, but new Vanilla workflows no longer depend on its legacy single-client selector.
-- Added an **always-visible two-client live dashboard** at the top of the Vanilla workspace. It independently observes up to two running `Vanilla MMO.exe` processes read-only and shows character name, current/max HP, current/max SP and percentage bars. The dashboard is exact-build/fingerprint aware and never sends input.
-- The dashboard already has location/activity slots. They deliberately show mapping-pending text until X/Y/map/target/action fields are independently discovered and verified; once those fields are added to the build profile, the same dashboard will surface them without screen/OCR heuristics.
-- Promoted the current Vanilla build's **HP, MaxHP, SP, MaxSP and CharacterName** mappings to verified for the exact executable fingerprint `7eb420579690bd2f5c81b42fa69888cb3d144486d3c275a19073f5216698b3ef`. This follows live confirmation that HP and SP track real gameplay changes and that the memory character name matches the active character. The trust applies only to this exact fingerprint.
-- The Vanilla **Automation** tab now owns its own selectable read-only client session. It exposes its own client selector/refresh/connect controls inside the Vanilla workspace rather than requiring the old 4RTools selector.
-- Added a new **Temporary actions** tab intended for short-lived helpers such as Soul Linker `Novice Spirit`. It can target either running Vanilla client, repeat a configured skill hotkey, optionally click a captured target position, and be explicitly started/stopped.
-- Temporary target positions are stored as **client-relative percentages**, not desktop pixels, so resolution/DPI changes do not alter the configured point. This is still a stationary screen target, not actor tracking; future verified actor/target mappings can improve that further.
-- Added **memory-driven SP resting** for temporary actions. Default hysteresis is: sit once when verified SP reaches **10% or lower**, keep polling CurrentSP/MaxSP from memory, then stand once and resume at **80% or higher**. The sit/stand hotkey and both thresholds are configurable. No SP-bar image recognition is used.
-- Temporary actions require the exact matching build and verified HP/maxHP/SP/maxSP/character-name mappings, stop if the process/state becomes invalid or the character is dead, and bind ordinary input to the selected Vanilla process/window only.
-- Existing **sequential two-client recovery/relog**, disconnect recovery, server-offline exponential backoff, persistent DPAPI-protected account settings, self-updater and rotating reconnect logs remain unchanged.
-- X/Y, map, target, action/combat/casting, ClientReady, Loading, StatusEffects and AutobattleEnabled remain unmapped/unverified. The application continues to fail closed rather than inventing values or treating unavailable data as idle/zero.
-- Updated repository engineering instructions so future Vanilla work targets the Vanilla-first workspace while reusing proven 4RTools read-only memory/input components where appropriate.
+- The embedded Recovery & relog view follows the actual parent viewport instead of being capped at a previous desktop width. Full-HD layouts retain the requested two-thirds accounts / one-third log split.
+- All nine account columns fit inside the visible table. On, Slot, Resume, Password, Proxy and PID use compact measured widths; Account, Username and Status share the remaining space. Long values and detailed recovery state remain available through hover text.
+- The launcher/actions strip is measured from its visible controls. The large unused area beneath it is removed, and controls wrap when necessary rather than extending off-screen.
+- The Accounts section uses the remaining pane height, reserves at least four rows plus a spare row's breathing room, and scrolls internally for larger saved-profile lists. Existing unlimited saved profiles / maximum two enabled clients behavior is preserved.
+- Update/version information stays right-aligned and can reflow below the left header actions on narrow windows. A new multiline update/error message no longer clips on its first display.
+- Live-client cards retain visible location and activity together on the final row. Card height respects font metrics instead of hiding fields to meet an arbitrary compact height.
+- Account actions, normal taskbar minimization, the global debug controls and the existing TESTS menu are retained.
 
-Validation for the exact source included Windows Release/Debug builds, the complete offline diagnostics/automation/reconnect test suite, **4 new temporary-action settings/hysteresis regression tests**, release packaging and a relocated portable-executable smoke test. The full validation reported zero test failures. Live HP/SP/name mappings were confirmed by the user against the running Vanilla client; live temporary-action/Soul-Link execution still requires local Vanilla/Gepard validation because GitHub Actions cannot emulate the game client.
+## Validation
 
-No game-memory writes, code injection, packet manipulation, Gepard/security bypass, debugger/kernel workaround or protection modification is introduced by this release. Gameplay state is observed through the existing bounded read-only memory layer; ordinary window input remains scoped to explicitly selected clients.
+The existing standard Windows GitHub Actions runners build and test both Debug and Release. The release is packaged, checksum-verified and launched in the existing inert portable smoke test. Publication is also gated on the native Windows mock-data UI harness in `scripts/test-ui-layout.ps1`.
+
+The UI harness instantiates the production application controls, supplies fictional account/runtime/fleet data, resizes the actual window, renders PNG screenshots and checks geometry. Its 15 scenarios cover 1920x1020, 1904x981, 1980x1020, 1600x900, 1366x768 and 1050x700 client areas; 2, 4, 12 and 40 saved profiles; normal, 125% and 150% recovery text sizes; long status messages; scrolling to the final account; selection retention across tab changes; and repeated shrink/grow transitions.
+
+Assertions cover every account column, viewport containment, the Full-HD 2:1 split, four visible account rows plus breathing room, toolbar spacing, live-card text, update/debug controls and stable settled bounds. Screenshots and a geometry report are retained as workflow artifacts for inspection. Failures stop publication rather than being treated as a successful compile.
+
+These are native Windows **mock-data UI** checks, not live Vanilla/Gepard startup or a connection to the user's RDP session. The harness keeps live process observation, input, recovery, email alerts and update requests inactive. Text-size scenarios do not claim to emulate every physical monitor/DPI configuration. No paid testing service or additional infrastructure is required.
+
+Existing legacy NuGet audit/compiler warnings are not hidden; dependency upgrades are outside this layout release. Recovery orchestration, gameplay-memory mappings, administrator requirements and game-input semantics are unchanged.
