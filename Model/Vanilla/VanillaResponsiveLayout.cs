@@ -5,20 +5,19 @@ using System.Windows.Forms;
 
 namespace _4RTools.Model.Vanilla
 {
-    /// <summary>
-    /// Minimal responsive recovery workspace. Full-HD uses a 2:1 split: launcher/actions/accounts
-    /// on the left, reconnect log on the right. Runtime state is surfaced directly in the account
-    /// table; the old standalone status panel is intentionally removed from the visible layout.
-    /// </summary>
+    // Presentation only. Reuses the existing controls/handlers, account catalog and supervisor.
+    // Bounds are calculated from the viewport, not inherited TableLayoutPanel preferred sizes.
+    // This avoids nested GrowOnly/percentage layouts retaining the former full-width grid.
     internal sealed partial class VanillaReconnectForm
     {
-        private const int WideRecoveryBreakpoint = 1100;
         private bool responsiveRecoveryHookInstalled;
         private bool responsiveRecoveryApplied;
-        private TableLayoutPanel responsiveRoot;
-        private TableLayoutPanel responsiveLeft;
+        private bool arrangingRecovery;
+        private Panel responsiveRoot;
+        private Panel responsiveLeft;
+        private FlowLayoutPanel responsiveHeader;
+        private FlowLayoutPanel responsiveAccountButtons;
         private GroupBox responsiveAccountBox;
-        private GroupBox responsiveStatusBox;
         private GroupBox responsiveLogBox;
         private ContextMenuStrip responsiveTestsMenu;
 
@@ -26,30 +25,13 @@ namespace _4RTools.Model.Vanilla
         {
             if (responsiveRecoveryHookInstalled) return;
             responsiveRecoveryHookInstalled = true;
-
             Shown += (s, e) => BeginInvoke((MethodInvoker)InstallResponsiveRecoveryLayout);
-            SizeChanged += (s, e) =>
-            {
-                if (!responsiveRecoveryApplied || IsDisposed) return;
-                ApplyWorkspaceSplit();
-                ResizeAccountColumns();
-            };
+            SizeChanged += (s, e) => ArrangeRecoveryWorkspace();
+            FontChanged += (s, e) => ArrangeRecoveryWorkspace();
         }
 
-        internal static bool UseWideRecoveryLayout(int availableWidth)
-        {
-            return availableWidth >= WideRecoveryBreakpoint;
-        }
-
-        internal static int MinimumVisibleAccountRows(int accountCount)
-        {
-            // Four real profile rows plus one visually empty row is the minimum. More profiles
-            // remain visible until the available panel height is exhausted; then the grid scrolls.
-            return Math.Max(5, accountCount + 1);
-        }
-
-        // Retained for regression compatibility; the account area is no longer assigned a fixed
-        // height. This is only the minimum space reserved for the table/buttons inside the left pane.
+        internal static bool UseWideRecoveryLayout(int availableWidth) { return availableWidth >= 1100; }
+        internal static int MinimumVisibleAccountRows(int accountCount) { return Math.Max(5, accountCount + 1); }
         internal static int PreferredAccountsPanelHeight(int availableHeight)
         {
             if (availableHeight < 620) return 170;
@@ -60,216 +42,266 @@ namespace _4RTools.Model.Vanilla
         private void InstallResponsiveRecoveryLayout()
         {
             if (responsiveRecoveryApplied || IsDisposed) return;
-            responsiveRoot = Controls.OfType<TableLayoutPanel>().FirstOrDefault();
-            if (responsiveRoot == null) return;
-
-            TableLayoutPanel oldTop = responsiveRoot.GetControlFromPosition(0, 0) as TableLayoutPanel;
-            responsiveAccountBox = FindGroupBoxStarting(responsiveRoot, "Accounts");
-            responsiveStatusBox = FindGroupBoxStarting(responsiveRoot, "Live recovery status");
-            responsiveLogBox = FindGroupBoxStarting(responsiveRoot, "Reconnect log");
-            if (oldTop == null || responsiveAccountBox == null || responsiveLogBox == null) return;
-
-            responsiveRecoveryApplied = true;
-            SuspendLayout();
-            responsiveRoot.SuspendLayout();
-            try
-            {
-                RebuildMinimalRecoveryHeader(oldTop);
-                ConfigureAccountsGrid();
-                ConfigureReconnectLog();
-
-                responsiveAccountBox.Text = "Accounts";
-                responsiveAccountBox.Padding = new Padding(5);
-                responsiveAccountBox.Margin = new Padding(0, 3, 0, 0);
-                responsiveAccountBox.MinimumSize = new Size(0, PreferredAccountsPanelHeight(ClientSize.Height));
-                help.SetToolTip(responsiveAccountBox,
-                    "Saved account profiles. Any number may be stored; at most two may be enabled at once. Runtime PID/state appears in the same table. Double-click or Edit a row to change account details, proxy or hotkey.");
-
-                if (responsiveStatusBox != null)
-                {
-                    responsiveStatusBox.Visible = false;
-                    responsiveStatusBox.MinimumSize = Size.Empty;
-                    responsiveStatusBox.MaximumSize = new Size(0, 0);
-                    responsiveRoot.Controls.Remove(responsiveStatusBox);
-                }
-
-                responsiveLeft = new TableLayoutPanel
-                {
-                    Dock = DockStyle.Fill,
-                    Margin = Padding.Empty,
-                    Padding = Padding.Empty,
-                    ColumnCount = 1,
-                    RowCount = 2
-                };
-                responsiveLeft.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-                responsiveLeft.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-                responsiveLeft.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-
-                responsiveRoot.Controls.Remove(oldTop);
-                responsiveRoot.Controls.Remove(responsiveAccountBox);
-                responsiveRoot.Controls.Remove(responsiveLogBox);
-                responsiveLeft.Controls.Add(oldTop, 0, 0);
-                responsiveLeft.Controls.Add(responsiveAccountBox, 0, 1);
-
-                responsiveRoot.Controls.Clear();
-                responsiveRoot.Padding = new Padding(5);
-                responsiveRoot.Margin = Padding.Empty;
-                responsiveRoot.AutoScroll = true;
-                responsiveRoot.AutoScrollMinSize = new Size(820, 430);
-                ApplyWorkspaceSplit();
-                ResizeAccountColumns();
-            }
-            finally
-            {
-                responsiveRoot.ResumeLayout(true);
-                ResumeLayout(true);
-            }
-        }
-
-        private void ApplyWorkspaceSplit()
-        {
-            if (responsiveRoot == null || responsiveLeft == null || responsiveLogBox == null) return;
-            bool wide = UseWideRecoveryLayout(Math.Max(0, responsiveRoot.ClientSize.Width));
-
-            responsiveRoot.SuspendLayout();
-            try
-            {
-                responsiveRoot.Controls.Clear();
-                responsiveRoot.ColumnStyles.Clear();
-                responsiveRoot.RowStyles.Clear();
-
-                if (wide)
-                {
-                    // User-facing primary layout: two thirds for configuration/accounts, one third log.
-                    responsiveRoot.ColumnCount = 2;
-                    responsiveRoot.RowCount = 1;
-                    responsiveRoot.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 66.6667F));
-                    responsiveRoot.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.3333F));
-                    responsiveRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-                    responsiveLeft.Margin = new Padding(0, 0, 4, 0);
-                    responsiveLogBox.Margin = new Padding(4, 0, 0, 0);
-                    responsiveRoot.Controls.Add(responsiveLeft, 0, 0);
-                    responsiveRoot.Controls.Add(responsiveLogBox, 1, 0);
-                    responsiveRoot.AutoScrollMinSize = new Size(820, 430);
-                }
-                else
-                {
-                    // On genuinely narrow windows preserve usability by stacking; scrolling is the fallback.
-                    responsiveRoot.ColumnCount = 1;
-                    responsiveRoot.RowCount = 2;
-                    responsiveRoot.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-                    responsiveRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 67F));
-                    responsiveRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 33F));
-                    responsiveLeft.Margin = new Padding(0, 0, 0, 3);
-                    responsiveLogBox.Margin = new Padding(0, 3, 0, 0);
-                    responsiveRoot.Controls.Add(responsiveLeft, 0, 0);
-                    responsiveRoot.Controls.Add(responsiveLogBox, 0, 1);
-                    responsiveRoot.AutoScrollMinSize = new Size(760, 650);
-                }
-            }
-            finally { responsiveRoot.ResumeLayout(true); }
-        }
-
-        private void RebuildMinimalRecoveryHeader(TableLayoutPanel top)
-        {
+            TableLayoutPanel oldRoot = Controls.OfType<TableLayoutPanel>().FirstOrDefault();
+            if (oldRoot == null) return;
+            responsiveAccountBox = FindGroupBoxStarting(oldRoot, "Accounts");
+            responsiveLogBox = FindGroupBoxStarting(oldRoot, "Reconnect log");
             Button browse = FindButton(this, "Browse...") ?? FindButton(this, "Browseâ€¦");
             Button start = FindButton(this, "START SUPERVISOR");
             Button stop = FindButton(this, "STOP");
-            GroupBox diagnostics = FindGroupBoxStarting(this, "Startup tests and selected-client diagnostics");
-            Label info = FindLabelStarting(this, "Passwords are encrypted");
+            Button add = FindButton(this, "Add"), edit = FindButton(this, "Edit"), remove = FindButton(this, "Remove");
+            if (responsiveAccountBox == null || responsiveLogBox == null || browse == null || start == null || stop == null) return;
 
-            if (testState.Parent != null) testState.Parent.Controls.Remove(testState);
-
-            top.SuspendLayout();
+            SuspendLayout();
             try
             {
-                top.Controls.Clear();
-                top.RowStyles.Clear();
-                top.ColumnStyles.Clear();
-                top.ColumnCount = 1;
-                top.RowCount = 1;
-                top.Dock = DockStyle.Top;
-                top.AutoSize = true;
-                top.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-                top.Margin = Padding.Empty;
-                top.Padding = Padding.Empty;
-                top.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-                top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+                AutoScroll = false;
+                AutoScrollMinSize = Size.Empty;
+                responsiveRoot = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, AutoScroll = true };
+                responsiveLeft = new Panel { Margin = Padding.Empty };
+                responsiveHeader = CompactFlow();
+                responsiveAccountButtons = CompactFlow();
+                BuildRecoveryHeader(browse, start, stop);
 
-                FlowLayoutPanel mainRow = CompactFlow();
-                mainRow.WrapContents = true;
-                mainRow.Controls.Add(new Label
-                {
-                    Text = "Launcher",
-                    AutoSize = true,
-                    Font = new Font(Font, FontStyle.Bold),
-                    Margin = new Padding(0, 6, 5, 0)
-                });
+                // Retain hidden compatibility controls used by ReadTop and RefreshStatus, but
+                // remove their old layout containers. They must not contribute preferred sizes.
+                var hidden = new Panel { Visible = false, Size = Size.Empty };
+                hidden.Controls.Add(launchArgs); hidden.Controls.Add(proxy); hidden.Controls.Add(maxClients); hidden.Controls.Add(status);
+                responsiveRoot.Controls.Add(hidden);
 
-                launchPath.Dock = DockStyle.None;
-                launchPath.Width = 250;
-                launchPath.Margin = new Padding(0, 2, 4, 2);
-                mainRow.Controls.Add(launchPath);
-                if (browse != null)
+                foreach (Button button in new[] { add, edit, remove })
                 {
-                    browse.AutoSize = true;
-                    browse.Margin = new Padding(0, 1, 6, 1);
-                    mainRow.Controls.Add(browse);
+                    if (button == null) continue;
+                    CompactButton(button);
+                    responsiveAccountButtons.Controls.Add(button);
                 }
+                Control[] obsolete = responsiveAccountBox.Controls.Cast<Control>().ToArray();
+                if (accounts.Parent != null) accounts.Parent.Controls.Remove(accounts);
+                responsiveAccountBox.Controls.Clear();
+                foreach (Control control in obsolete) control.Dispose();
+                responsiveAccountBox.Controls.Add(accounts);
+                responsiveAccountBox.Controls.Add(responsiveAccountButtons);
+                responsiveAccountBox.Dock = DockStyle.None;
+                responsiveAccountBox.MinimumSize = Size.Empty;
+                responsiveAccountBox.Margin = Padding.Empty;
+                responsiveAccountBox.Padding = new Padding(6);
+                responsiveAccountBox.Text = "Accounts";
+                help.SetToolTip(responsiveAccountBox, "Saved profiles; at most two enabled at once. Double-click or Edit a row. Hover a clipped value or Status for the full detail.");
+                ConfigureAccountsGrid();
 
-                startWithApp.Text = "Start with 4RTools";
-                autoRecover.Text = "Auto relog";
-                visualWatchdog.Text = "Visual watchdog";
-                startWithApp.Margin = new Padding(0, 6, 7, 0);
-                autoRecover.Margin = new Padding(0, 6, 7, 0);
-                visualWatchdog.Margin = new Padding(0, 6, 7, 0);
-                mainRow.Controls.Add(startWithApp);
-                mainRow.Controls.Add(autoRecover);
-                mainRow.Controls.Add(visualWatchdog);
+                responsiveLogBox.Dock = DockStyle.None;
+                responsiveLogBox.MinimumSize = Size.Empty;
+                responsiveLogBox.Margin = Padding.Empty;
+                responsiveLogBox.Padding = new Padding(6);
+                responsiveLogBox.Text = "Log";
+                log.WordWrap = true;
+                log.ScrollBars = ScrollBars.Vertical;
+                help.SetToolTip(log, "Reconnect/startup events. Lines wrap to this pane; COPY DEBUG LOG includes the complete diagnostic bundle.");
 
-                if (start != null)
-                {
-                    start.Text = "START";
-                    start.AutoSize = true;
-                    start.Margin = new Padding(1);
-                    mainRow.Controls.Add(start);
-                    help.SetToolTip(start, "Start serialized recovery supervision. Missing clients are completed one at a time.");
-                }
-                if (stop != null)
-                {
-                    stop.AutoSize = true;
-                    stop.Margin = new Padding(1);
-                    mainRow.Controls.Add(stop);
-                }
-
-                mainRow.Controls.Add(BuildTestsMenuButton());
-                runState.Margin = new Padding(6, 6, 0, 0);
-                mainRow.Controls.Add(runState);
-                testState.Margin = new Padding(6, 6, 0, 0);
-                mainRow.Controls.Add(testState);
-                top.Controls.Add(mainRow, 0, 0);
-
-                if (diagnostics != null)
-                {
-                    diagnostics.Visible = false;
-                    diagnostics.Height = 0;
-                }
-                if (info != null)
-                {
-                    info.Visible = false;
-                    help.SetToolTip(accounts,
-                        "Saved account profiles. Double-click to edit. Passwords are protected with Windows DPAPI and never written to logs. Runtime PID/state is shown in the same table.");
-                }
+                responsiveLeft.Controls.Add(responsiveHeader);
+                responsiveLeft.Controls.Add(responsiveAccountBox);
+                responsiveRoot.Controls.Add(responsiveLeft);
+                responsiveRoot.Controls.Add(responsiveLogBox);
+                Controls.Remove(oldRoot);
+                Controls.Add(responsiveRoot);
+                oldRoot.Dispose();
+                responsiveRecoveryApplied = true;
+                responsiveRoot.Layout += (s, e) => ArrangeRecoveryWorkspace();
+                runState.TextChanged += (s, e) => ArrangeRecoveryWorkspace();
+                testState.TextChanged += (s, e) => ArrangeRecoveryWorkspace();
+                accounts.RowsAdded += (s, e) => ArrangeRecoveryWorkspace();
+                accounts.RowsRemoved += (s, e) => ArrangeRecoveryWorkspace();
             }
-            finally { top.ResumeLayout(true); }
+            finally { ResumeLayout(true); }
+            ArrangeRecoveryWorkspace();
+        }
+
+        private void BuildRecoveryHeader(Button browse, Button start, Button stop)
+        {
+            var caption = new Label { Text = "Launcher", AutoSize = true, Margin = new Padding(0, 6, 4, 0) };
+            responsiveHeader.Controls.Add(caption);
+            launchPath.Dock = DockStyle.None;
+            launchPath.MinimumSize = Size.Empty;
+            launchPath.Margin = new Padding(0, 2, 4, 2);
+            responsiveHeader.Controls.Add(launchPath);
+            CompactButton(browse); responsiveHeader.Controls.Add(browse);
+            startWithApp.Text = "Start with 4RTools";
+            autoRecover.Text = "Auto relog";
+            visualWatchdog.Text = "Visual watchdog";
+            foreach (CheckBox check in new[] { startWithApp, autoRecover, visualWatchdog })
+            {
+                check.Dock = DockStyle.None;
+                check.AutoSize = true;
+                check.Margin = new Padding(4, 6, 4, 0);
+                responsiveHeader.Controls.Add(check);
+            }
+            start.Text = "START";
+            CompactButton(start); CompactButton(stop);
+            responsiveHeader.Controls.Add(start); responsiveHeader.Controls.Add(stop);
+            responsiveHeader.Controls.Add(BuildTestsMenuButton());
+            runState.Margin = new Padding(5, 6, 0, 0);
+            responsiveHeader.Controls.Add(runState);
+            testState.AutoSize = false;
+            testState.AutoEllipsis = true;
+            testState.Margin = new Padding(5, 6, 0, 0);
+            responsiveHeader.Controls.Add(testState);
+        }
+
+        private static void CompactButton(Button button)
+        {
+            button.Dock = DockStyle.None;
+            button.AutoSize = true;
+            button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            button.MinimumSize = new Size(54, 0);
+            button.Margin = new Padding(2);
+            button.Padding = new Padding(5, 0, 5, 0);
+        }
+
+        private void ArrangeRecoveryWorkspace()
+        {
+            if (!responsiveRecoveryApplied || arrangingRecovery || IsDisposed || responsiveRoot == null) return;
+            arrangingRecovery = true;
+            try
+            {
+                int gap = Math.Max(4, Font.Height / 3);
+                int width = Math.Max(1, responsiveRoot.ClientSize.Width - gap * 2);
+                int height = Math.Max(1, responsiveRoot.ClientSize.Height - gap * 2);
+                float scale = Font.SizeInPoints / 9F;
+                accounts.Font = Font;
+                int rowHeight = Math.Max(24, Font.Height + 8);
+                accounts.RowTemplate.Height = rowHeight;
+                foreach (DataGridViewRow row in accounts.Rows)
+                    if (row.Height != rowHeight) row.Height = rowHeight;
+                accounts.ColumnHeadersHeight = Math.Max(26, Font.Height + 10);
+                launchPath.Width = Math.Min(Math.Max(160, (int)(200 * scale)), Math.Max(160, width / 4));
+                testState.Size = new Size(Math.Min(230, width / 3), Font.Height + 4);
+                testState.Visible = !string.IsNullOrWhiteSpace(testState.Text);
+                help.SetToolTip(testState, testState.Text);
+
+                int minimumColumns = accounts.Columns.Cast<DataGridViewColumn>().Where(c => c.Visible).Sum(ColumnMinimumWidth)
+                    + SystemInformation.VerticalScrollBarWidth + 20;
+                int leftWidth = (width - gap) * 2 / 3;
+                bool wide = UseWideRecoveryLayout(width) && leftWidth >= minimumColumns;
+                if (!wide) leftWidth = width;
+                int headerHeight = MeasureFlow(responsiveHeader, leftWidth);
+                int buttonsHeight = MeasureFlow(responsiveAccountButtons, Math.Max(1, leftWidth - 16));
+                int minimumGrid = accounts.ColumnHeadersHeight + rowHeight * Math.Min(5, MinimumVisibleAccountRows(accounts.Rows.Count)) + 4;
+                int minimumLeft = headerHeight + gap + minimumGrid + buttonsHeight + Font.Height + 26;
+                int minimumLog = Math.Max(116, Font.Height * 6);
+                int needed = wide ? minimumLeft : minimumLeft + minimumLog + gap;
+                Size scrollMinimum = new Size(0, needed + gap * 2);
+                if (responsiveRoot.AutoScrollMinSize != scrollMinimum) responsiveRoot.AutoScrollMinSize = scrollMinimum;
+                height = Math.Max(height, needed);
+                int leftHeight = wide ? height : Math.Max(minimumLeft, height * 2 / 3);
+                if (!wide) leftHeight = Math.Min(leftHeight, height - minimumLog - gap);
+                Point origin = new Point(gap + responsiveRoot.AutoScrollPosition.X, gap + responsiveRoot.AutoScrollPosition.Y);
+                Put(responsiveLeft, origin.X, origin.Y, leftWidth, leftHeight);
+                Put(responsiveHeader, 0, 0, leftWidth, headerHeight);
+                Put(responsiveAccountBox, 0, headerHeight + gap, leftWidth, Math.Max(1, leftHeight - headerHeight - gap));
+                Rectangle inner = responsiveAccountBox.DisplayRectangle;
+                buttonsHeight = MeasureFlow(responsiveAccountButtons, inner.Width);
+                int gridHeight = Math.Max(1, inner.Height - buttonsHeight - gap);
+                Put(accounts, inner.Left, inner.Top, inner.Width, gridHeight);
+                Put(responsiveAccountButtons, inner.Left, inner.Top + gridHeight + gap, inner.Width, buttonsHeight);
+                if (wide) Put(responsiveLogBox, origin.X + leftWidth + gap, origin.Y, width - leftWidth - gap, height);
+                else Put(responsiveLogBox, origin.X, origin.Y + leftHeight + gap, width, height - leftHeight - gap);
+                ResizeAccountColumns();
+            }
+            finally { arrangingRecovery = false; }
+        }
+
+        private static void Put(Control control, int x, int y, int width, int height)
+        {
+            Rectangle bounds = new Rectangle(x, y, Math.Max(1, width), Math.Max(1, height));
+            if (control.Bounds != bounds) control.Bounds = bounds;
+        }
+
+        private static int MeasureFlow(FlowLayoutPanel flow, int width)
+        {
+            flow.Width = Math.Max(1, width);
+            flow.PerformLayout();
+            return flow.Controls.Cast<Control>().Where(c => c.Visible)
+                .Select(c => c.Bottom + c.Margin.Bottom).DefaultIfEmpty(0).Max() + flow.Padding.Bottom;
+        }
+
+        private void ConfigureAccountsGrid()
+        {
+            accounts.Dock = DockStyle.None;
+            accounts.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            accounts.MinimumSize = Size.Empty;
+            accounts.MaximumSize = Size.Empty;
+            accounts.Margin = Padding.Empty;
+            accounts.BorderStyle = BorderStyle.FixedSingle;
+            accounts.BackgroundColor = SystemColors.Window;
+            accounts.AllowUserToResizeRows = false;
+            accounts.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+            accounts.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            accounts.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            accounts.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False;
+            accounts.ScrollBars = ScrollBars.Both;
+            accounts.ShowCellToolTips = true;
+            accounts.Columns["Enabled"].HeaderText = "On";
+            accounts.Columns["Slot"].HeaderText = "Slot";
+            accounts.Columns["Hotkey"].HeaderText = "Resume";
+            foreach (DataGridViewColumn column in accounts.Columns)
+            {
+                column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                column.MinimumWidth = 24;
+            }
+            accounts.CellToolTipTextNeeded += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+                DataGridViewCell cell = accounts.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                e.ToolTipText = string.IsNullOrEmpty(cell.ToolTipText) ? Convert.ToString(cell.Value) : cell.ToolTipText;
+            };
+        }
+
+        private int ColumnMinimumWidth(DataGridViewColumn column)
+        {
+            int standard;
+            switch (column.Name)
+            {
+                case "Enabled": standard = 34; break;
+                case "Label": standard = 88; break;
+                case "User": standard = 90; break;
+                case "Slot": standard = 38; break;
+                case "Hotkey": standard = 68; break;
+                case "Secret": standard = 70; break;
+                case "AccountProxy": standard = 68; break;
+                case "RuntimePid": standard = 52; break;
+                case "RuntimeStatus": standard = 100; break;
+                default: standard = 60; break;
+            }
+            int textWidth = TextRenderer.MeasureText(column.HeaderText, accounts.Font, Size.Empty, TextFormatFlags.NoPadding).Width + 14;
+            return Math.Max(textWidth, (int)Math.Ceiling(standard * Font.SizeInPoints / 9F));
+        }
+
+        private void ResizeAccountColumns()
+        {
+            if (accounts.IsDisposed || accounts.ClientSize.Width <= 0) return;
+            DataGridViewColumn[] columns = accounts.Columns.Cast<DataGridViewColumn>().Where(c => c.Visible).ToArray();
+            int available = Math.Max(0, accounts.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 2);
+            int[] widths = columns.Select(ColumnMinimumWidth).ToArray();
+            int spare = Math.Max(0, available - widths.Sum());
+            string[] flexible = { "Label", "User", "RuntimeStatus" };
+            int[] weights = columns.Select(c => flexible.Contains(c.Name) ? (c.Name == "RuntimeStatus" ? 2 : 3) : 0).ToArray();
+            int totalWeight = weights.Sum();
+            for (int i = 0; i < columns.Length; i++)
+            {
+                if (weights[i] > 0 && totalWeight > 0)
+                {
+                    int extra = spare * weights[i] / totalWeight;
+                    widths[i] += extra;
+                    spare -= extra;
+                    totalWeight -= weights[i];
+                }
+                if (columns[i].Width != widths[i]) columns[i].Width = widths[i];
+            }
+            accounts.HorizontalScrollingOffset = 0;
         }
 
         private Button BuildTestsMenuButton()
         {
-            if (responsiveTestsMenu != null)
-            {
-                try { responsiveTestsMenu.Dispose(); } catch { }
-            }
             responsiveTestsMenu = new ContextMenuStrip();
             AddTestMenuItem("Test selected client", TestSelectedClientOnly);
             AddTestMenuItem("Test all clients", TestAllClientsKeepOpen);
@@ -284,15 +316,11 @@ namespace _4RTools.Model.Vanilla
             responsiveTestsMenu.Items.Add(new ToolStripSeparator());
             AddTestMenuItem("Network-drop test", ArmManualNetworkDropTest);
             AddTestMenuItem("Stop current test", StopCurrentTest);
-
-            var button = new Button { Text = "TESTS ▾", AutoSize = true, Margin = new Padding(1) };
+            var button = new Button { Text = "TESTS \u25BE" };
+            CompactButton(button);
             button.Click += (s, e) => responsiveTestsMenu.Show(button, new Point(0, button.Height));
-            help.SetToolTip(button, "Startup/recovery diagnostics and individual startup-step tests.");
-            Disposed += (s, e) =>
-            {
-                try { responsiveTestsMenu?.Dispose(); } catch { }
-                responsiveTestsMenu = null;
-            };
+            help.SetToolTip(button, "Startup tests and individual recovery steps.");
+            Disposed += (s, e) => responsiveTestsMenu.Dispose();
             return button;
         }
 
@@ -301,67 +329,9 @@ namespace _4RTools.Model.Vanilla
             responsiveTestsMenu.Items.Add(text, null, (s, e) => action());
         }
 
-        private void ConfigureAccountsGrid()
-        {
-            accounts.BorderStyle = BorderStyle.FixedSingle;
-            accounts.BackgroundColor = SystemColors.Window;
-            accounts.AllowUserToResizeRows = false;
-            accounts.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
-            accounts.RowTemplate.Height = 24;
-            accounts.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            accounts.ColumnHeadersHeight = 25;
-            accounts.ScrollBars = ScrollBars.Vertical;
-            accounts.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            accounts.MinimumSize = new Size(0, 25 + 24 * 5 + 2); // header + at least four rows + one blank-row worth of air.
-            ResizeAccountColumns();
-        }
-
-        private void ResizeAccountColumns()
-        {
-            if (accounts == null || accounts.IsDisposed || accounts.Columns.Count == 0) return;
-            foreach (DataGridViewColumn column in accounts.Columns)
-            {
-                column.MinimumWidth = 48;
-                column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-                switch (column.Name)
-                {
-                    case "Enabled": column.FillWeight = 7; column.MinimumWidth = 55; break;
-                    case "Label": column.FillWeight = 15; break;
-                    case "User": column.FillWeight = 18; break;
-                    case "Slot": column.FillWeight = 7; column.MinimumWidth = 56; break;
-                    case "Hotkey": column.FillWeight = 11; column.MinimumWidth = 76; break;
-                    case "Secret": column.FillWeight = 9; column.MinimumWidth = 70; break;
-                    case "AccountProxy": column.FillWeight = 10; column.MinimumWidth = 72; break;
-                    case "RuntimePid": column.FillWeight = 7; column.MinimumWidth = 58; break;
-                    case "RuntimeStatus": column.FillWeight = 16; column.MinimumWidth = 105; break;
-                    default: column.FillWeight = 10; break;
-                }
-            }
-        }
-
-        private void ConfigureReconnectLog()
-        {
-            log.Font = new Font("Consolas", 8.25F);
-            log.WordWrap = false;
-            log.ScrollBars = ScrollBars.Both;
-            responsiveLogBox.Text = "Log";
-            responsiveLogBox.Padding = new Padding(5);
-            responsiveLogBox.Margin = new Padding(4, 0, 0, 0);
-            help.SetToolTip(responsiveLogBox,
-                "Current reconnect/startup events. The full application diagnostic bundle is available from COPY DEBUG LOG at the top.");
-        }
-
         private static FlowLayoutPanel CompactFlow()
         {
-            return new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                WrapContents = true,
-                Margin = Padding.Empty,
-                Padding = Padding.Empty
-            };
+            return new FlowLayoutPanel { AutoSize = false, WrapContents = true, Margin = Padding.Empty, Padding = Padding.Empty, Size = new Size(1, 1) };
         }
 
         private static GroupBox FindGroupBoxStarting(Control root, string prefix)
@@ -370,26 +340,8 @@ namespace _4RTools.Model.Vanilla
             {
                 GroupBox group = child as GroupBox;
                 if (group != null && group.Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return group;
-                if (child.HasChildren)
-                {
-                    GroupBox nested = FindGroupBoxStarting(child, prefix);
-                    if (nested != null) return nested;
-                }
-            }
-            return null;
-        }
-
-        private static Label FindLabelStarting(Control root, string prefix)
-        {
-            foreach (Control child in root.Controls)
-            {
-                Label label = child as Label;
-                if (label != null && label.Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return label;
-                if (child.HasChildren)
-                {
-                    Label nested = FindLabelStarting(child, prefix);
-                    if (nested != null) return nested;
-                }
+                GroupBox nested = child.HasChildren ? FindGroupBoxStarting(child, prefix) : null;
+                if (nested != null) return nested;
             }
             return null;
         }
