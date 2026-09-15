@@ -34,25 +34,24 @@ namespace _4RTools.Model.Vanilla
             parent.Controls.Add(replacement);
             parent.Controls.SetChildIndex(replacement, index);
             help.SetToolTip(replacement, text == "Add"
-                ? "Create a managed Vanilla account, including its proxy route."
+                ? "Add another saved Vanilla account profile. Any number may be stored; at most two may be enabled at once."
                 : text == "Edit"
-                    ? "Edit the selected account, including proxy route, character slot, password and resume hotkey."
-                    : "Remove the selected managed account from this PC.");
+                    ? "Edit the selected account, including enabled state, proxy, character slot, password and resume hotkey."
+                    : "Remove the selected saved account profile.");
         }
 
         private void AddAccountMinimal()
         {
-            if (settings.Accounts.Count >= 2)
+            var account = new VanillaReconnectAccount
             {
-                MessageBox.Show(this, "Maximum two managed accounts.", "Accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            var account = new VanillaReconnectAccount { Label = "Client " + (settings.Accounts.Count + 1) };
+                Label = "Client " + (settings.Accounts.Count + 1),
+                Enabled = settings.Accounts.Count(a => a.Enabled) < 2
+            };
             VanillaProxyRoute route = settings.Proxy;
             using (var dialog = new VanillaMinimalAccountDialog(supervisor, account, route))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                if (!CanAcceptEnabledState(dialog.Account, null)) return;
                 settings.Accounts.Add(dialog.Account);
                 VanillaAccountProxyPreferences.Set(dialog.Account.Id, dialog.ProxyRoute);
                 RefreshAccounts();
@@ -69,6 +68,7 @@ namespace _4RTools.Model.Vanilla
             using (var dialog = new VanillaMinimalAccountDialog(supervisor, selected.Clone(), route))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                if (!CanAcceptEnabledState(dialog.Account, selected.Id)) return;
                 int index = settings.Accounts.FindIndex(a => a.Id == selected.Id);
                 if (index < 0) return;
                 settings.Accounts[index] = dialog.Account;
@@ -78,6 +78,18 @@ namespace _4RTools.Model.Vanilla
                 RefreshAccountProxyColumn();
                 QueueAutoSave("Account saved");
             }
+        }
+
+        private bool CanAcceptEnabledState(VanillaReconnectAccount candidate, string replacingId)
+        {
+            if (candidate == null || !candidate.Enabled) return true;
+            int otherEnabled = settings.Accounts.Count(a => a.Enabled
+                && (string.IsNullOrWhiteSpace(replacingId) || !string.Equals(a.Id, replacingId, StringComparison.OrdinalIgnoreCase)));
+            if (otherEnabled < 2) return true;
+            MessageBox.Show(this,
+                "Only two Vanilla accounts can be enabled at the same time. Save this profile as disabled, or disable another profile first.",
+                "Two active clients maximum", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
         }
 
         private void RemoveAccountMinimal()
@@ -171,6 +183,7 @@ namespace _4RTools.Model.Vanilla
             AcceptButton = save;
             CancelButton = cancel;
 
+            help.SetToolTip(enabled, "Enabled profiles are supervised/started. At most two profiles may be enabled at once; any number may be saved.");
             help.SetToolTip(proxy, "Proxy route used for this account only.");
             help.SetToolTip(hotkey, "Click here and press the key combination used to resume Vanilla auto-battle after login.");
             help.SetToolTip(password, "Stored with Windows DPAPI for this Windows user and never written to logs.");
