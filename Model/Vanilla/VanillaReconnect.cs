@@ -1100,13 +1100,9 @@ namespace _4RTools.Model.Vanilla
 
                     SelectDetectedGameServer(input, pid, config.StageDelayMs, account.Label + ": ");
 
-                    int slot = account.RequiredCharacterSlot() - 1;
-                    int col = slot % 5, row = slot / 5;
-                    input.ClickNormalized(config.Anchors.CharacterGridX + col * config.Anchors.CharacterStepX,
-                        config.Anchors.CharacterGridY + row * config.Anchors.CharacterStepY);
-                    Thread.Sleep(350);
-                    input.ClickNormalized(config.Anchors.GameStartX, config.Anchors.GameStartY);
-                    Thread.Sleep(config.GameLoadMs);
+                    WaitForCharacterSurfaceCancellable(input, pid, cancelled, 30000, account.Label + ": recovery");
+                    SelectConfiguredCharacterWithoutCoordinates(input, pid, account, cancelled, account.Label + ": recovery: ");
+                    PauseCharacterSelection(cancelled, config.GameLoadMs);
                 }
             }
             catch (Exception ex) { error = ex.Message; }

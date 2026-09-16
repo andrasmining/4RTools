@@ -152,3 +152,5 @@ Gepard gameplay test. See `RELEASE-NOTES.md` for the precise validation limits.
 This fork is independent of upstream 4RTools and Vanilla MMO. The MIT license
 retains `Copyright (c) 2022 4RTools`. Distributed third-party notices are included
 in `packaging/THIRD-PARTY-NOTICES.txt` and every portable release.
+
+Character selection is keyboard-driven from a clamped grid origin; fixed character-slot and GAME START coordinates are not used.

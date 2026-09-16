@@ -1,4 +1,21 @@
-# 4RTools Vanilla 0.6.38
+# 4RTools Vanilla 0.6.39
+
+## Resolution-agnostic character selection
+
+Character selection no longer clicks configured character-grid or GAME START
+coordinates. After the character screen is stably detected and foreground ownership
+is verified, the client is driven only with keyboard navigation: Up/Left clamp the
+selection to the top-left card, Right/Down move to the configured one-based slot,
+and Enter starts that character. The same path is used for cold startup and recovery.
+This removes the resolution/DPI failure that could click an empty card and open the
+new-character flow.
+
+Every one of the 15 target slots is regression-tested from every possible initial
+selection. Existing read-only username + character-name checks still verify the
+actual gameplay identity before the Autobattle resume hotkey; a mismatch fails closed.
+The supplied incident screenshot showed slot 2 required while a coordinate click landed
+on an empty card, which is the regression this release removes.
+
 
 ## Username reader and diagnostics
 
@@ -68,3 +85,13 @@ live test performed by this engineering session. No live Vanilla/Gepard client o
 user RDP desktop was available; independent relog/restart confirmation is not
 claimed. Character-slot memory mapping remains unavailable; configured slots are
 retained. Existing dependency/compiler warnings remain visible.
+
+<!-- BEGIN GENERATED RELEASE CHECKSUMS -->
+
+Release version: 0.6.39. SHA256:
+
+- `4RTools-Vanilla-v0.6.39-portable.zip`: `a6845122cd8105a3674ebbf13660a1478ce2a7bbbb9b1eaa5fcf5ed8647ea8d1`
+- `4RTools-Vanilla.exe`: `fb1278ecda7b50dce7fbe38ee4e4cd94167aef62e8e704c5b4062a192ce5554d`
+
+These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
+<!-- END GENERATED RELEASE CHECKSUMS -->

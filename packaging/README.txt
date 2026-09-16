@@ -97,3 +97,5 @@ A unique configured legacy username row learns its matching character name in
 place, keeping its slot, password, proxy, enabled state and ID. Ambiguous matches
 are not guessed. Slots remain unmapped; configured slots are preserved and unknown
 slots stay blank. Discovery never guesses slot 1, passwords or proxies.
+
+Character selection is keyboard-driven from a clamped grid origin; fixed character-slot and GAME START coordinates are not used.

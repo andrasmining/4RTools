@@ -280,17 +280,9 @@ namespace _4RTools.Model.Vanilla
                     VanillaDebugLog.Write("STARTUP", account.Label + ": server dialog handled after visual detection.");
 
                     WaitForCharacterSurface(input, pid.Value, generation);
-                    int slot = account.RequiredCharacterSlot() - 1;
-                    int col = slot % 5, row = slot / 5;
-                    input.Activate();
-                    BriefPause(generation, 120);
-                    input.ClickNormalized(config.Anchors.CharacterGridX + col * config.Anchors.CharacterStepX,
-                        config.Anchors.CharacterGridY + row * config.Anchors.CharacterStepY);
-                    BriefPause(generation, 220);
-                    input.Activate();
-                    input.ClickNormalized(config.Anchors.GameStartX, config.Anchors.GameStartY);
-                    Log(account.Label + ": character slot " + account.CharacterSlot + " selected; GAME START clicked with foreground verified.");
-                    VanillaDebugLog.Write("STARTUP", account.Label + ": character slot selected and GAME START clicked.");
+                    SelectConfiguredCharacterWithoutCoordinates(input, pid.Value, account,
+                        () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
+                        account.Label + ": sequential: ");
 
                     WaitForGameplayStable(input, pid.Value, generation, 60000, account.Label + " post-character");
                     ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: Preparing autobattle verification 1/3");
@@ -344,6 +336,95 @@ namespace _4RTools.Model.Vanilla
                 // Never close a newly created client because a transient visual/focus check failed.
                 // Fail closed and keep every later account blocked.
                 throw;
+            }
+        }
+
+        internal static Keys[] CharacterSelectionKeyPlan(int oneBasedSlot)
+        {
+            if (oneBasedSlot < 1 || oneBasedSlot > 15)
+                throw new ArgumentOutOfRangeException(nameof(oneBasedSlot));
+            int zero = oneBasedSlot - 1;
+            int row = zero / 5, column = zero % 5;
+            var keys = new System.Collections.Generic.List<Keys>();
+            // Character selection owns keyboard focus. Clamp to the top-left card first,
+            // then navigate from a known origin. This is independent of resolution/DPI.
+            keys.Add(Keys.Up); keys.Add(Keys.Up);
+            for (int i = 0; i < 4; i++) keys.Add(Keys.Left);
+            for (int i = 0; i < column; i++) keys.Add(Keys.Right);
+            for (int i = 0; i < row; i++) keys.Add(Keys.Down);
+            keys.Add(Keys.Enter);
+            return keys.ToArray();
+        }
+
+        private void SelectConfiguredCharacterWithoutCoordinates(VanillaForegroundInput input, int pid,
+            VanillaReconnectAccount account, Func<bool> cancelled, string logPrefix)
+        {
+            if (input == null) throw new ArgumentNullException(nameof(input));
+            if (cancelled == null) throw new ArgumentNullException(nameof(cancelled));
+            int slot = account.RequiredCharacterSlot();
+            Keys[] plan = CharacterSelectionKeyPlan(slot);
+            input.Activate();
+            for (int i = 0; i < plan.Length; i++)
+            {
+                if (cancelled()) throw new OperationCanceledException("Character selection cancelled before input.");
+                input.Press(plan[i]);
+                if (i + 1 < plan.Length) PauseCharacterSelection(cancelled, 70);
+            }
+            string expected = string.IsNullOrWhiteSpace(account.CharacterName) ? "<learn after gameplay>" : account.CharacterName;
+            string detail = logPrefix + "character selection used keyboard-only navigation to configured slot " + slot
+                + " for '" + expected + "'; no character-grid or GAME START coordinates were clicked.";
+            Log(detail);
+            VanillaDebugLog.Write("STARTUP", "PID=" + pid + "; " + detail);
+        }
+
+        private void WaitForCharacterSurfaceCancellable(VanillaForegroundInput input, int pid, Func<bool> cancelled,
+            int timeoutMs, string context)
+        {
+            Stopwatch watch = Stopwatch.StartNew();
+            int consecutive = 0;
+            string last = "not sampled";
+            while (watch.ElapsedMilliseconds < timeoutMs)
+            {
+                if (cancelled()) throw new OperationCanceledException(context + ": character selection cancelled.");
+                using (Bitmap image = input.CaptureClientBitmap())
+                {
+                    VanillaLoginLayout login;
+                    VanillaServerLayout server;
+                    VanillaProxyLayout proxyLayout;
+                    string evidence;
+                    bool loginVisible = VanillaAuthPattern.TryDetectLogin(image, out login, out evidence);
+                    bool serverVisible = VanillaAuthPattern.TryDetectServerDialog(image, out server, out evidence);
+                    bool proxyVisible = VanillaProxyPattern.TryDetect(image, out proxyLayout, out evidence);
+                    bool interactive = IsInteractiveFrame(image);
+                    last = "login=" + loginVisible + ", server=" + serverVisible + ", proxy=" + proxyVisible + ", interactive=" + interactive;
+                    if (!loginVisible && !serverVisible && !proxyVisible && interactive && watch.ElapsedMilliseconds >= 450)
+                    {
+                        consecutive++;
+                        if (consecutive >= 3)
+                        {
+                            SaveUiCapture(image, "character-screen-ready.png");
+                            VanillaDebugLog.Write("STARTUP", context + ": character surface PID=" + pid
+                                + " stable after " + watch.ElapsedMilliseconds + " ms; " + last + ".");
+                            return;
+                        }
+                    }
+                    else consecutive = 0;
+                }
+                PauseCharacterSelection(cancelled, 160);
+            }
+            throw new InvalidOperationException(context + ": character surface was not safely detected within "
+                + (timeoutMs / 1000) + "s. No character-selection input was sent. Last state: " + last);
+        }
+
+        private static void PauseCharacterSelection(Func<bool> cancelled, int milliseconds)
+        {
+            int remaining = Math.Max(0, milliseconds);
+            while (remaining > 0)
+            {
+                if (cancelled()) throw new OperationCanceledException("Character selection cancelled.");
+                int slice = Math.Min(50, remaining);
+                Thread.Sleep(slice);
+                remaining -= slice;
             }
         }
 

@@ -439,6 +439,20 @@ must cover multiple resolutions and softened/resampled rendering. Do not claim
 arbitrary future UI changes are guaranteed; unknown layouts must stop safely and
 produce useful captures/logs.
 
+## Resolution-agnostic character selection
+
+Never select a Vanilla character or GAME START by fixed/normalized grid coordinates.
+Character-select automation must use focus-verified keyboard navigation from a
+clamped known origin, driven by the configured one-based slot, and the existing
+read-only username + character-name identity must verify the resulting gameplay
+before any Autobattle hotkey is sent. Character-name evidence is preferred when
+available, but unavailable selection-screen memory must not be guessed or replaced
+with OCR/coordinate assumptions. Unknown or contradictory identity fails closed.
+Keep this path resolution/DPI agnostic and cover every target slot from every
+possible initial selection in deterministic tests. Any future visual interaction
+must detect the actual control/region first and click inside that detected region;
+do not reintroduce hard-coded character-grid or GAME START coordinates.
+
 ## Cleanliness, documentation, and final reporting
 
 Before finalizing substantial work, review for abandoned experiments, temporary
