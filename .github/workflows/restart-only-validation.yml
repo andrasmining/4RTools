@@ -1,0 +1,123 @@
+name: Restart-only autobattle validation
+
+on:
+  push:
+    branches: [fix/restart-only-autobattle]
+    paths: ['.github/workflows/restart-only-validation.yml']
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: restart-only-autobattle-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Preserve source bytes
+        shell: powershell
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Apply reviewed restart-only recovery transformation
+        shell: powershell
+        run: |
+          python .github/restart-only-transform.py
+          if ($LASTEXITCODE -ne 0) { throw 'Transformation failed.' }
+          git -c core.whitespace=cr-at-eol diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'Whitespace validation failed.' }
+          git diff --stat
+
+      - name: Verify automatic hotkey call sites are restart-owned only
+        shell: powershell
+        run: |
+          $bad = git grep -n "RequestVerifiedResume" -- Model/Vanilla | Select-String -NotMatch "VanillaReconnect.cs|VanillaAutobattleResume.cs"
+          if ($bad) { $bad | Write-Host; throw 'Unexpected automatic resume call site.' }
+          $watch = Get-Content Model/Vanilla/VanillaMovementWatchdog.cs -Raw
+          if ($watch -match 'RequestVerifiedResume') { throw 'Steady-state movement watchdog still sends hotkeys.' }
+          $core = Get-Content Model/Vanilla/VanillaReconnect.cs -Raw
+          if ($core -notmatch 'runtime\.RecoveryOwned && !runtime\.ResumeSent && !runtime\.ScriptRunning') { throw 'Restart ownership gate is missing.' }
+          if ($core -notmatch 'existing client; no login or hotkey input sent') { throw 'Existing-client no-input path is missing.' }
+          $resume = Get-Content Model/Vanilla/VanillaAutobattleResume.cs -Raw
+          if ($resume -notmatch 'PostLoginSettleMs = 10000') { throw 'Ten-second post-login settle is missing.' }
+          if ($resume -match 'MaximumClientRestarts') { throw 'Finite restart budget survived.' }
+
+      - name: Restore dependencies
+        shell: powershell
+        run: |
+          nuget restore 4RTools.sln -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+
+      - name: Validate shipped build profiles
+        shell: powershell
+        run: ./scripts/validate-vanilla-build-profiles.ps1
+
+      - name: Debug build and complete regression suite
+        shell: powershell
+        run: ./scripts/build.ps1 -Configuration Debug -VanillaRelease
+
+      - name: Release build, tests, portable package and Windows launch
+        shell: powershell
+        run: ./scripts/build-release.ps1 -Version 0.6.43
+
+      - name: Native test-owned process recovery
+        shell: powershell
+        run: ./scripts/test-recovery-native.ps1
+
+      - name: Native responsive UI checks
+        shell: powershell
+        run: ./scripts/test-ui-layout.ps1
+
+      - name: Commit validated source and remove temporary validation transport
+        shell: powershell
+        run: |
+          git config user.name '4RTools engineering'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add AGENTS.md Model/Vanilla Properties Tests README.md RELEASE-NOTES.md packaging/README.txt
+          git rm .github/restart-only-transform.py .github/workflows/restart-only-validation.yml
+          if ($LASTEXITCODE -ne 0) { throw 'Temporary validation cleanup failed.' }
+          git -c core.whitespace=cr-at-eol diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'Staged source validation failed.' }
+          git diff --cached --stat
+          git commit -m 'fix: make autobattle hotkeys restart-only'
+          if ($LASTEXITCODE -ne 0) { throw 'Validated source commit failed.' }
+          git push origin "HEAD:$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) { throw 'Push rejected; no remote changes were overwritten.' }
+
+      - name: Collect validation evidence
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path dist/evidence -Force | Out-Null
+          git bundle create dist/evidence/source.bundle --all
+          if ($LASTEXITCODE -ne 0) { throw 'Source evidence export failed.' }
+          git status --short | Out-File dist/evidence/worktree-status.txt -Encoding utf8
+          git rev-parse HEAD | Out-File dist/evidence/source-commit.txt -Encoding utf8
+          $cache = Join-Path $env:LOCALAPPDATA '4RTools-Engineering'
+          foreach ($folder in @('builds','portable-tests')) {
+            $source = Join-Path $cache $folder
+            if (Test-Path $source) { Copy-Item $source dist/evidence -Recurse -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: restart-only-validation-${{ github.run_id }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/native-recovery.log
+            dist/ui-layout/*.png
+            dist/ui-layout/*.txt
+            dist/evidence/**
+          retention-days: 7
+          if-no-files-found: error
