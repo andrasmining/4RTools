@@ -48,6 +48,15 @@ namespace _4RTools.Model.Vanilla
             var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
             client.DefaultRequestHeaders.UserAgent.ParseAdd("4RTools-Vanilla-Updater/" + CurrentVersionText);
             client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+            // End-user update checks remain anonymous. The disposable GitHub Actions
+            // release gate may authenticate its real updater probe so a shared runner's
+            // anonymous API quota cannot make an otherwise valid release fail.
+            if (string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase))
+            {
+                string token = Environment.GetEnvironmentVariable("GH_TOKEN");
+                if (!string.IsNullOrWhiteSpace(token))
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", "Bearer " + token.Trim());
+            }
             return client;
         }
 
