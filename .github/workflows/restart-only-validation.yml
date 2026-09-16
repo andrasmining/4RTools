@@ -45,8 +45,9 @@ jobs:
       - name: Verify automatic hotkey call sites are restart-owned only
         shell: powershell
         run: |
-          $bad = git grep -n "RequestVerifiedResume" -- Model/Vanilla | Select-String -NotMatch "VanillaReconnect.cs|VanillaAutobattleResume.cs"
-          if ($bad) { $bad | Write-Host; throw 'Unexpected automatic resume call site.' }
+          $bad = @(git grep -n "RequestVerifiedResume" -- Model/Vanilla 2>$null | Select-String -NotMatch "VanillaReconnect.cs|VanillaAutobattleResume.cs")
+          $global:LASTEXITCODE = 0
+          if ($bad.Count -gt 0) { $bad | Write-Host; throw 'Unexpected automatic resume call site.' }
           $watch = Get-Content Model/Vanilla/VanillaMovementWatchdog.cs -Raw
           if ($watch -match 'RequestVerifiedResume') { throw 'Steady-state movement watchdog still sends hotkeys.' }
           $core = Get-Content Model/Vanilla/VanillaReconnect.cs -Raw
@@ -54,8 +55,9 @@ jobs:
           if ($core -notmatch 'existing client; no login or hotkey input sent') { throw 'Existing-client no-input path is missing.' }
           $resume = Get-Content Model/Vanilla/VanillaAutobattleResume.cs -Raw
           if ($resume -notmatch 'PostLoginSettleMs = 10000') { throw 'Ten-second post-login settle is missing.' }
-          $finite = git grep -n "AutobattleRestartAttempts\|AutobattleRestartInProgress\|AutobattleRecoveryExhausted\|MaximumClientRestarts" -- Model/Vanilla Tests
-          if ($finite) { $finite | Write-Host; throw 'Obsolete finite restart state survived.' }
+          $finite = @(git grep -n "AutobattleRestartAttempts\|AutobattleRestartInProgress\|AutobattleRecoveryExhausted\|MaximumClientRestarts" -- Model/Vanilla Tests 2>$null)
+          $global:LASTEXITCODE = 0
+          if ($finite.Count -gt 0) { $finite | Write-Host; throw 'Obsolete finite restart state survived.' }
 
       - name: Restore dependencies
         shell: powershell
