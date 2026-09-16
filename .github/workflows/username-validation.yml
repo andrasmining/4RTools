@@ -1,4 +1,4 @@
-name: Username identity validation
+name: Username final publication validation
 on:
   push:
     branches: [fix/username-character-identity]
@@ -21,30 +21,53 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Apply checksum-verified username fix
+      - name: Persist mandatory VPS publication policy
         shell: powershell
         run: |
           @'
           from pathlib import Path
-          import base64, hashlib, lzma, re, subprocess
+          import subprocess
           assert subprocess.check_output(['git','branch','--show-current']).decode().strip() == 'fix/username-character-identity'
-          text = ''.join(Path('.github/username-fix-%d.txt' % i).read_text().strip() for i in (1,2,3))
-          assert len(text) == 24784, 'Incomplete source transfer'
-          patch = lzma.decompress(base64.b64decode(text, validate=True))
-          assert hashlib.sha256(patch).hexdigest() == 'd36752b2a069afad5cb6563ca749e640c23152d262aab3cb82fe0f66c54e8257'
-          paths = re.findall(r'^diff --git a/(\S+) b/\1$', patch.decode(), re.M)
-          assert len(paths) == 22 and all(not p.startswith('.github/') for p in paths)
-          evidence = Path('dist/evidence'); evidence.mkdir(parents=True, exist_ok=True)
-          target = evidence / 'reviewed.patch'; target.write_bytes(patch)
-          subprocess.run(['git','apply','--check','--binary',str(target)],check=True)
-          subprocess.run(['git','apply','--binary',str(target)],check=True)
-          subprocess.run(['git','add','--',*paths],check=True)
-          subprocess.run(['git','-c','core.whitespace=cr-at-eol','diff','--cached','--check'],check=True)
-          subprocess.run(['git','diff','--cached','--stat'],check=True)
-          tree = subprocess.check_output(['git','write-tree']).decode().strip()
-          subprocess.run(['git','archive','--format=zip','--output=dist/evidence/candidate-source.zip',tree],check=True)
+          p = Path('AGENTS.md')
+          text = p.read_text(encoding='utf-8')
+          title = '## VPS update delivery is mandatory'
+          assert title not in text
+          p.write_text(text.rstrip() + '\n\n' + title + '''
+
+          The user's VPS is updated through the application's GitHub-release updater.
+          Every implementation task must finish with a tested public stable release,
+          explicitly marked Latest, unless the user explicitly requests source-only work.
+          A chat ZIP, Actions artifact, branch, commit, PR or queued release is not an
+          alternative deliverable. Do not stop at those intermediate states.
+
+          Verify the public releases/latest response and both expected portable ZIP and
+          checksum assets. Exercise the previously published application's real updater
+          against the endpoint, verify downloads and source identity, integrate all work
+          into main and remove completed task branches. Diagnose and repair failures;
+          replace unsuitable approaches instead of handing development back to the user.
+          State a genuine unavoidable external blocker accurately only after exhausting
+          practical authorized alternatives. Never claim publication or VPS installation
+          without evidence; testing update discovery is not installing on the user's VPS.
+          '''.replace('\n          ', '\n'), encoding='utf-8')
+          p = Path('RELEASE-NOTES.md')
+          text = p.read_text(encoding='utf-8')
+          marker = '## Validation and limits'
+          assert text.count(marker) == 1
+          text = text.replace(marker, '''## VPS updater delivery
+
+          Releases are explicitly marked Latest. Publication checks reject downgrades,
+          verify the public latest endpoint, and run the real updater from the published
+          0.6.37 executable to confirm discovery of the new version and its ZIP/checksum
+          URLs. This runs on an isolated Windows Actions runner without launching the
+          application UI, touching a game client or installing on the user's VPS.
+
+          '''.replace('\n          ', '\n') + marker)
+          raw = p.read_bytes()
+          p.write_bytes(text.replace('\n','\r\n').encode('utf-8') if b'\r\n' in raw else text.encode('utf-8'))
+          subprocess.run(['git','-c','core.whitespace=cr-at-eol','diff','--check'],check=True)
+          subprocess.run(['git','diff','--','AGENTS.md','RELEASE-NOTES.md'],check=True)
           '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw 'Reviewed source integration failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Publication policy update failed.' }
       - name: Restore dependencies
         shell: powershell
         run: |
@@ -62,20 +85,24 @@ jobs:
       - name: Native test-owned process recovery
         shell: powershell
         run: ./scripts/test-recovery-native.ps1
-      - name: Native username diagnostics, legacy reconciliation and responsive UI
+      - name: Native username diagnostics and responsive UI
         shell: powershell
         run: ./scripts/test-ui-layout.ps1
-      - name: Commit validated source and remove patch transport
+      - name: Exercise real updater probe against the existing stable release
+        shell: powershell
+        run: ./scripts/test-published-update.ps1 -Version 0.6.37 -BaselineTag v0.6.36
+      - name: Commit verified publication policy
         shell: powershell
         run: |
           git config user.name '4RTools engineering'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/username-fix-1.txt .github/username-fix-2.txt .github/username-fix-3.txt
-          if ($LASTEXITCODE -ne 0) { throw 'Transport cleanup failed.' }
-          git commit -m 'fix: read verified username copies and reconcile composite character identities'
-          if ($LASTEXITCODE -ne 0) { throw 'Validated source commit failed.' }
+          git add AGENTS.md RELEASE-NOTES.md
+          git -c core.whitespace=cr-at-eol diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'Policy diff validation failed.' }
+          git commit -m 'docs: require latest stable releases for the VPS update path'
+          if ($LASTEXITCODE -ne 0) { throw 'Policy commit failed.' }
           git push origin "HEAD:$env:GITHUB_REF_NAME"
-          if ($LASTEXITCODE -ne 0) { throw 'Push rejected; no remote changes were overwritten.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Push rejected; no remote changes overwritten.' }
       - name: Collect source and validation evidence
         if: always()
         shell: powershell
@@ -84,7 +111,6 @@ jobs:
           git bundle create dist/evidence/source.bundle --all
           if ($LASTEXITCODE -ne 0) { throw 'Source evidence export failed.' }
           git status --short | Out-File dist/evidence/worktree-status.txt -Encoding utf8
-          git rev-parse HEAD | Out-File dist/evidence/source-commit.txt -Encoding utf8
           $cache = Join-Path $env:LOCALAPPDATA '4RTools-Engineering'
           foreach ($folder in @('builds','portable-tests')) {
             $source = Join-Path $cache $folder
@@ -93,13 +119,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: username-validation-${{ github.run_id }}
+          name: username-final-validation-${{ github.run_id }}
           path: |
             dist/*.zip
             dist/*.sha256
             dist/native-recovery.log
             dist/ui-layout/*.png
             dist/ui-layout/*.txt
+            dist/published/*.json
             dist/evidence/**
           retention-days: 7
           if-no-files-found: error
