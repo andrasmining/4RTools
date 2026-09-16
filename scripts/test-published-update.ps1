@@ -1,11 +1,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string] $Version,
-    [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+$')][string] $BaselineTag = 'v0.6.38'
+    [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+$')][string] $BaselineTag = 'v0.6.39'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-# Run only in the disposable Windows build environment, never against user data.
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -ne 'andrasmining/4RTools' -or -not $env:RUNNER_TEMP) {
     throw 'Published-update validation requires the repository Windows Actions runner.'
 }
@@ -51,10 +50,21 @@ $assembly = [Reflection.Assembly]::LoadFrom($executables[0].FullName)
 $updater = $assembly.GetType('_4RTools.Model.Vanilla.VanillaUpdater', $true)
 $current = $updater.GetProperty('CurrentVersion').GetValue($null, $null)
 if ($current -ne [version]$BaselineTag.Substring(1)) { throw 'Baseline executable version mismatch.' }
-# Invoke the previously published application's real HTTP updater without its UI,
-# game readers, input workers, installation helper or credential storage. GH_TOKEN
-# is inherited only on the disposable Actions runner, so this probe gets GitHub's
-# authenticated rate limit while normal end-user updater requests remain anonymous.
+
+# Keep this a test of the previously published binary's real CheckAsync. Its
+# private static HttpClient is retrieved, not replaced; the disposable Actions
+# runner adds only an Authorization header so GitHub's shared anonymous quota
+# cannot invalidate the probe. The published baseline executable bytes remain
+# untouched and normal user/VPS requests remain anonymous.
+$flags = [Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
+$httpField = $updater.GetField('Http', $flags)
+if ($null -eq $httpField) { throw 'Published updater HTTP client could not be located.' }
+$http = $httpField.GetValue($null)
+if ($null -eq $http) { throw 'Published updater HTTP client is unavailable.' }
+if ($null -eq $http.DefaultRequestHeaders.Authorization) {
+    $http.DefaultRequestHeaders.TryAddWithoutValidation('Authorization', 'Bearer ' + $token.Trim()) | Out-Null
+}
+
 $task = $updater.GetMethod('CheckAsync').Invoke($null, $null)
 if (-not $task.Wait(30000)) { throw 'Published updater check timed out.' }
 $info = $task.Result
@@ -76,6 +86,7 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $report) -Force | Out-Nul
     zipUrl = $info.ZipUrl
     checksumUrl = $info.ChecksumUrl
     originalUpdaterCheckPassed = $true
+    baselineBytesModified = $false
     authenticatedActionsProbe = $true
     publicLatestVerified = $true
     installedOnUserMachine = $false
