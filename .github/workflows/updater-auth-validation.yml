@@ -1,0 +1,53 @@
+name: Updater auth validation
+on:
+  push:
+    branches: [fix/agnostic-character-selection]
+    paths: ['.github/workflows/updater-auth-validation.yml']
+permissions:
+  contents: write
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Restore dependencies
+        shell: powershell
+        run: |
+          nuget restore 4RTools.sln -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+      - name: Validate shipped profiles
+        shell: powershell
+        run: ./scripts/validate-vanilla-build-profiles.ps1
+      - name: Debug build and full regression suite
+        shell: powershell
+        run: ./scripts/build.ps1 -Configuration Debug -VanillaRelease
+      - name: Release build, tests, package and launch smoke
+        shell: powershell
+        run: ./scripts/build-release.ps1 -Version 0.6.40
+      - name: Native recovery checks
+        shell: powershell
+        run: ./scripts/test-recovery-native.ps1
+      - name: Validate updater probe token plumbing
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if (-not $env:GH_TOKEN) { throw 'Workflow token unavailable.' }
+          $text = Get-Content scripts/test-published-update.ps1 -Raw
+          if ($text -notmatch "Authorization = 'Bearer ' \+ \$token\.Trim\(\)") { throw 'Authenticated API header missing.' }
+          $updater = Get-Content Model/Vanilla/VanillaUpdater.cs -Raw
+          if ($updater -notmatch 'GITHUB_ACTIONS' -or $updater -notmatch 'GH_TOKEN') { throw 'Actions-only updater authentication missing.' }
+      - name: Remove temporary validation workflow after success
+        shell: powershell
+        run: |
+          git config user.name '4RTools engineering'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/updater-auth-validation.yml
+          git commit -m 'build: retire updater auth validation transport'
+          git push origin "HEAD:$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) { throw 'Validated branch push failed.' }
