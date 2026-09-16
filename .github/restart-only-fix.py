@@ -55,12 +55,11 @@ for method in ('Stop', 'StopAtBoundary', 'Settings', 'ReplacedPid', 'ReplacedOpe
         return block.replace('h.E.Seconds=1', 'h.E.Seconds=301', 1).replace('h.E.Seconds = 1', 'h.E.Seconds = 301', 1)
     rewrite_method('Tests/VanillaRecoveryWatchdogTests.cs', method, bump)
 
-def close_failure(block):
-    assert 'ArmFiveMinuteStall' in block
-    block = block.replace('h.E.Seconds=1', 'h.E.Seconds=301', 1).replace('h.E.Seconds = 1', 'h.E.Seconds = 301', 1)
-    block = block.replace('h.E.Seconds=2', 'h.E.Seconds=302', 1).replace('h.E.Seconds = 2', 'h.E.Seconds = 302', 1)
-    block = block.replace('h.E.Seconds=3', 'h.E.Seconds=303', 1).replace('h.E.Seconds = 3', 'h.E.Seconds = 303', 1)
-    return block
+# Exercise close failure through the primary ten-minute position-restart path.
+# This is independent of visual terminal confirmation and proves failed close keeps
+# the PID plus backoff without creating another immediate restart.
+def close_failure(_):
+    return '''        private static void CloseFailure()\n        {\n            using (var h = new H())\n            {\n                h.Sample(101);\n                Assert(!h.Motion(h.A));\n                h.E.Seconds = 600;\n                h.Sample(101);\n                Assert(h.Motion(h.A) && h.E.Work.Count == 1, "Ten-minute stall did not queue the close test.");\n                h.E.FailClose = true;\n                h.E.Work.Dequeue()();\n                Assert((int?)Get(h.A,"ProcessId") == 101 && h.Forgotten.Count == 0\n                    && (int)Get(h.A,"RecoveryFailures") == 1, "Close failure did not preserve PID/backoff state.");\n                Assert((DateTimeOffset?)Get(h.A,"NextRecoveryAt") > h.E.UtcNow, "Close failure did not schedule backoff.");\n                h.E.Seconds = 601;\n                h.Sample(101);\n                Assert(!h.Motion(h.A) && h.E.Work.Count == 0, "Backoff allowed an immediate replacement close.");\n            }\n        }\n'''
 rewrite_method('Tests/VanillaRecoveryWatchdogTests.cs', 'CloseFailure', close_failure)
 
 # In the mixed serialization case B's baseline is established after A reaches its
