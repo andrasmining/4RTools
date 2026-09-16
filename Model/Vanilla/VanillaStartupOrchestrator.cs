@@ -74,6 +74,8 @@ namespace _4RTools.Model.Vanilla
                     {
                         runtime.ScriptRunning = false;
                         runtime.RecoveryOwned = false;
+                        runtime.ClosingForRecovery = false;
+                        ResetTerminalEvidence(runtime);
                         SetStage(runtime, VanillaReconnectStage.Stopped, "Sequential startup stopped by user");
                     }
                 }
@@ -105,13 +107,26 @@ namespace _4RTools.Model.Vanilla
                     {
                         if (!runtimes.TryGetValue(account.Id, out runtime)) throw new InvalidOperationException("Runtime disappeared for " + account.Label + ".");
                         existingPid = runtime.ProcessId.HasValue && IsAlive(runtime.ProcessId.Value) ? runtime.ProcessId : null;
-                        if (existingPid.HasValue && !CanAdoptExistingGameplayClient(runtime.ResumeSent,
-                            runtime.ResumeVerificationFailed, runtime.ScriptRunning))
-                            throw new InvalidOperationException(account.Label + ": existing client has an unfinished or failed startup. Verify it with the Resume hotkey test before starting later clients.");
+
                     }
 
                     if (existingPid.HasValue)
                     {
+                        using (var process = Process.GetProcessById(existingPid.Value))
+                        {
+                            if (CloseTerminalBeforeStartup(runtime, existingPid.Value, generation, config,
+                                () => { process.Refresh(); return VanillaVisualProbe.Classify(process.MainWindowHandle); },
+                                () => process.StartTime.ToUniversalTime(), milliseconds => BriefPause(generation, milliseconds)))
+                                existingPid = null;
+                        }
+                    }
+                    if (existingPid.HasValue)
+                    {
+                        lock (gate)
+                        {
+                            if (!CanAdoptExistingGameplayClient(runtime.ResumeSent, runtime.ResumeVerificationFailed, runtime.ScriptRunning))
+                                throw new InvalidOperationException(account.Label + ": existing client has an unfinished or failed startup. Verify it with the Resume hotkey test before starting later clients.");
+                        }
                         Log(account.Label + ": existing PID " + existingPid.Value + " found. Verifying gameplay before releasing the sequential gate.");
                         VanillaDebugLog.Write("STARTUP", account.Label + ": existing PID " + existingPid.Value + " verification begin.");
                         using (var input = new VanillaForegroundInput(existingPid.Value))
@@ -503,8 +518,10 @@ namespace _4RTools.Model.Vanilla
 
         private static bool IsAlive(int pid)
         {
-            try { using (var process = Process.GetProcessById(pid)) return !process.HasExited; }
-            catch { return false; }
+            var processes = Process.GetProcessesByName("Vanilla MMO");
+            try { return processes.Any(process => process.Id == pid); }
+            finally { foreach (var process in processes) process.Dispose(); }
+            // Enumeration failure propagates; it is not a missing client.
         }
     }
 

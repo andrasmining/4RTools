@@ -15,11 +15,11 @@ using Newtonsoft.Json;
 namespace _4RTools.Model.Vanilla
 {
     public enum VanillaProxyRoute { Global = 0, Singapore = 1, Tokyo = 2, LosAngeles = 3 }
-    public enum VanillaVisualState { Unknown, Gameplay, LoginShell, ModalDialog }
+    public enum VanillaVisualState { Unknown, Gameplay, LoginShell, ModalDialog, LoggingOut, Disconnected }
     public enum VanillaReconnectStage
     {
         Stopped, WaitingForClient, Launching, WaitingForWindow, LoggingIn, SelectingCharacter,
-        WaitingForGameplay, Online, AcknowledgingPopup, NeedsConfiguration, Backoff, Error, VerifyingAutobattle
+        WaitingForGameplay, Online, AcknowledgingPopup, NeedsConfiguration, Backoff, Error, VerifyingAutobattle, ClosingClient
     }
 
     public sealed class VanillaReconnectAccount
@@ -442,7 +442,7 @@ namespace _4RTools.Model.Vanilla
             RECT rect;
             if (hwnd == IntPtr.Zero || !GetClientRect(hwnd, out rect)) return VanillaVisualState.Unknown;
             int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
-            if (width < 320 || height < 240) return VanillaVisualState.Unknown;
+            if (width < 320 || height < 240 || width > 4096 || height > 4096) return VanillaVisualState.Unknown;
             using (var bitmap = new Bitmap(width, height, PixelFormat.Format24bppRgb))
             using (var graphics = Graphics.FromImage(bitmap))
             {
@@ -452,43 +452,58 @@ namespace _4RTools.Model.Vanilla
                 finally { graphics.ReleaseHdc(hdc); }
                 if (!ok) return VanillaVisualState.Unknown;
 
-                int global = 0, bright = 0, top = 0, topDark = 0, center = 0, centerNeutralLight = 0;
-                const int sx = 48, sy = 30;
-                for (int gy = 0; gy < sy; gy++)
-                {
-                    int y = Math.Min(height - 1, (int)((gy + .5) * height / sy));
-                    double ny = (gy + .5) / sy;
-                    for (int gx = 0; gx < sx; gx++)
-                    {
-                        int x = Math.Min(width - 1, (int)((gx + .5) * width / sx));
-                        double nx = (gx + .5) / sx;
-                        Color c = bitmap.GetPixel(x, y);
-                        int max = Math.Max(c.R, Math.Max(c.G, c.B)), min = Math.Min(c.R, Math.Min(c.G, c.B));
-                        int lum = (c.R * 299 + c.G * 587 + c.B * 114) / 1000;
-                        global++;
-                        if (lum >= 205) bright++;
-                        if (nx <= .27 && ny <= .16)
-                        {
-                            top++;
-                            if (lum < 165) topDark++;
-                        }
-                        if (nx >= .30 && nx <= .70 && ny >= .40 && ny <= .68)
-                        {
-                            center++;
-                            if (lum >= 175 && max - min <= 50) centerNeutralLight++;
-                        }
-                    }
-                }
-                double brightRatio = global == 0 ? 0 : (double)bright / global;
-                double hudDark = top == 0 ? 0 : (double)topDark / top;
-                double modal = center == 0 ? 0 : (double)centerNeutralLight / center;
-
-                if (modal >= .25 && brightRatio < .55 && hudDark >= .16) return VanillaVisualState.ModalDialog;
-                if (hudDark >= .20 && brightRatio < .72) return VanillaVisualState.Gameplay;
-                if (brightRatio >= .50 && hudDark < .16) return VanillaVisualState.LoginShell;
-                return VanillaVisualState.Unknown;
+                return Classify(bitmap);
             }
         }
+
+        internal static VanillaVisualState Classify(Bitmap bitmap)
+        {
+            if (bitmap == null || bitmap.Width < 320 || bitmap.Height < 240
+                || bitmap.Width > 4096 || bitmap.Height > 4096) return VanillaVisualState.Unknown;
+            var terminal = VanillaDisconnectPattern.Classify(bitmap);
+            if (VanillaReconnectSupervisor.IsTerminalDisconnect(terminal)) return terminal;
+            int width = bitmap.Width, height = bitmap.Height;
+            int global = 0, bright = 0, top = 0, topDark = 0, center = 0, centerNeutralLight = 0;
+            int minimumLum = 255, maximumLum = 0;
+            const int sx = 48, sy = 30;
+            for (int gy = 0; gy < sy; gy++)
+            {
+                int y = Math.Min(height - 1, (int)((gy + .5) * height / sy));
+                double ny = (gy + .5) / sy;
+                for (int gx = 0; gx < sx; gx++)
+                {
+                    int x = Math.Min(width - 1, (int)((gx + .5) * width / sx));
+                    double nx = (gx + .5) / sx;
+                    Color c = bitmap.GetPixel(x, y);
+                    int max = Math.Max(c.R, Math.Max(c.G, c.B)), min = Math.Min(c.R, Math.Min(c.G, c.B));
+                    int lum = (c.R * 299 + c.G * 587 + c.B * 114) / 1000;
+                    minimumLum = Math.Min(minimumLum, lum);
+                    maximumLum = Math.Max(maximumLum, lum);
+                    global++;
+                    if (lum >= 205) bright++;
+                    if (nx <= .27 && ny <= .16)
+                    {
+                        top++;
+                        if (lum < 165) topDark++;
+                    }
+                    if (nx >= .30 && nx <= .70 && ny >= .40 && ny <= .68)
+                    {
+                        center++;
+                        if (lum >= 175 && max - min <= 50) centerNeutralLight++;
+                    }
+                }
+            }
+            if (maximumLum - minimumLum < 40) return VanillaVisualState.Unknown;
+            double brightRatio = global == 0 ? 0 : (double)bright / global;
+            double hudDark = top == 0 ? 0 : (double)topDark / top;
+            double modal = center == 0 ? 0 : (double)centerNeutralLight / center;
+
+            if (modal >= .25 && brightRatio < .55 && hudDark >= .16) return VanillaVisualState.ModalDialog;
+            if (hudDark >= .20 && brightRatio < .72) return VanillaVisualState.Gameplay;
+            if (brightRatio >= .50 && hudDark < .16) return VanillaVisualState.LoginShell;
+            return VanillaVisualState.Unknown;
+        }
+
     }
 
     public sealed partial class VanillaReconnectSupervisor : IDisposable
@@ -504,7 +519,6 @@ namespace _4RTools.Model.Vanilla
             public DateTimeOffset? LoginLikeSince;
             public DateTimeOffset? GameplaySince;
             public DateTimeOffset? LastRecovery;
-            public DateTimeOffset? LastPopup;
             public DateTimeOffset? LastLaunch;
             public DateTimeOffset? NextRecoveryAt;
             public int RecoveryFailures;
@@ -515,6 +529,12 @@ namespace _4RTools.Model.Vanilla
             public string ResumeFailureDetail;
             public bool RecoveryOwned;
             public bool HasBeenOnline;
+            public bool ClosingForRecovery;
+            public readonly VanillaMovementWatchdog MovementWatchdog = new VanillaMovementWatchdog();
+            public bool MovementRecoveryPending;
+            public int TerminalSamples;
+            public VanillaVisualState TerminalVisual;
+            public DateTimeOffset? TerminalObservedAt;
         }
 
         private readonly object gate = new object();
@@ -528,8 +548,11 @@ namespace _4RTools.Model.Vanilla
         public event System.Action Updated;
         public event System.Action<string> Logged;
 
-        public VanillaReconnectSupervisor(string baseDirectory)
+        public VanillaReconnectSupervisor(string baseDirectory) : this(baseDirectory, new VanillaRecoveryRestartEnvironment()) { }
+
+        internal VanillaReconnectSupervisor(string baseDirectory, IVanillaRecoveryRestartEnvironment restartEnvironment)
         {
+            this.restartEnvironment = restartEnvironment ?? throw new ArgumentNullException(nameof(restartEnvironment));
             this.baseDirectory = Path.GetFullPath(baseDirectory);
             sessionLog = new VanillaSessionLog(this.baseDirectory);
             store = new VanillaReconnectStore(this.baseDirectory);
@@ -579,6 +602,13 @@ namespace _4RTools.Model.Vanilla
                     active.ResumeFailureDetail = "Settings changed during startup/recovery; no further input sent";
                     SetStage(active, VanillaReconnectStage.Error, active.ResumeFailureDetail);
                 }
+                foreach (var runtime in runtimes.Values)
+                {
+                    runtime.ClosingForRecovery = runtime.RecoveryOwned = false;
+                    runtime.MovementRecoveryPending = false;
+                    runtime.MovementWatchdog.Reset();
+                    ResetTerminalEvidence(runtime);
+                }
                 settings = copy;
                 RebuildRuntimes();
                 if (save) store.Save(settings);
@@ -624,6 +654,10 @@ namespace _4RTools.Model.Vanilla
                     }
                     runtime.ScriptRunning = false;
                     runtime.RecoveryOwned = false;
+                    runtime.ClosingForRecovery = false;
+                    runtime.MovementRecoveryPending = false;
+                    runtime.MovementWatchdog.Reset();
+                    ResetTerminalEvidence(runtime);
                     SetStage(runtime, VanillaReconnectStage.Stopped, "Supervisor stopped");
                 }
             }
@@ -678,7 +712,7 @@ namespace _4RTools.Model.Vanilla
 
         private void TickLocked()
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = restartEnvironment.UtcNow;
             var desired = settings.Accounts.Where(a => a.Enabled).Take(settings.MaxClients).ToList();
             var desiredIds = new HashSet<string>(desired.Select(a => a.Id), StringComparer.OrdinalIgnoreCase);
             foreach (var runtime in runtimes.Values.Where(r => !desiredIds.Contains(r.Account.Id)))
@@ -697,7 +731,13 @@ namespace _4RTools.Model.Vanilla
             {
                 if (runtime.ProcessId.HasValue && !aliveIds.Contains(runtime.ProcessId.Value))
                 {
+                    // The close worker owns this intentional exit and its completion.
+                    // Do not turn it into a failed launch or release its lease mid-close.
+                    if (runtime.ClosingForRecovery && runtime.ScriptRunning) continue;
                     int old = runtime.ProcessId.Value;
+                    if (positionClientExited != null) positionClientExited(old);
+                    runtime.MovementWatchdog.Reset();
+                    runtime.MovementRecoveryPending = false;
                     bool failedDuringRecovery = runtime.RecoveryOwned;
                     runtime.ProcessId = null;
                     runtime.ResumeSent = false;
@@ -706,6 +746,7 @@ namespace _4RTools.Model.Vanilla
                     runtime.ScriptRunning = false;
                     runtime.RecoveryOwned = false;
                     runtime.HasBeenOnline = false;
+                    ResetTerminalEvidence(runtime);
                     if (failedDuringRecovery)
                         ScheduleRecoveryFailureLocked(runtime, now, "PID " + old + " exited during recovery");
                     else
@@ -720,6 +761,7 @@ namespace _4RTools.Model.Vanilla
             var claimed = new HashSet<int>(runtimes.Values.Where(r => r.ProcessId.HasValue).Select(r => r.ProcessId.Value));
             foreach (var runtime in desired.Select(a => runtimes[a.Id]))
             {
+                if (runtime.ScriptRunning) continue;
                 if (!runtime.ProcessId.HasValue)
                 {
                     var candidate = alive.Where(p => !claimed.Contains(p.Id)).OrderBy(p => SafeStart(p)).FirstOrDefault();
@@ -749,6 +791,10 @@ namespace _4RTools.Model.Vanilla
                 }
                 p = Process.GetProcessById(runtime.ProcessId.Value);
                 p.Refresh();
+                // Independent of visual recognition and window availability. A stale/failed
+                // coordinate reader is an unhealthy observation, never position (0,0).
+                if (CheckMovementWatchdog(runtime, now, () => p.StartTime.ToUniversalTime(),
+                    () => settings.VisualWatchdog ? VanillaVisualProbe.Classify(p.MainWindowHandle) : VanillaVisualState.Unknown)) return;
                 if (p.MainWindowHandle == IntPtr.Zero)
                 {
                     SetStage(runtime, VanillaReconnectStage.WaitingForWindow, "Waiting for Vanilla main window");
@@ -757,6 +803,7 @@ namespace _4RTools.Model.Vanilla
 
                 VanillaVisualState visual = settings.VisualWatchdog ? VanillaVisualProbe.Classify(p.MainWindowHandle) : VanillaVisualState.Unknown;
                 runtime.Visual = visual;
+                if (HandleTerminalVisual(runtime, visual, now, () => p.StartTime.ToUniversalTime())) return;
                 if (visual == VanillaVisualState.Gameplay)
                 {
                     runtime.LoginLikeSince = null;
@@ -780,25 +827,6 @@ namespace _4RTools.Model.Vanilla
                 }
 
                 runtime.GameplaySince = null;
-                if (visual == VanillaVisualState.ModalDialog)
-                {
-                    if (runtime.HasBeenOnline && settings.AutoRecover)
-                    {
-                        CloseForRecovery(runtime, p, now, "Disconnect/logged-out modal detected after gameplay", false);
-                        return;
-                    }
-                    if (OtherRecoveryOwner(runtime) != null) return;
-                    if (!runtime.LastPopup.HasValue || (now - runtime.LastPopup.Value).TotalMilliseconds >= settings.PopupCooldownMs)
-                    {
-                        using (var input = new VanillaTargetedInput(runtime.ProcessId.Value)) { input.Activate(); input.Press(Keys.Enter); }
-                        runtime.LastPopup = now;
-                        runtime.ResumeSent = false;
-                        SetStage(runtime, VanillaReconnectStage.AcknowledgingPopup, "Pre-login modal detected; pressed Enter to acknowledge it");
-                        Log(runtime.Account.Label + ": acknowledged a pre-login Vanilla modal dialog.");
-                    }
-                    return;
-                }
-
                 if (visual == VanillaVisualState.LoginShell)
                 {
                     if (!runtime.LoginLikeSince.HasValue) runtime.LoginLikeSince = now;
@@ -852,6 +880,7 @@ namespace _4RTools.Model.Vanilla
             }
             if (string.IsNullOrWhiteSpace(settings.LaunchExecutable) || !File.Exists(settings.LaunchExecutable))
             {
+                runtime.RecoveryOwned = false;
                 SetStage(runtime, VanillaReconnectStage.NeedsConfiguration, "Set the Vanilla launch executable");
                 return false;
             }
@@ -887,7 +916,7 @@ namespace _4RTools.Model.Vanilla
                 bool aborted = false;
                 try
                 {
-                    VanillaPatcherLauncher.Launch(executable, arguments,
+                    int? launchedPid = VanillaPatcherLauncher.Launch(executable, arguments,
                         message => Log(label + ": " + message),
                         () =>
                         {
@@ -900,6 +929,12 @@ namespace _4RTools.Model.Vanilla
                                 return aborted;
                             }
                         });
+                    lock (gate)
+                    {
+                        if (!aborted && running && !disposed && launchedPid.HasValue
+                            && generation == runtime.ResumeOperationGeneration && runtime.ScriptRunning)
+                            Bind(runtime, launchedPid.Value, true, "Launcher returned the replacement client");
+                    }
                 }
                 catch (Exception ex) { error = ex.Message; }
 
@@ -931,6 +966,10 @@ namespace _4RTools.Model.Vanilla
         private void Bind(Runtime runtime, int pid, bool freshLaunch, string detail)
         {
             runtime.ProcessId = pid;
+            runtime.ClosingForRecovery = false;
+            runtime.MovementRecoveryPending = false;
+            runtime.MovementWatchdog.Reset();
+            ResetTerminalEvidence(runtime);
             // Never toggle Autobattle merely because 4RTools adopted an already-running client.
             // Only a genuine fresh launch/relog arms a new bounded resume verification.
             runtime.ResumeSent = !freshLaunch;
@@ -1256,27 +1295,7 @@ namespace _4RTools.Model.Vanilla
 
         private void CloseForRecovery(Runtime runtime, Process process, DateTimeOffset now, string reason, bool failedAttempt)
         {
-            int pid = runtime.ProcessId.GetValueOrDefault();
-            string evidence;
-            bool exited = TryCloseProcess(process, out evidence);
-            runtime.ProcessId = exited ? (int?)null : pid;
-            runtime.ResumeSent = false;
-            runtime.Visual = VanillaVisualState.Unknown;
-            runtime.LoginLikeSince = runtime.GameplaySince = null;
-            runtime.ScriptRunning = false;
-            runtime.RecoveryOwned = false;
-            runtime.HasBeenOnline = false;
-            if (failedAttempt)
-            {
-                ScheduleRecoveryFailureLocked(runtime, now, reason + (string.IsNullOrEmpty(evidence) ? "" : "; " + evidence));
-            }
-            else
-            {
-                runtime.NextRecoveryAt = now;
-                SetStage(runtime, exited ? VanillaReconnectStage.WaitingForClient : VanillaReconnectStage.Backoff,
-                    reason + "; client close " + (exited ? "completed" : "is still pending") + "; sequential relaunch queued");
-                Log(runtime.Account.Label + ": " + reason + "; " + evidence + ". Relaunch will be serialized with other clients.");
-            }
+            QueueClientRestart(runtime, now, reason, failedAttempt, () => process.StartTime.ToUniversalTime());
         }
 
         private static bool TryCloseProcess(int pid, out string evidence)
@@ -1285,10 +1304,15 @@ namespace _4RTools.Model.Vanilla
             {
                 using (var process = Process.GetProcessById(pid)) return TryCloseProcess(process, out evidence);
             }
+            catch (ArgumentException)
+            {
+                evidence = "process no longer exists";
+                return true;
+            }
             catch (Exception ex)
             {
-                evidence = "process already gone or unavailable: " + ex.Message;
-                return true;
+                evidence = "process exit could not be verified: " + ex.Message;
+                return false;
             }
         }
 
@@ -1312,7 +1336,7 @@ namespace _4RTools.Model.Vanilla
             catch (Exception ex)
             {
                 evidence = "client close failed: " + ex.Message;
-                try { process.Refresh(); return process.HasExited; } catch { return true; }
+                try { process.Refresh(); return process.HasExited; } catch { return false; }
             }
         }
         private static void WaitForWindow(int pid, int timeoutMs)
@@ -1356,6 +1380,8 @@ namespace _4RTools.Model.Vanilla
                     claimed.Add(match.Id);
                     assigned++;
                     runtime.ProcessId = match.Id;
+                    runtime.MovementRecoveryPending = false;
+                    runtime.MovementWatchdog.Reset();
                     runtime.ResumeSent = true;
                     runtime.ScriptRunning = false;
                     runtime.RecoveryOwned = false;
@@ -1372,11 +1398,9 @@ namespace _4RTools.Model.Vanilla
 
         private List<Process> GetVanillaProcesses()
         {
-            return Process.GetProcessesByName("Vanilla MMO").Where(p =>
-            {
-                try { return !p.HasExited; }
-                catch { p.Dispose(); return false; }
-            }).ToList();
+            // The process-list snapshot is presence evidence. A protected metadata
+            // query failure must not remove a live PID and create a false free slot.
+            return Process.GetProcessesByName("Vanilla MMO").ToList();
         }
 
         private static DateTime SafeStart(Process p)

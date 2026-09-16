@@ -72,3 +72,13 @@ file. A passing build or mock UI test does not prove live-game behavior.
 Vanilla observation remains read-only. No game-memory writes, injections,
 packet manipulation, game-file changes or Gepard bypasses are performed.
 Unknown observations are never reinterpreted as valid gameplay state.
+
+Autofarming health watchdog (0.6.36)
+----------------------------------
+With automatic recovery enabled, an online managed client is restarted after
+120 seconds without fresh verified X/Y movement. Unchanged, unreadable, missing
+and stale coordinates all count as lack of verified movement, never as (0,0).
+A popup is not required. Both known disconnect/logout messages are also detected
+and logged. Missing processes use the existing immediate sequential restart path.
+The watchdog is inactive during startup/recovery and after STOP. Both failed
+clients recover sequentially; another healthy client is left running.

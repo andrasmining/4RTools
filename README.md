@@ -37,6 +37,36 @@ including cold startup, recovery and diagnostic input. Startup and recovery are
 serialized; a healthy client is not restarted or toggled merely because another
 client needs recovery.
 
+### Terminal disconnect recovery
+
+The visual watchdog explicitly recognizes the reported **Now Logging Out.** and
+**Disconnected from Server.** Message dialogs. Two fresh matching captures are
+required. Only the affected client is closed; its actual process exit must be
+confirmed before replacement. If both clients fail, one complete close/restart/
+login/movement-verification/minimize sequence finishes before the other begins.
+The same terminal check is performed for an assigned existing client during START.
+Unknown popups are not dismissed with Enter or used as automatic close evidence.
+Failed close/launch attempts retain diagnostics and use bounded retry backoff;
+STOP, configuration changes or replaced client ownership cancel pending actions.
+This depends on a readable supported dialog capture, not merely frozen HP or X/Y.
+
+### Autofarming health watchdog
+
+The main health check uses the existing verified, read-only X/Y observations for
+each managed client. **120 seconds without verified movement** triggers recovery,
+including coordinates that remain unchanged, unavailable, unreadable or stale.
+A missing process is queued for restart immediately. The watchdog does not require
+a popup or a successful screenshot. It runs only while automatic recovery is ON,
+after startup/recovery; STOP and client/configuration changes cancel/reset it.
+
+Both known terminal dialogs can be recognized sooner and are logged separately.
+Recovery keeps one account's lease through close, confirmed exit, relaunch, login,
+verified movement and minimization. Another affected account remains queued; a
+healthy sibling is not restarted or sent another Autobattle toggle. A failed
+attempt uses exponential backoff rather than repeatedly closing or launching.
+This is an autofarming policy: a deliberately stationary character can also reach
+the timeout. It is not a diagnosis of why the client stopped moving.
+
 ### Autobattle movement verification
 
 For a freshly started or recovered client, the configured resume hotkey is followed

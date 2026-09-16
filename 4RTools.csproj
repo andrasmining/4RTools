@@ -735,4 +735,12 @@
     <Error Condition="!Exists('packages\Costura.Fody.5.7.0\build\Costura.Fody.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Costura.Fody.5.7.0\build\Costura.Fody.targets'))" />
   </Target>
   <Import Project="packages\Costura.Fody.5.7.0\build\Costura.Fody.targets" Condition="Exists('packages\Costura.Fody.5.7.0\build\Costura.Fody.targets')" />
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Vanilla\LoggingOut.png">
+      <LogicalName>Vanilla.TerminalDialog.LoggingOut.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Vanilla\Disconnected.png">
+      <LogicalName>Vanilla.TerminalDialog.Disconnected.png</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 </Project>

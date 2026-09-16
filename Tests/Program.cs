@@ -14,8 +14,12 @@ namespace Vanilla.Diagnostics.Tests
         private static int passed;
         private static int failed;
 
-        private static int Main()
+        [STAThread]
+        private static int Main(string[] args)
         {
+            if (args.Length == 1 && args[0].StartsWith("--recovery-native-probe", StringComparison.Ordinal))
+                return VanillaNativeRecoveryTests.Child(args[0].EndsWith("-ignore-close", StringComparison.Ordinal));
+            if (args.Length == 1 && args[0] == "--native-recovery-tests") return VanillaNativeRecoveryTests.Run();
             // These tests only use fake process memory. Never open or enumerate a live process.
             Run("Empty map leaves unsupported values unknown", EmptyMap);
             Run("Readable zero differs from an unsupported value", ReadableZero);
@@ -63,6 +67,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += VanillaSessionLogTests.Run();
             failed += VanillaReconnectRegressionTests.Run();
             failed += VanillaAutobattleResumeTests.Run();
+            failed += VanillaRecoveryWatchdogTests.Run();
             failed += VanillaTemporaryActionTests.Run();
             failed += VanillaMemoryScannerTests.Run();
             failed += ProcessObservationContextTests.Run();

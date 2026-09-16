@@ -1,74 +1,72 @@
-# 4RTools Vanilla 0.6.35
+# 4RTools Vanilla 0.6.36
 
-## Autobattle startup and recovery
+## Primary X/Y autofarming watchdog
 
-Startup, recovery and the Resume hotkey diagnostic share one bounded movement
-verifier. After the configured hotkey, fresh verified X/Y readings are observed
-throughout a 10-second window. A change on either axis succeeds immediately.
-Without movement, the intended client is focused and checked again before a
-retry. There are **three total attempts: the initial press and two retries**.
-The third unsuccessful window produces an explicit failure; later gameplay
-polls do not restart the same budget.
+The existing verified, read-only fleet observations now also drive a per-client
+movement watchdog. After startup/recovery, 120 seconds without verified movement
+queues that client for restart. This includes unchanged, missing, unreadable,
+unverified and stale X/Y readings. Unknown is never converted to coordinate zero.
+Neither an unrecognized popup nor a failed screenshot blocks this recovery path.
+Missing processes keep the existing immediate sequential relaunch behavior.
+Process presence comes from the process-list snapshot: a denied metadata query
+cannot silently discard a live PID or authorize a duplicate replacement.
 
-Cold startup holds the current client's recovery lease until movement verification
-and minimization are complete. A failed cold start blocks later accounts. Healthy
-already-running clients are adopted without toggling Autobattle. Failed or
-interrupted startup is not silently adopted as healthy; a successful explicit
-Resume hotkey diagnostic clears its failed latch.
+Movement on either axis resets the deadline. The reader's movement timestamp also
+preserves intermediate movement when a character returns to the same position
+between supervisor polls. Deadlines use monotonic time. Stale/cached timestamps,
+a first late baseline and temporary read loss do not masquerade as movement.
+Valid session/map changes start a new baseline; unknown map fluctuations do not.
 
-Compact account status displays the current verification/retry attempt. Detailed
-failure reasons remain available in hover text and logs. A verifying client is
-not automatically minimized before verification finishes.
+STOP, configuration/client replacement and disposal cancel pending work. The
+watchdog does not accrue inactivity during startup, login or recovery. Automatic
+recovery must be ON; the visual-watchdog switch controls image observation, not
+the primary coordinate watchdog. No additional game-memory reader is created and
+no failed reader is reopened for the same live process. A confirmed process exit
+clears only that client's old reader so a recycled PID cannot inherit it.
 
-## Lifecycle and recovery repairs
+## Terminal dialogs and sequential recovery
 
-- STOP and configuration changes invalidate pending startup, recovery and diagnostic
-  workers. Old callbacks cannot revive an operation after STOP/START or overwrite
-  a replacement client's status. A cancelled login cannot close the replacement
-  client as a side effect of its failure cleanup.
-- A rejected diagnostic request no longer invalidates the running diagnostic while
-  leaving its input lease occupied. Explicit resume diagnostics record their real
-  success/failure instead of leaving an obsolete failed latch behind.
-- Final client minimization checks the exact runtime/PID under the ownership lock.
-  Foreground input is serialized; cancellation and target ownership are checked
-  before clicks, key presses and each typed character. Chord cleanup releases held
-  keys after cancellation or input failure.
-- Recovery and diagnostic proxy selection use the account's proxy, as cold startup
-  already did. Shipped read-only build profiles are loaded beside the executable,
-  not from the mutable user-data directory.
-- Unknown/stale observations, failed reads, map/session/character changes, dead
-  characters and lost input ownership stop verification safely. Existing trusted
-  X/Y/map mappings are reused; no memory writes, offset guesses, packet actions,
-  injection or protection bypasses are introduced.
+The two reported messages, **Now Logging Out.** and **Disconnected from Server.**,
+are separately recognized from cropped dialog references, with two fresh matching
+observations before early recovery. They are also handled when already present
+on an assigned client before START. Unknown modals are not blindly acknowledged
+with Enter. Uniform failed captures remain unknown rather than gameplay.
 
-## Repository and packaging
+One account owns the entire close -> confirmed exit -> relaunch -> login ->
+verified Autobattle movement -> minimization sequence. If both clients fail, the
+second remains queued until the first completes or its attempt fails/backoffs.
+A healthy sibling is neither closed, restarted nor toggled. The recovery lease
+is retained across the polling handoff between close and relaunch.
 
-The outdated README and packaged quick start now describe the actual Vanilla-first
-workspace, auto-saved account settings, taskbar minimization, persistent data and
-movement verification. Repository policy explicitly requires verified release
-publication, integration into main and removal of completed task branches.
-Temporary recovery/patch infrastructure is removed after validation.
+Closing uses ordinary Windows lifecycle control with a process-identity-pinned,
+restricted handle (no game-memory write, injection or privilege changes). Normal
+window close waits up to three seconds; one termination request may then wait
+another three seconds. Unconfirmed exit, denied access or changed identity does
+not authorize a replacement launch. Cancellation is checked at every native
+operation boundary. Failed attempts retain the PID and exponential backoff.
 
-The release workflow verifies the published tag against its tested source commit,
-downloads the public ZIP and checksum, and compares the downloaded bytes with the
-Windows-tested package. It exports the verification report and source identity.
-Licenses, notices, existing user configuration and the two-active-client limit
-are preserved.
+## Validation
 
-## Validation and limitations
+The existing Windows Debug/Release builds, full offline regression suite,
+shipped-profile validation, x86/version and package checksum checks, inert portable
+launch, and 18 native mock-data UI scenarios remain release gates. Additional
+regressions cover the exact 120-second boundary, axis/intermediate movement,
+unavailable/stale/unverified state, map/session/PID isolation, STOP/configuration
+cancellation, one/both/mixed client failures, close-to-relaunch lease continuity,
+backoff, initially present dialogs, and both supplied message images at resampled
+sizes. Native process control is tested separately using an inert test-owned child,
+not a game client.
 
-Publication is gated on shipped-profile validation, Debug and Release compilation,
-the complete offline regression suite, portable-package checksums and x86/version
-checks, an inert Windows executable launch, and 18 native mock-data UI scenarios.
-The autobattle suite includes 47 deterministic cases covering movement, timing,
-three-attempt exhaustion, state validity, cancellation, client/operation isolation,
-failure latching, diagnostic lifecycle, safe adoption and held-key cleanup. The
-new lifecycle regressions are reproduced before applying their implementation
-fixes, then required to pass with the full suite.
+The published ZIP/checksum and clean source identity are verified by downloading
+release assets after publication. Temporary patch/workflow infrastructure and the
+completed working branch are removed after integration and successful release.
 
-These automated Windows build, package and mock-data UI checks are **not live
-Vanilla/Gepard gameplay or RDP testing**. This release has not been exercised
-against a live game client in this engineering session. Movement proves only
-movement, not combat or its cause. Conversely, a character fighting while
-stationary for all three windows can fail this deliberately movement-based check.
-Legacy dependency/compiler warnings remain visible; they are not suppressed.
+## Limits
+
+This engineering session has no live Vanilla/Gepard client or user RDP desktop.
+Automated state-machine, Windows package/UI and cropped-image checks do not prove
+live game recovery or minimized-client capture across every DPI/skin. The X/Y
+watchdog does not depend on such capture. A deliberately stationary character can
+also reach the timeout: this is the requested autofarming recovery rule, not proof
+of the underlying cause. Existing dependency/compiler warnings remain visible.
+The ten-second, three-total-attempt startup Autobattle verification is unchanged.

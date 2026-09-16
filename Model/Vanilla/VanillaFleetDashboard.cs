@@ -27,6 +27,7 @@ namespace _4RTools.Model.Vanilla
         public string Build { get; internal set; }
         public string Error { get; internal set; }
         public bool Ready { get; internal set; }
+        internal VanillaPositionSample Position { get; set; }
 
         public decimal? HpPercent { get { return Percent(CurrentHP, MaxHP); } }
         public decimal? SpPercent { get { return Percent(CurrentSP, MaxSP); } }
@@ -42,7 +43,7 @@ namespace _4RTools.Model.Vanilla
     /// Keeps lightweight read-only observations for the at-most-two live Vanilla clients.
     /// It never sends input. Each PID is fingerprinted and resolved through the audited build profile.
     /// </summary>
-    public sealed class VanillaFleetMonitor : IDisposable
+    public sealed partial class VanillaFleetMonitor : IDisposable
     {
         private readonly string baseDirectory;
         private readonly Stopwatch clock = Stopwatch.StartNew();
@@ -107,7 +108,9 @@ namespace _4RTools.Model.Vanilla
                     try { readers.Add(pid, createReader(pid)); }
                     catch (Exception ex) { readers.Add(pid, Reader.Failed(pid, ex.Message)); }
                 }
-                return live.Select(pid => readers[pid].Poll(clock.Elapsed)).ToArray();
+                var clients = live.Select(pid => readers[pid].Poll(clock.Elapsed)).ToArray();
+                PublishPositions(clients);
+                return clients;
             }
         }
 
@@ -260,6 +263,11 @@ namespace _4RTools.Model.Vanilla
                 return new VanillaFleetClientInfo
                 {
                     ProcessId = processId,
+                    Position = new VanillaPositionSample(processId, state.SessionId, state.SampledAtUtc,
+                        state.X.IsAvailable ? (int?)state.X.Value : null, state.Y.IsAvailable ? (int?)state.Y.Value : null,
+                        state.Map.IsAvailable && state.Map.Validation == StateValidation.Valid ? state.Map.Value : null,
+                        state.X.Validation == StateValidation.Valid && state.Y.Validation == StateValidation.Valid,
+                        state.Error, state.LastMovementAtUtc),
                     CharacterName = name,
                     CurrentHP = state.CurrentHP.IsAvailable ? (uint?)state.CurrentHP.Value : null,
                     MaxHP = state.MaxHP.IsAvailable ? (uint?)state.MaxHP.Value : null,

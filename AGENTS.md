@@ -212,6 +212,25 @@ movement, deadline/refocus races, cancellation, stale/missing state, identity
 changes, lease isolation and input cleanup with deterministic regression tests.
 Keep existing Windows build, portable launch and mock-data UI gates intact.
 
+## Terminal dialogs and sequential replacement
+
+Treat verified `Now Logging Out.` and `Disconnected from Server.` dialogs as
+terminal client states requiring close and replacement, including an assigned
+existing client encountered during START. Confirm with fresh matching visual
+observations. A generic white/modal rectangle, stale frame, failed capture or
+unknown message cannot authorize closing a client or pressing Enter.
+
+If one client fails, leave healthy siblings alone. If both fail, hold the same
+global recovery lease through closing the first client, confirmed process exit,
+replacement launch, login, verified Autobattle movement and minimization. Only
+then may the next client close/restart. Failed attempts release their lease into
+bounded backoff; missing configuration must not strand other accounts. Bind every
+close/termination to the observed process identity and current runtime/operation.
+Never treat an inaccessible process or failed exit query as a confirmed exit.
+STOP, settings changes, client replacement and disposal cancel delayed actions.
+Cover both exact dialogs, single-client and dual-client failure, native visual
+matching, unknown-message rejection, close/exit ordering and cancellation tests.
+
 ## Required validation
 
 Test every meaningful change as far as available tooling permits. Appropriate
@@ -441,3 +460,26 @@ After completing a task, report:
 
 Do not present unverified behavior, unfinished features, or unpushed commits as
 completed work.
+
+
+## Primary autofarming movement watchdog
+
+For enabled, supervised autofarming clients, X/Y health is the primary recovery
+signal. After startup/recovery has finished, restart an affected client when no
+fresh verified coordinate movement has been observed for 120 seconds. Missing,
+unreadable, unverified and stale coordinates remain invalid, not zero; their
+absence must not reset or indefinitely defer that deadline. Use monotonic elapsed
+time, the existing fingerprinted read-only fleet observations, and distinct
+per-client/session baselines. Credit intermediate movement even when the latest
+position returns to the previous coordinates. Reset on STOP, configuration/client
+replacement and valid map/session changes; do not accrue time during login or
+recovery. Never reopen a failed reader for the same client to evade a blocked read.
+
+A recognized terminal dialog can trigger recovery sooner after confirmation.
+Pattern recognition adds diagnostic evidence but is not required for a timed-out
+movement watchdog. Unknown popups must not receive blind Enter/click input. Keep
+the same global recovery lease from closing through verified exit, relaunch,
+login, verified Autobattle movement and minimization. Recover only the affected
+client; simultaneous failures remain sequential. Failure/backoff releases the
+lease without pretending the failed attempt succeeded. Verify process identity
+and cancellation before close/termination, and never treat denied access as exit.
