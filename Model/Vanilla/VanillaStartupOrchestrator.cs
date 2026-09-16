@@ -35,6 +35,13 @@ namespace _4RTools.Model.Vanilla
             return gameplayConfirmed && movementVerified && minimized && !failed;
         }
 
+        internal static bool ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState visual)
+        {
+            return visual == VanillaVisualState.LoginShell
+                || visual == VanillaVisualState.LoggingOut
+                || visual == VanillaVisualState.Disconnected;
+        }
+
         public void StartHardenedSequentialStartup(System.Action<bool, string> completed)
         {
             VanillaReconnectSettings config;
@@ -130,11 +137,29 @@ namespace _4RTools.Model.Vanilla
                         }
                         Log(account.Label + ": existing PID " + existingPid.Value + " found. Verifying gameplay before releasing the sequential gate.");
                         VanillaDebugLog.Write("STARTUP", account.Label + ": existing PID " + existingPid.Value + " verification begin.");
-                        using (var input = new VanillaForegroundInput(existingPid.Value))
+                        WaitForExistingClientGameplayReady(account, existingPid.Value,
+                            () => StartupCancelled(generation), 15000, account.Label + " existing client");
+                        VanillaVisualState supplementalVisual = VanillaVisualState.Unknown;
+                        try
                         {
-                            input.CancellationRequested = () => StartupCancelled(generation);
-                            WaitForGameplayStable(input, existingPid.Value, generation, 15000, account.Label + " existing client");
+                            using (var process = Process.GetProcessById(existingPid.Value))
+                            {
+                                process.Refresh();
+                                supplementalVisual = VanillaVisualProbe.Classify(process.MainWindowHandle);
+                            }
                         }
+                        catch (Exception ex)
+                        {
+                            VanillaDebugLog.Write("STARTUP", account.Label
+                                + ": supplemental visual probe failed after memory verification: " + ex.Message);
+                        }
+                        VanillaDebugLog.Write("STARTUP", account.Label + ": existing PID " + existingPid.Value
+                            + " accepted by fresh verified memory gameplay state; supplemental visual=" + supplementalVisual
+                            + (supplementalVisual == VanillaVisualState.Unknown ? " (Unknown is non-blocking)." : "."));
+                        if (ExistingClientVisualBlocksMemoryAdoption(supplementalVisual))
+                            throw new InvalidOperationException(account.Label
+                                + ": fresh verified memory says gameplay, but supplemental visual is " + supplementalVisual
+                                + "; existing client was not adopted.");
 
                         if (!WaitForOwnedClientSafeMinimize(runtime, existingPid.Value, () => StartupCancelled(generation),
                             account.Label + ": existing client"))

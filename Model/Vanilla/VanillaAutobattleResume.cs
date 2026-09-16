@@ -209,17 +209,30 @@ namespace _4RTools.Model.Vanilla
         private void WaitForAutobattleReady(VanillaReconnectAccount account, int pid, Func<bool> cancelled,
             int timeoutMs, string context)
         {
+            WaitForVerifiedGameplayMemoryState(account, pid, cancelled, timeoutMs, context, true);
+        }
+
+        private void WaitForExistingClientGameplayReady(VanillaReconnectAccount account, int pid, Func<bool> cancelled,
+            int timeoutMs, string context)
+        {
+            WaitForVerifiedGameplayMemoryState(account, pid, cancelled, timeoutMs, context, false);
+        }
+
+        private void WaitForVerifiedGameplayMemoryState(VanillaReconnectAccount account, int pid, Func<bool> cancelled,
+            int timeoutMs, string context, bool postLoginHotkey)
+        {
             if (account == null) throw new ArgumentNullException(nameof(account));
             if (cancelled == null) throw new ArgumentNullException(nameof(cancelled));
-            Log(account.Label + ": " + context + ": waiting for fresh verified username/character/X/Y/HP before the mandatory post-login hotkey.");
-            VanillaDebugLog.Write("AUTOBATTLE", "PID=" + pid + "; " + account.Label + ": " + context
-                + ": waiting for verified post-login memory state before hotkey.");
+            string purpose = postLoginHotkey ? "mandatory post-login hotkey" : "existing-client adoption";
+            Log(account.Label + ": " + context + ": waiting for fresh verified username/character/X/Y/map/living HP for " + purpose + ".");
+            VanillaDebugLog.Write("MEMORY-GATE", "PID=" + pid + "; " + account.Label + ": " + context
+                + ": waiting for verified gameplay memory state; purpose=" + purpose + ".");
             using (var memory = new ReadOnlyProcessMemory(pid))
             {
                 var identity = VanillaExecutableIdentity.Read(memory.ExecutablePath);
                 var profile = VanillaBuildProfile.Find(AutobattleBuildProfileDirectory, identity,
                     message => Log(account.Label + ": " + message));
-                if (profile == null) throw new InvalidOperationException("No verified Vanilla build profile; post-login autobattle readiness cannot be proven.");
+                if (profile == null) throw new InvalidOperationException("No verified Vanilla build profile; gameplay memory state cannot be proven.");
                 var adapter = new VanillaStateAdapter(profile, identity);
                 using (var source = new MemoryStateSource(memory, profile.MemoryMap))
                 {
@@ -228,7 +241,7 @@ namespace _4RTools.Model.Vanilla
                     string last = "no valid sample yet";
                     while (watch.ElapsedMilliseconds < timeoutMs)
                     {
-                        if (cancelled()) throw new OperationCanceledException(context + ": post-login readiness cancelled.");
+                        if (cancelled()) throw new OperationCanceledException(context + ": gameplay memory verification cancelled.");
                         var now = DateTimeOffset.UtcNow;
                         try
                         {
@@ -239,13 +252,14 @@ namespace _4RTools.Model.Vanilla
                             VanillaAutobattleResumeVerifier.ValidateSample(state, null, pid, now);
                             consecutive++;
                             last = "verified " + state.UserName.Value + "/" + state.CharacterName.Value
-                                + " at " + state.X.Value + "," + state.Y.Value;
+                                + " map=" + state.Map.Value + " xy=" + state.X.Value + "," + state.Y.Value
+                                + " hp=" + state.CurrentHP.Value + "/" + state.MaxHP.Value;
                             if (consecutive >= 2)
                             {
-                                Log(account.Label + ": " + context + ": post-login memory state ready after "
+                                Log(account.Label + ": " + context + ": gameplay memory state ready after "
                                     + watch.ElapsedMilliseconds + "ms (" + last + ").");
-                                VanillaDebugLog.Write("AUTOBATTLE", "PID=" + pid + "; " + account.Label + ": " + context
-                                    + ": readiness verified; mandatory restart-only 10s settle/hotkey sequence may proceed.");
+                                VanillaDebugLog.Write("MEMORY-GATE", "PID=" + pid + "; " + account.Label + ": " + context
+                                    + ": accepted by two fresh verified gameplay-memory samples; " + last + ".");
                                 return;
                             }
                         }
@@ -257,8 +271,10 @@ namespace _4RTools.Model.Vanilla
                         }
                         Thread.Sleep(150);
                     }
-                    throw new InvalidOperationException(context + ": fresh verified post-login state was not ready within "
-                        + (timeoutMs / 1000) + "s; no autobattle hotkey was sent. Last state: " + last);
+                    throw new InvalidOperationException(context + ": fresh verified gameplay memory state was not ready within "
+                        + (timeoutMs / 1000) + "s; "
+                        + (postLoginHotkey ? "no autobattle hotkey was sent. " : "existing client was not adopted. ")
+                        + "Last state: " + last);
                 }
             }
         }

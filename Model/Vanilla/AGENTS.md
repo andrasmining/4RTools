@@ -56,3 +56,9 @@ the visual classifier returns Unknown. Known login/modal/logout/disconnect state
 still block input. Every readiness transition, 7-second settle, hotkey attempt and
 10-second movement window must also be written to the global debug log, not only
 the reconnect session log.
+
+## Existing-client startup evidence
+
+- For an already-running, identity-matched Vanilla client, fresh verified read-only gameplay memory is the primary startup evidence: expected username + character, X/Y, map and living HP.
+- Visual recognition is supplemental for existing-client adoption. `Unknown` must not fail adoption, trigger hotkey input, or repeatedly restore/focus a client solely to prove gameplay. Explicit login/logout/disconnected evidence may still fail closed.
+- `COPY DEBUG LOG` must retain enough host/session/display/top-level-window telemetry to diagnose machine-specific visual/focus differences without requiring the user to reconstruct the environment manually.

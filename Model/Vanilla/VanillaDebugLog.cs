@@ -34,6 +34,11 @@ namespace _4RTools.Model.Vanilla
             Write("APP", "Global debug logging initialized. version=" + SafeVersion()
                 + ", pid=" + Process.GetCurrentProcess().Id + ", base='" + AppDomain.CurrentDomain.BaseDirectory
                 + "', cwd='" + Environment.CurrentDirectory + "'.");
+            try
+            {
+                Write("HOST", VanillaHostDiagnostics.Build().Replace("\r", " ").Replace("\n", " | "));
+            }
+            catch (Exception ex) { Write("HOST", "Host diagnostics failed: " + ex); }
         }
 
         internal static void SetEnabled(bool value)
@@ -78,6 +83,9 @@ namespace _4RTools.Model.Vanilla
             text.AppendLine("Version: " + SafeVersion());
             text.AppendLine("Debug enabled: " + Enabled);
             text.AppendLine("Data root: " + VanillaAppData.RootDirectory);
+            text.AppendLine();
+            try { text.Append(VanillaHostDiagnostics.Build()); }
+            catch (Exception ex) { text.AppendLine("HOST DIAGNOSTICS FAILED: " + ex); }
             text.AppendLine();
 
             try

@@ -81,7 +81,8 @@ namespace _4RTools.Forms
             {
                 string reconnect = integratedReconnectSupervisor == null ? null : integratedReconnectSupervisor.LogPath;
                 string contents = _4RTools.Model.Vanilla.VanillaDebugLog.BuildClipboardBundle(reconnect);
-                Clipboard.SetText(string.IsNullOrWhiteSpace(contents) ? "(debug log is empty)" : contents);
+                Clipboard.SetDataObject(string.IsNullOrWhiteSpace(contents) ? "(debug log is empty)" : contents,
+                    true, 20, 100);
                 integratedUpdateStatus.Text = "Version " + _4RTools.Model.Vanilla.VanillaUpdater.CurrentVersionText + " - debug log copied.";
                 _4RTools.Model.Vanilla.VanillaDebugLog.Write("UI", "Global debug bundle copied to clipboard.");
             }

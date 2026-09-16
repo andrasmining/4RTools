@@ -27,6 +27,8 @@ namespace Vanilla.Diagnostics.Tests
             Test("Supervisor minimizes only healthy gameplay clients", ManagedMinimizePolicy);
             Test("Launcher PID binding closes the duplicate-launch race", SequentialLaunchBinding);
             Test("Sequential startup advances only after gameplay resume and minimize", HardenedStartupAdvanceGate);
+            Test("Existing client startup accepts verified memory when visual is Unknown", ExistingClientMemoryGate);
+            Test("Host diagnostics include session display and window context", HostDiagnosticsBundle);
             Test("Gepard splash is never an interactive input target", GepardSplashIsTransient);
             Test("Real Vanilla game window outranks generic windows", GameWindowCandidateRanking);
             Test("Minimized Vanilla game window stays eligible for restore", MinimizedGameWindowCandidate);
@@ -203,6 +205,29 @@ namespace Vanilla.Diagnostics.Tests
                 "Startup advanced after a failed current-client sequence.");
             Assert(VanillaReconnectSupervisor.SequentialStartupMayAdvance(true, true, true, false),
                 "Startup did not advance after gameplay + one resume + minimize completed successfully.");
+        }
+
+        private static void ExistingClientMemoryGate()
+        {
+            Assert(!VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.Unknown),
+                "Unknown visual state must not override fresh verified gameplay memory.");
+            Assert(!VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.Gameplay),
+                "Gameplay unexpectedly blocked memory-backed adoption.");
+            Assert(VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.LoginShell),
+                "A verified login shell must block gameplay adoption.");
+            Assert(VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.LoggingOut),
+                "Logging-out state must block gameplay adoption.");
+            Assert(VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.Disconnected),
+                "Disconnected state must block gameplay adoption.");
+        }
+
+        private static void HostDiagnosticsBundle()
+        {
+            string value = VanillaHostDiagnostics.Build();
+            Assert(value.Contains("HOST / DISPLAY / SESSION DIAGNOSTICS")
+                && value.Contains("Session=") && value.Contains("Screens=")
+                && value.Contains("Vanilla processes="),
+                "Host diagnostics are missing required machine/session/display/process context.");
         }
 
         private static void GepardSplashIsTransient()
