@@ -136,8 +136,8 @@ namespace _4RTools.Model.Vanilla
                             WaitForGameplayStable(input, existingPid.Value, generation, 15000, account.Label + " existing client");
                         }
 
-                        if (!RunOwnedClientStep(runtime, existingPid.Value, () => StartupCancelled(generation),
-                            () => KeepAssignedClientMinimized(account.Id)))
+                        if (!WaitForOwnedClientSafeMinimize(runtime, existingPid.Value, () => StartupCancelled(generation),
+                            account.Label + ": existing client"))
                             throw new InvalidOperationException(account.Label + ": existing gameplay client could not be confirmed minimized; next client was NOT started.");
 
                         lock (gate)
@@ -405,8 +405,10 @@ namespace _4RTools.Model.Vanilla
                         () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
                         account.Label + ": sequential: ");
 
-                    WaitForGameplayStable(input, pid.Value, generation, 60000, account.Label + " post-character");
-                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: gameplay confirmed; settling 7s before " + account.HotkeyText);
+                    WaitForAutobattleReady(account, pid.Value,
+                        () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
+                        60000, "Sequential startup post-character");
+                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: verified post-login state confirmed; settling 7s before " + account.HotkeyText);
                     BriefPause(generation, VanillaAutobattleResumeVerifier.PostLoginSettleMs);
                     ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: 7s settle complete; preparing autobattle hotkey verification 1/3");
                     VerifyAutobattleResumeAsync(account, pid.Value,
@@ -417,9 +419,9 @@ namespace _4RTools.Model.Vanilla
 
                 if (StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration))
                     throw new OperationCanceledException("Sequential startup cancelled.");
-                bool minimized = RunOwnedClientStep(runtime, pid.Value,
+                bool minimized = WaitForOwnedClientSafeMinimize(runtime, pid.Value,
                     () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
-                    () => KeepAssignedClientMinimized(account.Id));
+                    account.Label + ": sequential startup");
                 if (!SequentialStartupMayAdvance(true, true, minimized, false))
                     throw new InvalidOperationException(account.Label + ": could not confirm minimization; next client was NOT started.");
 

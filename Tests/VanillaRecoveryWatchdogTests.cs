@@ -52,6 +52,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Recovery OFF disables position restarts", RecoveryOff);
             Test("Visual watchdog OFF does not disable the position watchdog", VisualOff);
             Test("Startup and recovery do not accrue movement timeouts", StartupGrace);
+            Test("Automatic minimization requires 60s visible and 60s cursor idle", MinimizeGrace);
             Test("30s stillness requests hotkey recovery before client restart", WatchdogHotkeyFirst);
             Test("Three failed client restarts stop the supervisor permanently", RestartBudget);
             Test("Verified movement resets the client restart budget", RestartBudgetReset);
@@ -230,6 +231,15 @@ namespace Vanilla.Diagnostics.Tests
         { using (var h = new H()) { var s=h.Supervisor.Settings;s.VisualWatchdog=false;Set(h.Supervisor,"settings",s);h.Motion(h.A);h.E.Seconds=30;h.Motion(h.A);Assert(h.Wakeups.Count==1 && h.E.Work.Count==0); } }
         private static void StartupGrace()
         { using (var h = new H()) { Set(h.A,"ScriptRunning",true);h.Motion(h.A);h.E.Seconds=1000;h.Motion(h.A);Set(h.A,"ScriptRunning",false);Assert(!h.Motion(h.A) && h.E.Work.Count==0); } }
+        private static void MinimizeGrace()
+        {
+            Assert(!VanillaReconnectSupervisor.AutomaticMinimizeReady(TimeSpan.FromSeconds(59.999), TimeSpan.FromSeconds(120)),
+                "Visible-window grace was shorter than 60 seconds.");
+            Assert(!VanillaReconnectSupervisor.AutomaticMinimizeReady(TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(59.999)),
+                "Cursor activity grace was shorter than 60 seconds.");
+            Assert(VanillaReconnectSupervisor.AutomaticMinimizeReady(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60)),
+                "Exactly 60 seconds of visibility and cursor idle should allow minimization.");
+        }
         private static void WatchdogHotkeyFirst()
         { using(var h=new H()){h.Sample(101);h.Motion(h.A);h.E.Seconds=30;h.Sample(101);Assert(h.Motion(h.A));Assert(h.Wakeups.Count==1,"Watchdog did not request hotkey recovery.");Assert(h.E.Work.Count==0&&h.E.Closed.Count==0,"Watchdog restarted before three hotkey attempts could run.");} }
         private static void RestartBudget()

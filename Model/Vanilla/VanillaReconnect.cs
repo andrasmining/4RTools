@@ -550,6 +550,7 @@ namespace _4RTools.Model.Vanilla
             public int AutobattleRestartAttempts;
             public bool AutobattleRestartInProgress;
             public bool AutobattleRecoveryExhausted;
+            public DateTimeOffset? NonMinimizedSince;
             public int TerminalSamples;
             public VanillaVisualState TerminalVisual;
             public DateTimeOffset? TerminalObservedAt;
@@ -627,6 +628,7 @@ namespace _4RTools.Model.Vanilla
                     runtime.AutobattleRestartAttempts = 0;
                     runtime.AutobattleRestartInProgress = false;
                     runtime.AutobattleRecoveryExhausted = false;
+                    runtime.NonMinimizedSince = null;
                     runtime.MovementWatchdog.Reset();
                     ResetTerminalEvidence(runtime);
                 }
@@ -661,6 +663,7 @@ namespace _4RTools.Model.Vanilla
                         runtime.ResumeVerificationFailed = false;
                         runtime.ResumeFailureDetail = null;
                         runtime.NextRecoveryAt = null;
+                        runtime.NonMinimizedSince = null;
                         runtime.MovementWatchdog.Reset();
                     }
                 }
@@ -695,6 +698,7 @@ namespace _4RTools.Model.Vanilla
                     runtime.AutobattleRestartAttempts = 0;
                     runtime.AutobattleRestartInProgress = false;
                     runtime.AutobattleRecoveryExhausted = false;
+                    runtime.NonMinimizedSince = null;
                     runtime.MovementWatchdog.Reset();
                     ResetTerminalEvidence(runtime);
                     SetStage(runtime, VanillaReconnectStage.Stopped, "Supervisor stopped");
@@ -986,7 +990,11 @@ namespace _4RTools.Model.Vanilla
                 try
                 {
                     int? launchedPid = VanillaPatcherLauncher.Launch(executable, arguments,
-                        message => Log(label + ": " + message),
+                        message =>
+                        {
+                            Log(label + ": " + message);
+                            VanillaDebugLog.Write("LAUNCHER", label + ": " + message);
+                        },
                         () =>
                         {
                             lock (gate)
@@ -1038,6 +1046,7 @@ namespace _4RTools.Model.Vanilla
             runtime.CharacterSession = freshLaunch ? (Guid?)null : CurrentCharacter(pid)?.Session;
             runtime.ConfirmedCharacter = null;
             runtime.ClosingForRecovery = false;
+            runtime.NonMinimizedSince = null;
             if (!runtime.AutobattleRestartInProgress) runtime.MovementRecoveryPending = false;
             runtime.MovementWatchdog.Reset();
             ResetTerminalEvidence(runtime);
@@ -1142,7 +1151,7 @@ namespace _4RTools.Model.Vanilla
                     WaitForCharacterSurfaceCancellable(input, pid, cancelled, 30000, account.Label + ": recovery");
                     SelectConfiguredCharacterWithoutCoordinates(input, pid, account, cancelled, account.Label + ": recovery: ");
 
-                    WaitForGameplayStableCancellable(input, pid, cancelled, 60000, account.Label + " recovery post-character");
+                    WaitForAutobattleReady(account, pid, cancelled, 60000, "Recovery post-character");
                     autobattlePhase = true;
                     ResumeProgress(owner, pid, generation, "Recovery login: gameplay confirmed; settling 7s before " + account.HotkeyText);
                     PauseCharacterSelection(cancelled, VanillaAutobattleResumeVerifier.PostLoginSettleMs);
@@ -1151,7 +1160,7 @@ namespace _4RTools.Model.Vanilla
                         detail => ResumeProgress(owner, pid, generation, "Recovery login: " + detail))
                         .GetAwaiter().GetResult();
                     if (cancelled()) throw new OperationCanceledException("Recovery login cancelled after autobattle verification.");
-                    if (!RunOwnedClientStep(owner, pid, cancelled, () => KeepAssignedClientMinimized(account.Id)))
+                    if (!WaitForOwnedClientSafeMinimize(owner, pid, cancelled, account.Label + ": recovery"))
                         throw new InvalidOperationException("Movement verified but client minimization could not be confirmed.");
                 }
             }

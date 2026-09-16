@@ -1,53 +1,52 @@
-# 4RTools Vanilla 0.6.41
+# 4RTools Vanilla 0.6.42
 
-## Guaranteed post-login Autobattle start
+## Post-login hotkey path hardened
 
-A successful login/relog no longer depends on a later supervisor poll to start
-Autobattle. After gameplay is stably detected, the client settles for 7 seconds,
-then the configured Autobattle/slave hotkey is always sent. Fresh verified X/Y is
-observed for 10 seconds. If the character does not move, the intended client is
-revalidated and the hotkey is sent again, for three attempts total.
+Recovery/relogin no longer depends on the screenshot classifier reporting exactly
+`Gameplay` before the configured Autobattle/slave hotkey can run. After character
+selection, 4RTools waits for two fresh read-only samples proving the expected login
+username/character plus valid X/Y/map/living HP. It then keeps the existing 7-second
+settle and three-attempt hotkey verifier (10 seconds of X/Y observation per attempt).
+Known login, modal, logging-out and disconnected screens still block input.
 
-Logs now expose the post-login settle, every `Sending autobattle hotkey attempt X/3`
-message and each 10-second X/Y verification window. The same sequence is used by
-cold startup and normal recovery/relogin.
+The reconnect session log and global Debug log now both record readiness, the 7-second
+settle, every `Sending autobattle hotkey attempt X/3` event and every movement window.
+The 30-second steady-state movement watchdog and three-restart terminal budget remain.
 
-## 30-second hotkey-first movement recovery
+## Human-presence-aware minimization
 
-The online autofarming movement watchdog is reduced from 120 seconds to 30 seconds.
-Unchanged, missing, unreadable, unverified and stale X/Y do not reset the deadline.
-When the watchdog fires, it first invokes the same three-attempt hotkey verifier;
-it does not immediately restart the process. A recognized terminal disconnect/logout
-can still request replacement sooner after its existing confirmation rules.
+A supervised game window is no longer minimized immediately after the user restores,
+maximizes or otherwise exposes it. Automatic minimization requires BOTH at least 60
+seconds continuously non-minimized and at least 60 seconds without machine cursor
+movement. Any cursor movement restarts the idle grace. If cursor state cannot be read,
+automatic minimization fails closed and waits another grace period. Explicit manual
+minimize remains immediate.
 
-If all three hotkey attempts fail, only the affected client is restarted under the
-global recovery lease. The replacement repeats login -> 7-second settle -> up to
-three hotkeys -> verified X/Y movement -> minimization. Another failed client waits
-until that complete sequence finishes; healthy siblings are untouched.
+Startup/recovery keeps ownership while waiting for the same safe-minimize condition,
+so a later client does not steal the serialized startup/recovery gate while the user
+is actively working in the current client.
 
-## Bounded client restart budget
+## Slower single-action GAME START
 
-One movement-failure incident permits at most three client restarts. A successful
-verified movement observation clears the incident and resets the restart budget.
-If verified movement cannot be established after the third replacement cycle, the
-supervisor stops completely, records a terminal failure, and sends no further
-automatic hotkeys or restart requests until the user manually starts it again.
-Manual Start resets the bounded incident state.
+The Vanilla launcher is allowed to settle for 2.5 seconds before any GAME START action.
+Each attempt now performs exactly ONE activation: a semantic native button invocation
+when available, otherwise one click only after two stable visual detections 750 ms
+apart. The old fallback coordinate sweep and the previous native-plus-visual double
+activation are removed. After a real activation, 4RTools waits at least 15 seconds for
+Vanilla/Gepard startup before another attempt.
 
-Existing process/PID/session/character ownership checks, STOP/configuration
-cancellation, read-only memory boundaries, terminal-dialog handling, username +
-character identity, and resolution-independent keyboard character selection remain.
+This reduces duplicate/too-fast launcher input associated with the observed generic
+GDI+ launcher error while remaining resolution/DPI independent.
 
 ## Validation and limits
 
-Release validation covers Debug/Release regression suites, the three-hotkey verifier,
-30-second watchdog behavior, three-restart exhaustion and reset, sequential dual-client
-recovery, cancellation/ownership boundaries, native test-owned process recovery,
-portable launch/package checks and native mock-data UI checks. The public release ZIP,
-checksum and exact source identity are verified after publication, and the previously
-published executable's real updater must discover this Latest release before cleanup.
+Release validation covers Debug/Release regression suites, post-login memory readiness,
+visual input blocking, three-hotkey/three-restart recovery, 30-second movement watchdog,
+60-second cursor/visibility minimization policy, launcher pacing/stable-candidate rules,
+native test-owned process recovery, portable launch/package checks and native mock-data
+UI checks. Public release assets, exact source identity and updater discovery are
+verified after publication.
 
-No live Vanilla/Gepard/RDP client was available to this engineering session. The
-behavior is therefore validated by Windows/runtime/state tests and packaging, not by
-an independent live gameplay login. Existing dependency/compiler warnings remain
-visible.
+No live Vanilla/Gepard/RDP session was available to the build runner. The user-supplied
+screenshots/log are live evidence for the defects; final automation behavior is validated
+by Windows/runtime/state tests rather than an independent live-game login.

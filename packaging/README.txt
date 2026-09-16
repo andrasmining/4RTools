@@ -35,7 +35,12 @@ failed or interrupted client is not silently treated as healthy. The explicit
 Resume hotkey diagnostic performs a new bounded verification; success clears
 the failed state. Healthy already-running clients are adopted without toggling.
 
-STOP and changes to the active configuration cancel pending input. Unknown or
+STOP and changes to the active configuration cancel pending input.
+
+Automatic minimization is user-presence aware. A restored/maximized managed client
+is left alone until it has remained visible for at least 60 seconds AND the machine
+cursor has not moved for at least 60 seconds. Cursor movement restarts the grace.
+ Unknown or
 stale coordinates, failed reads, loss of input ownership, client/session changes,
 map transitions and dead characters stop the verification safely. Detailed
 reasons and attempt progress are available in status and logs. A character that

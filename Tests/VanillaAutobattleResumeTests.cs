@@ -30,6 +30,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Third attempt succeeds without a fourth key", () => Success(3, true));
             Test("No movement fails after exactly three 10-second windows", BoundedFailure);
             Test("Post-login settle and restart budgets are explicitly bounded", RecoveryConstants);
+            Test("Unknown visual state does not block verified post-login memory input", VisualGate);
             Test("A completed verifier cannot reset its retry budget", NoRestart);
             Test("Intermediate movement is seen even if the character returns", MovementAndReturn);
             Test("Movement at the deadline prevents another toggle", DeadlineMovement);
@@ -67,6 +68,18 @@ namespace Vanilla.Diagnostics.Tests
             Test("Release failure does not strand other held modifiers", ChordReleaseFailure);
             Console.WriteLine("Autobattle resume: {0} passed; {1} failed. Fake clock, state and input only.", passed, failed);
             return failed;
+        }
+
+        private static void VisualGate()
+        {
+            Assert(!VanillaReconnectSupervisor.AutobattleVisualBlocksInput(VanillaVisualState.Unknown),
+                "Unknown visual state incorrectly blocked verified memory-backed hotkey input.");
+            Assert(!VanillaReconnectSupervisor.AutobattleVisualBlocksInput(VanillaVisualState.Gameplay),
+                "Gameplay visual state was unexpectedly blocked.");
+            foreach (var blocked in new[] { VanillaVisualState.LoginShell, VanillaVisualState.ModalDialog,
+                VanillaVisualState.LoggingOut, VanillaVisualState.Disconnected })
+                Assert(VanillaReconnectSupervisor.AutobattleVisualBlocksInput(blocked),
+                    "Unsafe visual state did not block input: " + blocked);
         }
 
         private static void ProfileDirectory()

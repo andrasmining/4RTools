@@ -15,6 +15,8 @@ namespace Vanilla.Diagnostics.Tests
             Test("Patcher executable detection is exact and case-insensitive", PatcherDetection);
             Test("Patcher beside Vanilla client is preferred when present", PreferAdjacentPatcher);
             Test("GAME START visual detector is available", VisualDetectorAvailable);
+            Test("Launcher actions are deliberately paced", Pacing);
+            Test("GAME START visual confirmation rejects a moving candidate", StableCandidate);
             Console.WriteLine("Patcher launcher: {0} passed; {1} failed. No processes were started.", passed, failed);
             return failed;
         }
@@ -54,6 +56,25 @@ namespace Vanilla.Diagnostics.Tests
             }
         }
 
+        private static void Pacing()
+        {
+            Type type = LauncherType();
+            Equal(15000, (int)type.GetField("DefaultRetryMs", BindingFlags.Static | BindingFlags.NonPublic).GetRawConstantValue(),
+                "Launcher retry delay must leave time for Gepard/client startup.");
+            Equal(2500, (int)type.GetField("LauncherSettleMs", BindingFlags.Static | BindingFlags.NonPublic).GetRawConstantValue(),
+                "Launcher must settle before the first GAME START action.");
+        }
+
+        private static void StableCandidate()
+        {
+            MethodInfo method = LauncherType().GetMethod("SameGameStartCandidate", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert(method != null, "Stable GAME START confirmation helper is missing.");
+            Assert((bool)method.Invoke(null, new object[] { .50d, .765d, .512d, .755d }),
+                "Small detector jitter should remain one candidate.");
+            Assert(!(bool)method.Invoke(null, new object[] { .50d, .765d, .56d, .70d }),
+                "A moving visual candidate must not authorize a click.");
+        }
+
         private static void VisualDetectorAvailable()
         {
             MethodInfo method = LauncherType().GetMethod("TryFindGameStart", BindingFlags.Static | BindingFlags.NonPublic);
@@ -85,6 +106,11 @@ namespace Vanilla.Diagnostics.Tests
         private static void Assert(bool value, string message)
         {
             if (!value) throw new Exception(message);
+        }
+
+        private static void Equal(int expected, int actual, string message)
+        {
+            if (expected != actual) throw new Exception(message + " Expected: " + expected + "; actual: " + actual);
         }
 
         private static void Equal(string expected, string actual, string message)

@@ -22,7 +22,9 @@ namespace _4RTools.Model.Vanilla
         internal const double DefaultGameStartX = 0.50;
         internal const double DefaultGameStartY = 0.765;
         internal const int DefaultStartTimeoutMs = 120000;
-        internal const int DefaultRetryMs = 10000;
+        internal const int DefaultRetryMs = 15000;
+        internal const int LauncherSettleMs = 2500;
+        internal const int VisualConfirmationDelayMs = 750;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
@@ -105,11 +107,11 @@ namespace _4RTools.Model.Vanilla
                 DateTime nextClick = DateTime.MinValue;
                 string launcherName = Path.GetFileNameWithoutExtension(executablePath);
                 string launcherDirectory = Path.GetDirectoryName(executablePath);
-                int fallbackAttempt = 0;
                 int clickAttempt = 0;
-                double[] fallbackY = { gameStartY, 0.795, 0.825, 0.745 };
                 bool sawLauncherWindow = false;
                 DateTime? launcherWindowLostAt = null;
+                DateTime? launcherWindowStableAt = null;
+                int stableLauncherPid = 0;
                 int noWindowLogs = 0;
 
                 while (DateTime.UtcNow < deadline)
@@ -134,6 +136,21 @@ namespace _4RTools.Model.Vanilla
                         {
                             sawLauncherWindow = true;
                             launcherWindowLostAt = null;
+                            if (stableLauncherPid != patcherPid.Value)
+                            {
+                                stableLauncherPid = patcherPid.Value;
+                                launcherWindowStableAt = DateTime.UtcNow;
+                                log?.Invoke("Launcher window appeared for PID " + patcherPid.Value
+                                    + "; waiting " + LauncherSettleMs + "ms before any GAME START action.");
+                                nextClick = DateTime.UtcNow.AddMilliseconds(250);
+                                continue;
+                            }
+                            if (!launcherWindowStableAt.HasValue
+                                || (DateTime.UtcNow - launcherWindowStableAt.Value).TotalMilliseconds < LauncherSettleMs)
+                            {
+                                nextClick = DateTime.UtcNow.AddMilliseconds(250);
+                                continue;
+                            }
                             try
                             {
                                 IntPtr launcherHwnd = ResolveLauncherWindow(patcherPid.Value);
@@ -145,54 +162,63 @@ namespace _4RTools.Model.Vanilla
                                 log?.Invoke("Launcher window resolved: " + windowDescription + "; foreground=" + DescribeWindow(GetForegroundWindow())
                                     + "; childControls=" + childInventory + ".");
 
+                                clickAttempt++;
                                 if (nativeFound)
                                 {
                                     UIntPtr result;
-                                    int beforeError = Marshal.GetLastWin32Error();
                                     IntPtr sent = SendMessageTimeout(nativeGameStart, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, 2000, out result);
                                     int error = sent == IntPtr.Zero ? Marshal.GetLastWin32Error() : 0;
-                                    log?.Invoke("GAME START native control invoke: target=" + DescribeWindow(nativeGameStart)
-                                        + "; SendMessageTimeout=" + (sent == IntPtr.Zero ? "FAILED" : "OK") + "; err=" + error + "; priorErr=" + beforeError + ".");
-                                }
-
-                                double clickX = gameStartX;
-                                double clickY;
-                                string detectorEvidence;
-                                bool visuallyDetected = TryFindGameStartOnWindow(patcherPid.Value, debugDirectory, out clickX, out clickY, out detectorEvidence);
-                                string evidence = detectorEvidence;
-                                if (!visuallyDetected)
-                                {
-                                    clickY = fallbackY[fallbackAttempt % fallbackY.Length];
-                                    fallbackAttempt++;
-                                    evidence += "; fallback sweep used";
-                                }
-
-                                string strategy;
-                                string inputEvidence;
-                                if ((clickAttempt++ & 1) == 0)
-                                {
-                                    using (var input = new VanillaForegroundInput(patcherPid.Value, launcherHwnd))
-                                        inputEvidence = input.ClickNormalizedWithDiagnostics(clickX, clickY, requireForeground: false);
-                                    strategy = "screen-coordinate SendInput";
+                                    log?.Invoke("GAME START attempt #" + clickAttempt + ": one semantic native-control invoke only; target="
+                                        + DescribeWindow(nativeGameStart) + "; result=" + (sent == IntPtr.Zero ? "FAILED" : "OK")
+                                        + "; err=" + error + ". No second click is sent in this attempt; waiting " + retryMs + "ms before any retry.");
                                 }
                                 else
                                 {
-                                    inputEvidence = ClickTargetedWindowAtPoint(patcherPid.Value, clickX, clickY);
-                                    strategy = "targeted hit-window message";
+                                    double firstX = gameStartX, firstY = gameStartY;
+                                    string firstEvidence;
+                                    if (!TryFindGameStartOnWindow(patcherPid.Value, debugDirectory, out firstX, out firstY, out firstEvidence))
+                                    {
+                                        clickAttempt--;
+                                        log?.Invoke("GAME START is not safely detected yet; no fallback coordinate click was sent. " + firstEvidence);
+                                        nextClick = DateTime.UtcNow.AddMilliseconds(1000);
+                                        continue;
+                                    }
+                                    SleepCancellable(VisualConfirmationDelayMs, cancelled);
+                                    int? startedDuringConfirmation = FindNewVanillaProcess(before);
+                                    if (startedDuringConfirmation.HasValue)
+                                    {
+                                        log?.Invoke("Patcher started Vanilla MMO (PID " + startedDuringConfirmation.Value + ") during GAME START confirmation.");
+                                        return startedDuringConfirmation;
+                                    }
+                                    double secondX = gameStartX, secondY = gameStartY;
+                                    string secondEvidence;
+                                    if (!TryFindGameStartOnWindow(patcherPid.Value, debugDirectory, out secondX, out secondY, out secondEvidence)
+                                        || !SameGameStartCandidate(firstX, firstY, secondX, secondY))
+                                    {
+                                        clickAttempt--;
+                                        log?.Invoke("GAME START visual candidate changed during confirmation; no click sent. first=["
+                                            + firstEvidence + "]; second=[" + secondEvidence + "].");
+                                        nextClick = DateTime.UtcNow.AddMilliseconds(1000);
+                                        continue;
+                                    }
+                                    string inputEvidence;
+                                    using (var input = new VanillaForegroundInput(patcherPid.Value, launcherHwnd))
+                                        inputEvidence = input.ClickNormalizedWithDiagnostics(secondX, secondY, requireForeground: false);
+                                    log?.Invoke(string.Format(
+                                        "GAME START attempt #{0}: one visually confirmed click only at normalized=({1:0.000},{2:0.000}); first=[{3}]; second=[{4}]; input=[{5}]. Waiting {6}ms before any retry.",
+                                        clickAttempt, secondX, secondY, firstEvidence, secondEvidence, inputEvidence, retryMs));
                                 }
-
-                                log?.Invoke(string.Format(
-                                    "GAME START attempt #{0}: normalized=({1:0.000},{2:0.000}); strategy={3}; detector=[{4}]; input=[{5}]. Waiting for Vanilla/Gepard startup before retry.",
-                                    clickAttempt, clickX, clickY, strategy, evidence, inputEvidence));
                             }
                             catch (Exception ex)
                             {
-                                log?.Invoke("Launcher click attempt failed before completion: " + ex.GetType().Name + ": " + ex.Message);
+                                log?.Invoke("Launcher GAME START attempt failed before completion: " + ex.GetType().Name + ": " + ex.Message);
                             }
                             nextClick = DateTime.UtcNow.AddMilliseconds(retryMs);
                         }
                         else
                         {
+                            stableLauncherPid = 0;
+                            launcherWindowStableAt = null;
                             if (sawLauncherWindow)
                             {
                                 if (!launcherWindowLostAt.HasValue) launcherWindowLostAt = DateTime.UtcNow;
@@ -218,6 +244,23 @@ namespace _4RTools.Model.Vanilla
             finally
             {
                 if (launched != null) launched.Dispose();
+            }
+        }
+
+        internal static bool SameGameStartCandidate(double firstX, double firstY, double secondX, double secondY)
+        {
+            return Math.Abs(firstX - secondX) <= 0.025 && Math.Abs(firstY - secondY) <= 0.025;
+        }
+
+        private static void SleepCancellable(int milliseconds, Func<bool> cancelled)
+        {
+            int remaining = Math.Max(0, milliseconds);
+            while (remaining > 0)
+            {
+                if (cancelled != null && cancelled()) throw new OperationCanceledException("Patcher launch cancelled.");
+                int slice = Math.Min(100, remaining);
+                Thread.Sleep(slice);
+                remaining -= slice;
             }
         }
 

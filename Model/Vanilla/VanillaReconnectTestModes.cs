@@ -12,6 +12,14 @@ namespace _4RTools.Model.Vanilla
     public sealed partial class VanillaReconnectSupervisor
     {
         private const int SwMinimize = 6;
+        internal const int AutomaticMinimizeIdleSeconds = 60;
+        private Point? lastCursorPosition;
+        private DateTimeOffset? lastCursorMovementAt;
+        private Func<DateTimeOffset> minimizeClock = () => DateTimeOffset.UtcNow;
+        private Func<Point?> cursorPosition = ReadCursorPosition;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CursorPoint { public int X, Y; }
 
         public bool MinimizeAssignedClient(string accountId)
         {
@@ -21,6 +29,53 @@ namespace _4RTools.Model.Vanilla
         public bool KeepAssignedClientMinimized(string accountId)
         {
             return MinimizeAssignedClientCore(accountId, false);
+        }
+
+        internal static bool AutomaticMinimizeReady(TimeSpan visibleFor, TimeSpan cursorIdleFor)
+        {
+            return visibleFor >= TimeSpan.FromSeconds(AutomaticMinimizeIdleSeconds)
+                && cursorIdleFor >= TimeSpan.FromSeconds(AutomaticMinimizeIdleSeconds);
+        }
+
+        internal void SetMinimizePolicyTestServices(Func<DateTimeOffset> clock, Func<Point?> cursor)
+        {
+            lock (gate)
+            {
+                minimizeClock = clock ?? (() => DateTimeOffset.UtcNow);
+                cursorPosition = cursor ?? ReadCursorPosition;
+                lastCursorPosition = null;
+                lastCursorMovementAt = null;
+                foreach (Runtime runtime in runtimes.Values) runtime.NonMinimizedSince = null;
+            }
+        }
+
+        private bool WaitForOwnedClientSafeMinimize(Runtime owner, int pid, Func<bool> cancelled, string context)
+        {
+            if (owner == null) throw new ArgumentNullException(nameof(owner));
+            if (cancelled == null) throw new ArgumentNullException(nameof(cancelled));
+            Log(context + ": client ready; automatic minimize is waiting for 60s with the client visible and no cursor movement.");
+            while (true)
+            {
+                if (cancelled()) throw new OperationCanceledException(context + ": minimization wait cancelled.");
+                lock (gate)
+                {
+                    Runtime current;
+                    if (disposed || !runtimes.TryGetValue(owner.Account.Id, out current) || !ReferenceEquals(owner, current)
+                        || current.ProcessId != pid || !current.Account.Enabled || CharacterOwnershipChanged(current, pid))
+                        throw new OperationCanceledException(context + ": client ownership changed during minimization grace.");
+                }
+                if (KeepAssignedClientMinimized(owner.Account.Id))
+                {
+                    lock (gate)
+                    {
+                        Runtime current;
+                        if (!runtimes.TryGetValue(owner.Account.Id, out current) || !ReferenceEquals(owner, current) || current.ProcessId != pid)
+                            throw new OperationCanceledException(context + ": client changed as minimization completed.");
+                    }
+                    return true;
+                }
+                Thread.Sleep(250);
+            }
         }
 
         public void KeepOnlineClientsMinimized()
@@ -45,9 +100,9 @@ namespace _4RTools.Model.Vanilla
         {
             int pid;
             string label;
+            Runtime runtime;
             lock (gate)
             {
-                Runtime runtime;
                 if (!runtimes.TryGetValue(accountId, out runtime)) throw new ArgumentException("Unknown account.");
                 if (!runtime.ProcessId.HasValue) return false;
                 pid = runtime.ProcessId.Value;
@@ -61,7 +116,49 @@ namespace _4RTools.Model.Vanilla
                     process.Refresh();
                     if (process.HasExited || process.MainWindowHandle == IntPtr.Zero) return false;
                     IntPtr window = process.MainWindowHandle;
-                    if (IsIconic(window)) return true;
+                    DateTimeOffset now = minimizeClock();
+                    Point? cursor = null;
+                    try { cursor = cursorPosition(); } catch { }
+
+                    lock (gate)
+                    {
+                        Runtime current;
+                        if (!runtimes.TryGetValue(accountId, out current) || !ReferenceEquals(runtime, current)
+                            || current.ProcessId != pid) return false;
+                        ObserveCursorLocked(cursor, now);
+                        if (IsIconic(window))
+                        {
+                            current.NonMinimizedSince = null;
+                            return true;
+                        }
+                        if (!testLog)
+                        {
+                            if (!current.NonMinimizedSince.HasValue) current.NonMinimizedSince = now;
+                            TimeSpan visibleFor = now - current.NonMinimizedSince.Value;
+                            TimeSpan cursorIdleFor = now - (lastCursorMovementAt ?? now);
+                            if (!AutomaticMinimizeReady(visibleFor, cursorIdleFor)) return false;
+                        }
+                    }
+
+                    // Re-sample immediately before minimizing. A cursor move between policy
+                    // evaluation and ShowWindow is treated as active user presence.
+                    if (!testLog)
+                    {
+                        DateTimeOffset finalNow = minimizeClock();
+                        Point? finalCursor = null;
+                        try { finalCursor = cursorPosition(); } catch { }
+                        lock (gate)
+                        {
+                            Runtime current;
+                            if (!runtimes.TryGetValue(accountId, out current) || !ReferenceEquals(runtime, current)
+                                || current.ProcessId != pid) return false;
+                            ObserveCursorLocked(finalCursor, finalNow);
+                            if (!current.NonMinimizedSince.HasValue
+                                || !AutomaticMinimizeReady(finalNow - current.NonMinimizedSince.Value,
+                                    finalNow - (lastCursorMovementAt ?? finalNow))) return false;
+                        }
+                    }
+
                     ShowWindow(window, SwMinimize);
                     if (!IsIconic(window))
                     {
@@ -69,8 +166,14 @@ namespace _4RTools.Model.Vanilla
                         else Log(label + ": could not confirm that supervised Vanilla client PID " + pid + " was minimized.");
                         return false;
                     }
+                    lock (gate)
+                    {
+                        Runtime current;
+                        if (runtimes.TryGetValue(accountId, out current) && ReferenceEquals(runtime, current) && current.ProcessId == pid)
+                            current.NonMinimizedSince = null;
+                    }
                     Log((testLog ? "TEST " : string.Empty) + label + ": Vanilla client PID " + pid
-                        + (testLog ? " minimized and left running." : " minimized and left running by supervisor policy."));
+                        + (testLog ? " minimized and left running." : " minimized after 60s visible + cursor-idle grace."));
                     return true;
                 }
             }
@@ -81,10 +184,34 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
+        private void ObserveCursorLocked(Point? cursor, DateTimeOffset now)
+        {
+            if (!cursor.HasValue)
+            {
+                // Unknown presence fails closed: do not auto-minimize for another full grace period.
+                lastCursorMovementAt = now;
+                return;
+            }
+            if (!lastCursorPosition.HasValue || lastCursorPosition.Value != cursor.Value)
+            {
+                lastCursorPosition = cursor;
+                lastCursorMovementAt = now;
+            }
+            else if (!lastCursorMovementAt.HasValue) lastCursorMovementAt = now;
+        }
+
+        private static Point? ReadCursorPosition()
+        {
+            CursorPoint point;
+            return GetCursorPos(out point) ? (Point?)new Point(point.X, point.Y) : null;
+        }
+
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll")]
         private static extern bool IsIconic(IntPtr hWnd);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool GetCursorPos(out CursorPoint point);
     }
 
     internal sealed partial class VanillaReconnectForm

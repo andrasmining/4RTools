@@ -56,6 +56,7 @@ namespace _4RTools.Model.Vanilla
             runtime.AutobattleRestartAttempts = 0;
             runtime.AutobattleRestartInProgress = false;
             runtime.AutobattleRecoveryExhausted = false;
+            runtime.NonMinimizedSince = null;
             runtime.MovementWatchdog.Reset();
             ResetTerminalEvidence(runtime);
             SetStage(runtime, VanillaReconnectStage.WaitingForClient, "Character/session changed; old client left untouched");

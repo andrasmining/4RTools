@@ -32,3 +32,27 @@ The table is a character roster: Description, Username, Slot, Character name,
 then the remaining fields. Multiple characters may share one username; at most
 two enabled rows. Unknown slots remain blank, not slot 1. Auto-discovered rows
 stay disabled. Native UI checks must cover discovery and the character editor.
+
+## User-presence-aware minimization and launcher pacing
+
+Automatic minimization must respect active human use. If a managed Vanilla window
+is restored/maximized/otherwise visible, do not minimize it immediately. Require
+at least 60 seconds continuously visible AND at least 60 seconds without machine
+cursor movement. Any cursor movement restarts the idle grace; unavailable cursor
+state fails closed and defers minimization. Manual explicit minimize remains
+immediate. Startup/recovery that owns a serialized gate may wait for this grace
+rather than stealing a window from an active user.
+
+Launcher GAME START automation must never double-activate a control in one attempt.
+Wait for the launcher window to remain present for at least 2.5 seconds, then use
+one semantic native-control invocation when available; otherwise require two stable
+visual detections before one click. Never use blind/fallback GAME START coordinates.
+Wait at least 15 seconds after an actual activation before another attempt unless a
+new Vanilla process appears first.
+
+Post-login Autobattle/slave activation is memory-state-first. Fresh verified login
+username + character identity + X/Y/map/living HP may establish readiness even when
+the visual classifier returns Unknown. Known login/modal/logout/disconnect states
+still block input. Every readiness transition, 7-second settle, hotkey attempt and
+10-second movement window must also be written to the global debug log, not only
+the reconnect session log.

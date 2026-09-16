@@ -197,7 +197,71 @@ namespace _4RTools.Model.Vanilla
                 SetStage(current, VanillaReconnectStage.VerifyingAutobattle, detail);
             }
             Log(owner.Account.Label + ": " + detail);
+            VanillaDebugLog.Write("AUTOBATTLE", "PID=" + pid + "; " + owner.Account.Label + ": " + detail);
             RaiseUpdated();
+        }
+
+        internal static bool AutobattleVisualBlocksInput(VanillaVisualState visual)
+        {
+            return visual == VanillaVisualState.LoginShell || visual == VanillaVisualState.ModalDialog
+                || visual == VanillaVisualState.LoggingOut || visual == VanillaVisualState.Disconnected;
+        }
+
+        private void WaitForAutobattleReady(VanillaReconnectAccount account, int pid, Func<bool> cancelled,
+            int timeoutMs, string context)
+        {
+            if (account == null) throw new ArgumentNullException(nameof(account));
+            if (cancelled == null) throw new ArgumentNullException(nameof(cancelled));
+            Log(account.Label + ": " + context + ": waiting for fresh verified username/character/X/Y/HP before the mandatory post-login hotkey.");
+            VanillaDebugLog.Write("AUTOBATTLE", "PID=" + pid + "; " + account.Label + ": " + context
+                + ": waiting for verified post-login memory state before hotkey.");
+            using (var memory = new ReadOnlyProcessMemory(pid))
+            {
+                var identity = VanillaExecutableIdentity.Read(memory.ExecutablePath);
+                var profile = VanillaBuildProfile.Find(AutobattleBuildProfileDirectory, identity,
+                    message => Log(account.Label + ": " + message));
+                if (profile == null) throw new InvalidOperationException("No verified Vanilla build profile; post-login autobattle readiness cannot be proven.");
+                var adapter = new VanillaStateAdapter(profile, identity);
+                using (var source = new MemoryStateSource(memory, profile.MemoryMap))
+                {
+                    var watch = Stopwatch.StartNew();
+                    int consecutive = 0;
+                    string last = "no valid sample yet";
+                    while (watch.ElapsedMilliseconds < timeoutMs)
+                    {
+                        if (cancelled()) throw new OperationCanceledException(context + ": post-login readiness cancelled.");
+                        var now = DateTimeOffset.UtcNow;
+                        try
+                        {
+                            var state = source.Poll(now);
+                            if (source.IsStopped) throw new InvalidOperationException(state.Error ?? source.Status);
+                            adapter.Observe(state, watch.Elapsed);
+                            ValidateExpectedCharacter(account, state);
+                            VanillaAutobattleResumeVerifier.ValidateSample(state, null, pid, now);
+                            consecutive++;
+                            last = "verified " + state.UserName.Value + "/" + state.CharacterName.Value
+                                + " at " + state.X.Value + "," + state.Y.Value;
+                            if (consecutive >= 2)
+                            {
+                                Log(account.Label + ": " + context + ": post-login memory state ready after "
+                                    + watch.ElapsedMilliseconds + "ms (" + last + ").");
+                                VanillaDebugLog.Write("AUTOBATTLE", "PID=" + pid + "; " + account.Label + ": " + context
+                                    + ": readiness verified; mandatory 7s settle/hotkey sequence may proceed.");
+                                return;
+                            }
+                        }
+                        catch (InvalidOperationException ex)
+                        {
+                            if (source.IsStopped) throw;
+                            consecutive = 0;
+                            last = ex.Message;
+                        }
+                        Thread.Sleep(150);
+                    }
+                    throw new InvalidOperationException(context + ": fresh verified post-login state was not ready within "
+                        + (timeoutMs / 1000) + "s; no autobattle hotkey was sent. Last state: " + last);
+                }
+            }
         }
 
         private async Task VerifyAutobattleResumeAsync(VanillaReconnectAccount account, int pid,
@@ -226,8 +290,16 @@ namespace _4RTools.Model.Vanilla
                         var currentFile = new FileInfo(memory.ExecutablePath);
                         if (!currentFile.Exists || currentFile.Length != executableLength || currentFile.LastWriteTimeUtc != executableWriteTime)
                             throw new InvalidOperationException("The Vanilla executable changed during verification.");
-                        if (VanillaVisualProbe.Classify(input.Window) != VanillaVisualState.Gameplay)
-                            throw new InvalidOperationException("Gameplay is no longer confirmed; autobattle verification stopped.");
+                        VanillaVisualState visual = VanillaVisualState.Unknown;
+                        try { visual = VanillaVisualProbe.Classify(input.Window); }
+                        catch (Exception ex)
+                        {
+                            VanillaDebugLog.Write("AUTOBATTLE", "PID=" + pid
+                                + "; visual probe unavailable during memory-verified resume: " + ex.Message);
+                        }
+                        if (AutobattleVisualBlocksInput(visual))
+                            throw new InvalidOperationException("Client is in blocking visual state " + visual
+                                + "; autobattle verification stopped before input.");
                         var state = source.Poll(DateTimeOffset.UtcNow);
                         if (source.IsStopped) throw new InvalidOperationException(state.Error ?? source.Status);
                         adapter.Observe(state, clock.Elapsed);
@@ -410,9 +482,8 @@ namespace _4RTools.Model.Vanilla
                         () => !IsRunning || ResumeWorkerCancelled(runtime, pid, generation),
                         detail => ResumeProgress(runtime, pid, generation, detail)).ConfigureAwait(false);
                     if (!IsRunning || ResumeWorkerCancelled(runtime, pid, generation)) throw new OperationCanceledException();
-                    if (!RunOwnedClientStep(runtime, pid,
-                        () => !IsRunning || ResumeWorkerCancelled(runtime, pid, generation),
-                        () => KeepAssignedClientMinimized(account.Id)))
+                    if (!WaitForOwnedClientSafeMinimize(runtime, pid,
+                        () => !IsRunning || ResumeWorkerCancelled(runtime, pid, generation), account.Label + ": autobattle recovery"))
                         throw new InvalidOperationException("Movement verified but client minimization could not be confirmed.");
                 }
                 catch (OperationCanceledException) { cancelled = true; }
