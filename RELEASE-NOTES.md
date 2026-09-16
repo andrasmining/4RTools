@@ -68,13 +68,3 @@ live test performed by this engineering session. No live Vanilla/Gepard client o
 user RDP desktop was available; independent relog/restart confirmation is not
 claimed. Character-slot memory mapping remains unavailable; configured slots are
 retained. Existing dependency/compiler warnings remain visible.
-
-<!-- BEGIN GENERATED RELEASE CHECKSUMS -->
-
-Release version: 0.6.38. SHA256:
-
-- `4RTools-Vanilla-v0.6.38-portable.zip`: `59413711ca743c301bab59e68a50ddea8011f8bbd8a2719fe0557b177d7635f7`
-- `4RTools-Vanilla.exe`: `82778560ff97d683251fa6c8c2229b05be3f1436e333115ad6f3a9d450c91c13`
-
-These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
-<!-- END GENERATED RELEASE CHECKSUMS -->
