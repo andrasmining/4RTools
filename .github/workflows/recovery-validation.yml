@@ -4,41 +4,108 @@ on:
     branches: [fix/terminal-dialog-recovery]
     paths: ['.github/workflows/recovery-validation.yml']
 permissions:
-  contents: read
+  contents: write
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+concurrency:
+  group: terminal-recovery-validation
+  cancel-in-progress: false
 jobs:
-  recover:
+  validate:
     runs-on: windows-2022
-    timeout-minutes: 10
+    timeout-minutes: 35
     steps:
+      - name: Preserve source bytes
+        shell: powershell
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          persist-credentials: false
-      - name: Export interrupted source without applying it
+      - name: Apply checksum-verified reviewed recovery patch
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Path dist/recovery -Force | Out-Null
-          git bundle create dist/recovery/source.bundle --all
-          if ($LASTEXITCODE -ne 0) { throw 'Source export failed.' }
           @'
           from pathlib import Path
-          import base64, lzma
-          text = ''.join(Path('.github/terminal-patch-%d.txt' % i).read_text().strip() for i in (1,2,3))
-          data = base64.b64decode(text[:len(text)//4*4])
-          decoder = lzma.LZMADecompressor()
-          try:
-              partial = decoder.decompress(data)
-              Path('dist/recovery/interrupted.patch').write_bytes(partial)
-              print('Recovered bytes:', len(partial), 'complete stream:', decoder.eof)
-          except lzma.LZMAError as error:
-              print('Prior payload cannot be recovered:', error)
+          import base64, hashlib, lzma, subprocess
+          branch = subprocess.check_output(['git','branch','--show-current']).decode().strip()
+          assert branch == 'fix/terminal-dialog-recovery'
+          data = ''.join(Path('.github/recovery-final-%d.txt' % i).read_text().strip() for i in range(1,7))
+          assert len(data) == 41276, 'Incomplete transfer'
+          patch = lzma.decompress(base64.b64decode(data, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '719cfc38b083adecff0a8a037dacf9138fd1b8885605332ff59bf5ee5724c1be'
+          evidence = Path('dist/evidence')
+          evidence.mkdir(parents=True, exist_ok=True)
+          path = evidence / 'reviewed.patch'
+          path.write_bytes(patch)
+          subprocess.run(['git','apply','--check','--binary',str(path)], check=True)
+          subprocess.run(['git','apply','--binary',str(path)], check=True)
+          names = subprocess.check_output(['git','diff','--name-only']).decode().splitlines()
+          names += ['Model/Vanilla/VanillaClientCloseHandle.cs','Model/Vanilla/VanillaDisconnectPattern.cs',
+            'Model/Vanilla/VanillaMovementWatchdog.cs','Model/Vanilla/VanillaTerminalRecovery.cs',
+            'Resources/Vanilla/Disconnected.png','Resources/Vanilla/LoggingOut.png',
+            'Tests/VanillaNativeRecoveryTests.cs','Tests/VanillaRecoveryWatchdogTests.cs','scripts/test-recovery-native.ps1']
+          subprocess.run(['git','add','--',*sorted(set(names))],check=True)
+          subprocess.run(['git','-c','core.whitespace=cr-at-eol','diff','--cached','--check'],check=True)
+          subprocess.run(['git','diff','--cached','--stat'],check=True)
+          tree = subprocess.check_output(['git','write-tree']).decode().strip()
+          subprocess.run(['git','archive','--format=zip','--output=dist/evidence/candidate-source.zip',tree],check=True)
           '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw 'Source inspection failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Reviewed recovery source integration failed.' }
+      - name: Restore dependencies
+        shell: powershell
+        run: |
+          nuget restore 4RTools.sln -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+      - name: Validate shipped profiles
+        shell: powershell
+        run: ./scripts/validate-vanilla-build-profiles.ps1
+      - name: Debug build and complete regression suite
+        shell: powershell
+        run: ./scripts/build.ps1 -Configuration Debug -VanillaRelease
+      - name: Release build, tests, portable package and launch smoke
+        shell: powershell
+        run: ./scripts/build-release.ps1 -Version 0.6.36
+      - name: Native test-owned process close and cancellation checks
+        shell: powershell
+        run: ./scripts/test-recovery-native.ps1
+      - name: Native mock-data UI regression checks
+        shell: powershell
+        run: ./scripts/test-ui-layout.ps1
+      - name: Commit validated source and remove interrupted transport scaffolding
+        shell: powershell
+        run: |
+          git config user.name '4RTools engineering'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/terminal-patch-1.txt .github/terminal-patch-2.txt .github/terminal-patch-3.txt .github/recovery-final-1.txt .github/recovery-final-2.txt .github/recovery-final-3.txt .github/recovery-final-4.txt .github/recovery-final-5.txt .github/recovery-final-6.txt .github/workflows/recovery-validation.yml
+          if ($LASTEXITCODE -ne 0) { throw 'Temporary transport cleanup failed.' }
+          git commit -m 'fix: recover stalled farming clients with a serialized position watchdog'
+          if ($LASTEXITCODE -ne 0) { throw 'Validated source commit failed.' }
+          git push origin "HEAD:$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) { throw 'Remote advanced or push denied; no overwrite attempted.' }
+      - name: Collect source and validation evidence
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path dist/evidence -Force | Out-Null
+          git bundle create dist/evidence/source.bundle --all
+          if ($LASTEXITCODE -ne 0) { throw 'Source evidence export failed.' }
+          git status --short | Out-File dist/evidence/worktree-status.txt -Encoding utf8
+          git rev-parse HEAD | Out-File dist/evidence/source-commit.txt -Encoding utf8
+          $cache = Join-Path $env:LOCALAPPDATA '4RTools-Engineering'
+          foreach ($folder in @('builds','portable-tests')) {
+            $source = Join-Path $cache $folder
+            if (Test-Path $source) { Copy-Item $source dist/evidence -Recurse -Force }
+          }
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: recovery-source-${{ github.run_id }}
-          path: dist/recovery/**
-          retention-days: 2
+          name: recovery-validation-${{ github.run_id }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/native-recovery.log
+            dist/ui-layout/*.png
+            dist/ui-layout/*.txt
+            dist/evidence/**
+          retention-days: 7
           if-no-files-found: error
