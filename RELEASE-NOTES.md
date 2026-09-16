@@ -41,6 +41,14 @@ Startup hotkeys validate the expected username even for legacy rows whose charac
 name is being learned. Existing two-client limits, sequential recovery, terminal
 dialog handling, the 120-second movement watchdog and startup movement checks remain.
 
+## VPS updater delivery
+
+Releases are explicitly marked Latest. Publication checks reject downgrades,
+verify the public latest endpoint, and run the real updater from the published
+0.6.37 executable to confirm discovery of the new version and its ZIP/checksum
+URLs. This runs on an isolated Windows Actions runner without launching the
+application UI, touching a game client or installing on the user's VPS.
+
 ## Validation and limits
 
 Publication is gated on full Windows Debug/Release regression suites, shipped
@@ -60,3 +68,13 @@ live test performed by this engineering session. No live Vanilla/Gepard client o
 user RDP desktop was available; independent relog/restart confirmation is not
 claimed. Character-slot memory mapping remains unavailable; configured slots are
 retained. Existing dependency/compiler warnings remain visible.
+
+<!-- BEGIN GENERATED RELEASE CHECKSUMS -->
+
+Release version: 0.6.38. SHA256:
+
+- `4RTools-Vanilla-v0.6.38-portable.zip`: `59413711ca743c301bab59e68a50ddea8011f8bbd8a2719fe0557b177d7635f7`
+- `4RTools-Vanilla.exe`: `82778560ff97d683251fa6c8c2229b05be3f1436e333115ad6f3a9d450c91c13`
+
+These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
+<!-- END GENERATED RELEASE CHECKSUMS -->

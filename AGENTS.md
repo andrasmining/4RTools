@@ -523,3 +523,20 @@ remain unresolved, never guessed. Only untouched empty auto-discovery duplicates
 may be folded into that configured row; user-configured rows must survive.
 Record screenshot provenance accurately; automated tests do not prove independent
 live relog/restart validation of a supplied address.
+
+## VPS update delivery is mandatory
+
+The user's VPS is updated through the application's GitHub-release updater.
+Every implementation task must finish with a tested public stable release,
+explicitly marked Latest, unless the user explicitly requests source-only work.
+A chat ZIP, Actions artifact, branch, commit, PR or queued release is not an
+alternative deliverable. Do not stop at those intermediate states.
+
+Verify the public releases/latest response and both expected portable ZIP and
+checksum assets. Exercise the previously published application's real updater
+against the endpoint, verify downloads and source identity, integrate all work
+into main and remove completed task branches. Diagnose and repair failures;
+replace unsuitable approaches instead of handing development back to the user.
+State a genuine unavoidable external blocker accurately only after exhausting
+practical authorized alternatives. Never claim publication or VPS installation
+without evidence; testing update discovery is not installing on the user's VPS.
