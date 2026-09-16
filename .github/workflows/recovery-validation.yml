@@ -1,0 +1,44 @@
+name: Recovery validation
+on:
+  push:
+    branches: [fix/terminal-dialog-recovery]
+    paths: ['.github/workflows/recovery-validation.yml']
+permissions:
+  contents: read
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+jobs:
+  recover:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export interrupted source without applying it
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path dist/recovery -Force | Out-Null
+          git bundle create dist/recovery/source.bundle --all
+          if ($LASTEXITCODE -ne 0) { throw 'Source export failed.' }
+          @'
+          from pathlib import Path
+          import base64, lzma
+          text = ''.join(Path('.github/terminal-patch-%d.txt' % i).read_text().strip() for i in (1,2,3))
+          data = base64.b64decode(text[:len(text)//4*4])
+          decoder = lzma.LZMADecompressor()
+          try:
+              partial = decoder.decompress(data)
+              Path('dist/recovery/interrupted.patch').write_bytes(partial)
+              print('Recovered bytes:', len(partial), 'complete stream:', decoder.eof)
+          except lzma.LZMAError as error:
+              print('Prior payload cannot be recovered:', error)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Source inspection failed.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recovery-source-${{ github.run_id }}
+          path: dist/recovery/**
+          retention-days: 2
+          if-no-files-found: error
