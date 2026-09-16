@@ -33,10 +33,8 @@ jobs:
           assert len(data) == 41276, 'Incomplete transfer'
           patch = lzma.decompress(base64.b64decode(data, validate=True))
           assert hashlib.sha256(patch).hexdigest() == '719cfc38b083adecff0a8a037dacf9138fd1b8885605332ff59bf5ee5724c1be'
-          evidence = Path('dist/evidence')
-          evidence.mkdir(parents=True, exist_ok=True)
-          path = evidence / 'reviewed.patch'
-          path.write_bytes(patch)
+          evidence = Path('dist/evidence'); evidence.mkdir(parents=True, exist_ok=True)
+          path = evidence / 'reviewed.patch'; path.write_bytes(patch)
           subprocess.run(['git','apply','--check','--binary',str(path)], check=True)
           subprocess.run(['git','apply','--binary',str(path)], check=True)
           names = subprocess.check_output(['git','diff','--name-only']).decode().splitlines()
@@ -46,9 +44,6 @@ jobs:
             'Tests/VanillaNativeRecoveryTests.cs','Tests/VanillaRecoveryWatchdogTests.cs','scripts/test-recovery-native.ps1']
           subprocess.run(['git','add','--',*sorted(set(names))],check=True)
           subprocess.run(['git','-c','core.whitespace=cr-at-eol','diff','--cached','--check'],check=True)
-          subprocess.run(['git','diff','--cached','--stat'],check=True)
-          tree = subprocess.check_output(['git','write-tree']).decode().strip()
-          subprocess.run(['git','archive','--format=zip','--output=dist/evidence/candidate-source.zip',tree],check=True)
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Reviewed recovery source integration failed.' }
       - name: Restore dependencies
@@ -56,6 +51,41 @@ jobs:
         run: |
           nuget restore 4RTools.sln -NonInteractive
           if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+      - name: Add production fleet regressions and correct inert window visibility
+        shell: powershell
+        run: |
+          python .github/finish-recovery.py tests
+          if ($LASTEXITCODE -ne 0) { throw 'Regression insertion failed.' }
+      - name: Reproduce first-movement and unsupported-readiness defects
+        shell: powershell
+        run: |
+          $red = Join-Path $env:GITHUB_WORKSPACE 'dist/evidence/red'
+          $failedAsExpected = $false
+          try { ./scripts/build.ps1 -Configuration Debug -VanillaRelease -CacheRoot $red }
+          catch { $failedAsExpected = $true; Write-Host "Expected baseline regression failure: $($_.Exception.Message)" }
+          if (-not $failedAsExpected) { throw 'New regressions did not reproduce the observed defects.' }
+          $log = Get-ChildItem $red -Recurse -Filter tests-Debug.log | Sort-Object LastWriteTime | Select-Object -Last 1
+          if (-not $log) { throw 'No runtime regression output; a compile error is not an accepted reproduction.' }
+          $text = Get-Content $log.FullName -Raw
+          foreach ($name in @('First observed intermediate movement resets the deadline','Fleet tracks intermediate movement without a readiness field')) {
+            if (-not $text.Contains("FAIL $name")) { throw "Expected failing regression not found: $name" }
+          }
+          if (-not $text.Contains('Recovery watchdog: 64 passed; 2 failed.')) { throw 'Unexpected baseline failures.' }
+          'Two movement regressions reproduced before implementation correction.' | Out-File dist/evidence/reproduced.txt -Encoding utf8
+          $global:LASTEXITCODE = 0
+      - name: Fix verified position history and stage final source
+        shell: powershell
+        run: |
+          python .github/finish-recovery.py fix
+          if ($LASTEXITCODE -ne 0) { throw 'Production corrections failed.' }
+          git add Model/Vanilla/VanillaMovementWatchdog.cs Tests/VanillaRecoveryWatchdogTests.cs Tests/VanillaNativeRecoveryTests.cs
+          if ($LASTEXITCODE -ne 0) { throw 'Corrected source staging failed.' }
+          git -c core.whitespace=cr-at-eol diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'Corrected source validation failed.' }
+          git diff --cached --stat
+          $tree = git write-tree
+          git archive --format=zip --output=dist/evidence/candidate-source.zip $tree
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate source export failed.' }
       - name: Validate shipped profiles
         shell: powershell
         run: ./scripts/validate-vanilla-build-profiles.ps1
@@ -76,7 +106,7 @@ jobs:
         run: |
           git config user.name '4RTools engineering'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/terminal-patch-1.txt .github/terminal-patch-2.txt .github/terminal-patch-3.txt .github/recovery-final-1.txt .github/recovery-final-2.txt .github/recovery-final-3.txt .github/recovery-final-4.txt .github/recovery-final-5.txt .github/recovery-final-6.txt .github/workflows/recovery-validation.yml
+          git rm .github/terminal-patch-1.txt .github/terminal-patch-2.txt .github/terminal-patch-3.txt .github/recovery-final-1.txt .github/recovery-final-2.txt .github/recovery-final-3.txt .github/recovery-final-4.txt .github/recovery-final-5.txt .github/recovery-final-6.txt .github/finish-recovery.py .github/workflows/recovery-validation.yml
           if ($LASTEXITCODE -ne 0) { throw 'Temporary transport cleanup failed.' }
           git commit -m 'fix: recover stalled farming clients with a serialized position watchdog'
           if ($LASTEXITCODE -ne 0) { throw 'Validated source commit failed.' }
