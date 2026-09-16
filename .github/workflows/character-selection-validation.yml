@@ -28,9 +28,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Character-selection patch failed.' }
           git -c core.whitespace=cr-at-eol diff --check
           if ($LASTEXITCODE -ne 0) { throw 'Whitespace validation failed.' }
-          if (git grep -n -E 'ClickNormalized\(config\.Anchors\.(CharacterGrid|GameStart)' -- Model/Vanilla/VanillaReconnect.cs Model/Vanilla/VanillaStartupOrchestrator.cs) {
-            throw 'Fixed character-selection coordinate click remains in production path.'
-          }
+          $matches = & git grep -n -E 'ClickNormalized\(config\.Anchors\.(CharacterGrid|GameStart)' -- Model/Vanilla/VanillaReconnect.cs Model/Vanilla/VanillaStartupOrchestrator.cs 2>$null
+          $grepCode = $LASTEXITCODE
+          if ($grepCode -eq 0 -and $matches) { throw "Fixed character-selection coordinate click remains: $matches" }
+          if ($grepCode -ne 0 -and $grepCode -ne 1) { throw 'Coordinate guard grep failed.' }
+          $global:LASTEXITCODE = 0
       - name: Restore dependencies
         shell: powershell
         run: |
