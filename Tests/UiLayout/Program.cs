@@ -76,6 +76,8 @@ internal static class UiLayoutHarness
                 RunCase(main, recovery, 1920, 1020, 40, 1.50F, false);
                 RunCase(main, recovery, 1050, 700, 40, 1F, false);
                 RunCase(main, recovery, 1920, 1020, 4, 1F, false);
+                CheckCharacterDiscovery(main, recovery);
+                CheckCharacterEditor(main, recovery);
                 Call(main, "AssertSmokeBackgroundServicesInactive");
                 report.AppendLine("Background services: inactive; fleet polls=0; no game input or email enabled.");
             }
@@ -87,6 +89,56 @@ internal static class UiLayoutHarness
         File.WriteAllText(Path.Combine(output, "layout-report.txt"), report.ToString());
         Console.WriteLine(report.ToString());
         return failures.Count == 0 ? 0 : 1;
+    }
+
+    private static void CheckCharacterDiscovery(Form main, object recovery)
+    {
+        caseNumber++;
+        object fleet = Field(main, "integratedFleetMonitor");
+        Type type = app.GetType("_4RTools.Model.Vanilla.VanillaCharacterIdentity", true);
+        Array observed = Array.CreateInstance(type, 1);
+        object identity = Activator.CreateInstance(type, BindingFlags.Instance | BindingFlags.NonPublic, null,
+            new object[] { 99101, Guid.NewGuid(), DateTimeOffset.UtcNow, "Auto discovered mock", null, null }, null);
+        observed.SetValue(identity, 0);
+        fleet.GetType().GetField("characterCache", All).SetValue(fleet, observed);
+        Call(recovery, "DiscoverCharacters", false);
+        Call(recovery, "DiscoverCharacters", false);
+        DataGridView grid = (DataGridView)Field(recovery, "accounts");
+        var found = grid.Rows.Cast<DataGridViewRow>().Where(r => Convert.ToString(r.Cells["CharacterName"].Value) == "Auto discovered mock").ToArray();
+        Check(found.Length == 1, "Discovery added duplicate or missing character rows.");
+        if (found.Length == 1)
+        {
+            Check(Convert.ToString(found[0].Cells["Enabled"].Value) == "No", "Discovery enabled a new client.");
+            Check(Convert.ToString(found[0].Cells["Slot"].Value) == "—", "Unknown discovered slot silently became slot 1.");
+            Check(Convert.ToString(found[0].Cells["Secret"].Value) == "Not set", "Discovery populated a password.");
+            Check(Convert.ToString(found[0].Cells["AccountProxy"].Value) == "Not set", "Discovery guessed a proxy.");
+        }
+        Check(Field(recovery, "characterDiscoveryTimer") == null, "Explicit inert discovery started a background timer.");
+        SaveScreenshot(main, Path.Combine(output, "19-character-discovery.png"));
+        report.AppendLine("CASE 19 character discovery: one disabled row; unknown username/slot; no duplicate; no background observer.");
+    }
+
+    private static void CheckCharacterEditor(Form main, object recovery)
+    {
+        caseNumber++;
+        Type rowType = app.GetType("_4RTools.Model.Vanilla.VanillaReconnectAccount", true);
+        object row = Activator.CreateInstance(rowType);
+        Property(row, "Enabled", false); Property(row, "CharacterName", "Auto discovered mock");
+        Property(row, "CharacterSlot", null); Property(row, "ProxyNeedsConfiguration", true);
+        Type proxyType = app.GetType("_4RTools.Model.Vanilla.VanillaProxyRoute", true);
+        Type dialogType = app.GetType("_4RTools.Model.Vanilla.VanillaMinimalAccountDialog", true);
+        using (Form dialog = (Form)Activator.CreateInstance(dialogType, BindingFlags.Instance | BindingFlags.NonPublic, null,
+            new object[] { Field(recovery, "supervisor"), row, Enum.ToObject(proxyType, 0) }, null))
+        {
+            dialog.Show(main); Pump();
+            foreach (string name in new[] { "enabled", "label", "user", "slot", "character", "password", "proxy", "hotkey" })
+                Check(FullyVisible((Control)Field(dialog, name), dialog), "Character editor clipped field: " + name);
+            Check(((TextBox)Field(dialog, "slot")).Text == "", "Character editor invented slot 1.");
+            Check(((ComboBox)Field(dialog, "proxy")).SelectedIndex == -1, "Character editor invented proxy.");
+            SaveScreenshot(dialog, Path.Combine(output, "20-character-editor.png"));
+            dialog.Close();
+        }
+        report.AppendLine("CASE 20 character editor: all identity/credential fields visible; unavailable slot/proxy preserved.");
     }
 
     private static void ResizeNativeViewport(Form main, int width, int height)
@@ -125,6 +177,11 @@ internal static class UiLayoutHarness
             Pump();
             Call(main, "AssertSmokeBackgroundServicesInactive");
             DataGridView grid = (DataGridView)Field(recovery, "accounts");
+            string[] expectedColumns = { "Enabled", "Label", "User", "Slot", "CharacterName", "Hotkey", "Secret", "AccountProxy", "RuntimePid", "RuntimeStatus" };
+            Check(grid.Columns.Cast<DataGridViewColumn>().OrderBy(c => c.DisplayIndex).Select(c => c.Name).SequenceEqual(expectedColumns), name + ": character column order is wrong.");
+            Check(grid.Columns["Label"].HeaderText == "Description" && grid.Columns["CharacterName"].HeaderText == "Character name", name + ": character headers missing.");
+            Check(grid.Rows.Cast<DataGridViewRow>().All(r => !string.IsNullOrWhiteSpace(Convert.ToString(r.Cells["CharacterName"].Value))), name + ": saved character names missing from table.");
+            Check(Field(recovery, "characterDiscoveryTimer") == null, name + ": smoke mode started character discovery.");
             Control launcher = (Control)Field(recovery, "launchPath");
             Control box = grid.Parent;
             while (box != null && !(box is GroupBox)) box = box.Parent;
@@ -243,7 +300,8 @@ internal static class UiLayoutHarness
             object account = Activator.CreateInstance(type);
             Property(account, "Id", "layout-account-" + i);
             Property(account, "Enabled", i < 2);
-            Property(account, "Label", i == 0 ? "Priest - long account label to test fitting" : "Account " + (i + 1));
+            Property(account, "Label", i == 0 ? "Priest - long description to test fitting" : "Character " + (i + 1));
+            Property(account, "CharacterName", "Mock character " + (i + 1));
             Property(account, "UserName", i == 1 ? "long_username_for_layout_test" : "mock-user-" + (i + 1));
             Property(account, "CharacterSlot", i % 15 + 1);
             Property(account, "ResumeCtrl", false); Property(account, "ResumeAlt", true);

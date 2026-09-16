@@ -48,6 +48,7 @@ namespace _4RTools.Model.Vanilla
                 if (hardenedStartupRunning) throw new InvalidOperationException("A serialized startup sequence is already running.");
                 settings.Validate();
                 RebuildRuntimes();
+                AdoptExistingClients(false);
                 config = settings.Clone();
                 configured = config.Accounts.Where(a => a.Enabled).ToArray();
                 if (configured.Length == 0) throw new InvalidOperationException("Enable at least one account first.");
@@ -199,8 +200,17 @@ namespace _4RTools.Model.Vanilla
         {
             if (string.IsNullOrWhiteSpace(config.LaunchExecutable) || !File.Exists(config.LaunchExecutable))
                 throw new InvalidOperationException("Set the Vanilla launch executable before starting the supervisor.");
-            if (string.IsNullOrWhiteSpace(account.UserName) || string.IsNullOrWhiteSpace(account.ProtectedPassword))
-                throw new InvalidOperationException(account.Label + ": username/password is missing.");
+            string missing = MissingCharacterConfiguration(account);
+            if (missing != null) throw new InvalidOperationException(account.Label + ": " + missing + ".");
+            var alreadyRunning = GetVanillaProcesses();
+            try
+            {
+                if (alreadyRunning.Count >= 2)
+                    throw new InvalidOperationException("Two Vanilla clients are already running; no third client will be started.");
+                if (alreadyRunning.Any(p => CurrentCharacter(p.Id) == null))
+                    throw new InvalidOperationException("A running client has no verified character identity yet; no duplicate client will be started.");
+            }
+            finally { foreach (var process in alreadyRunning) process.Dispose(); }
 
             Runtime runtime;
             int resumeGeneration;
@@ -270,7 +280,7 @@ namespace _4RTools.Model.Vanilla
                     VanillaDebugLog.Write("STARTUP", account.Label + ": server dialog handled after visual detection.");
 
                     WaitForCharacterSurface(input, pid.Value, generation);
-                    int slot = Math.Max(1, Math.Min(15, account.CharacterSlot)) - 1;
+                    int slot = account.RequiredCharacterSlot() - 1;
                     int col = slot % 5, row = slot / 5;
                     input.Activate();
                     BriefPause(generation, 120);
@@ -567,6 +577,10 @@ namespace _4RTools.Model.Vanilla
             {
                 if (testRunning) throw new InvalidOperationException("Stop the current diagnostic test before starting the supervisor.");
                 if (supervisor.IsHardenedStartupRunning) throw new InvalidOperationException("Sequential startup is already running.");
+                if (accountCatalogStore == null) throw new InvalidOperationException("The saved character catalog could not be loaded; no clients will be started.");
+                autosaveTimer?.Stop();
+                DiscoverCharacters(false);
+                SynchronizeSupervisorAccountsFromCatalog();
                 SynchronizeDerivedUiValues();
                 ReadTop();
                 settings.LaunchArguments = string.Empty;

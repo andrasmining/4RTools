@@ -28,6 +28,7 @@ namespace _4RTools.Model.Vanilla
         public string Error { get; internal set; }
         public bool Ready { get; internal set; }
         internal VanillaPositionSample Position { get; set; }
+        internal VanillaCharacterIdentity Identity { get; set; }
 
         public decimal? HpPercent { get { return Percent(CurrentHP, MaxHP); } }
         public decimal? SpPercent { get { return Percent(CurrentSP, MaxSP); } }
@@ -110,6 +111,7 @@ namespace _4RTools.Model.Vanilla
                 }
                 var clients = live.Select(pid => readers[pid].Poll(clock.Elapsed)).ToArray();
                 PublishPositions(clients);
+                PublishCharacters(clients);
                 return clients;
             }
         }
@@ -128,6 +130,7 @@ namespace _4RTools.Model.Vanilla
                 foreach (IProcessMetadata process in processes) process.Dispose();
                 foreach (IClientReader reader in readers.Values) reader.Dispose();
                 readers.Clear();
+                System.Threading.Volatile.Write(ref characterCache, new VanillaCharacterIdentity[0]);
                 const string operation = "Process.GetProcessesByName(Vanilla MMO)";
                 int? nativeCode = (ex as Win32Exception)?.NativeErrorCode
                     ?? (ex as MemoryObservationException)?.NativeErrorCode;
@@ -183,6 +186,7 @@ namespace _4RTools.Model.Vanilla
                 disposed = true;
                 foreach (var reader in readers.Values) reader.Dispose();
                 readers.Clear();
+                System.Threading.Volatile.Write(ref characterCache, new VanillaCharacterIdentity[0]);
                 clock.Stop();
             }
         }
@@ -269,6 +273,7 @@ namespace _4RTools.Model.Vanilla
                         state.X.Validation == StateValidation.Valid && state.Y.Validation == StateValidation.Valid,
                         state.Error, state.LastMovementAtUtc),
                     CharacterName = name,
+                    Identity = VanillaCharacterIdentity.FromState(state),
                     CurrentHP = state.CurrentHP.IsAvailable ? (uint?)state.CurrentHP.Value : null,
                     MaxHP = state.MaxHP.IsAvailable ? (uint?)state.MaxHP.Value : null,
                     CurrentSP = state.CurrentSP.IsAvailable ? (uint?)state.CurrentSP.Value : null,

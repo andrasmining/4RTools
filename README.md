@@ -88,6 +88,25 @@ Progress and failures appear in account status and logs. Movement confirms only
 movement: it is not proof of combat, and a character fighting without moving can
 fail this deliberately position-based check.
 
+## Character roster and automatic discovery
+
+The recovery table is one row per **character**, not per login account. Columns
+are Enabled, **Description, Username, Slot, Character name**, then hotkey,
+password, proxy, PID and status. Multiple characters on one username remain
+independent saved profiles; at most two may be enabled.
+
+Fresh verified running characters are discovered at startup and as the existing
+fleet reader receives observations. Missing characters are added once, disabled.
+Existing descriptions, passwords, configured slots, enabled flags and proxies
+are preserved. Processes are matched by character identity, never PID order.
+
+**Current mapping limit:** the shipped profile verifies character names, but not
+login usernames or one-based character slots. These auto-fill only when verified
+mappings supply them; otherwise they remain unknown/editable. Existing configured
+values are retained. New discovered rows therefore need any missing login details
+as well as password/proxy before unattended restart can be enabled. A successful
+tool-owned configured login can learn the actual name for that exact legacy row.
+
 ## State validity and boundaries
 
 Shipped build profiles are matched to the executable fingerprint. The current

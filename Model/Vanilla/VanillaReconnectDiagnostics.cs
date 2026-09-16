@@ -179,7 +179,7 @@ namespace _4RTools.Model.Vanilla
                                 SelectDetectedGameServer(input, discoveredPid.Value, config.StageDelayMs, "TEST " + account.Label + ": ");
                                 break;
                             case VanillaReconnectTestStep.SelectCharacter:
-                                int slot = Math.Max(1, Math.Min(15, account.CharacterSlot)) - 1;
+                                int slot = account.RequiredCharacterSlot() - 1;
                                 int col = slot % 5, row = slot / 5;
                                 input.ClickNormalized(config.Anchors.CharacterGridX + col * config.Anchors.CharacterStepX,
                                     config.Anchors.CharacterGridY + row * config.Anchors.CharacterStepY);

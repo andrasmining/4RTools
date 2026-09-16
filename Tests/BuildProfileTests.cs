@@ -350,8 +350,8 @@ namespace Vanilla.Diagnostics.Tests
             foreach (VanillaField field in Enum.GetValues(typeof(VanillaField)))
             {
                 var mapping = new VanillaFieldMapping { Module = "VanillaTestClient.exe", Address = (0x100 + (int)field * 0x100).ToString(), Evidence = "Simulated verified field for offline tests." };
-                if (field == VanillaField.X || field == VanillaField.Y) mapping.Encoding = VanillaValueEncoding.Int32;
-                else if (field == VanillaField.CharacterName || field == VanillaField.Map) { mapping.Encoding = VanillaValueEncoding.Utf8; mapping.ByteCount = 32; }
+                if (field == VanillaField.X || field == VanillaField.Y || field == VanillaField.CharacterSlot) mapping.Encoding = VanillaValueEncoding.Int32;
+                else if (field == VanillaField.CharacterName || field == VanillaField.Map || field == VanillaField.UserName) { mapping.Encoding = VanillaValueEncoding.Utf8; mapping.ByteCount = 32; }
                 else if (field == VanillaField.AutobattleEnabled || field == VanillaField.ClientReady || field == VanillaField.Loading) mapping.Encoding = VanillaValueEncoding.Boolean8;
                 else if (field == VanillaField.StatusEffects) { mapping.Encoding = VanillaValueEncoding.UInt32Array; mapping.ByteCount = 8; }
                 profile.MemoryMap.Fields.Add(field, mapping); profile.VerifiedFields.Add(field);
@@ -376,12 +376,13 @@ namespace Vanilla.Diagnostics.Tests
                 foreach (var pair in this.profile.MemoryMap.Fields)
                 {
                     var bytes = new byte[pair.Value.ReadSize];
-                    if (pair.Key == VanillaField.CharacterName || pair.Key == VanillaField.Map)
+                    if (pair.Key == VanillaField.CharacterName || pair.Key == VanillaField.Map || pair.Key == VanillaField.UserName)
                         Array.Copy(Encoding.UTF8.GetBytes(pair.Key == VanillaField.Map ? "test_map" : "Offline character"), bytes, pair.Key == VanillaField.Map ? 8 : 17);
                     memory.Put(moduleBase + VanillaMemoryMap.ParseAddress(pair.Value.Address), bytes);
                 }
                 Put(VanillaField.CurrentHP, 90); Put(VanillaField.MaxHP, 100); Put(VanillaField.CurrentSP, 20); Put(VanillaField.MaxSP, 100);
                 Put(VanillaField.X, 10); Put(VanillaField.Y, 20); Put(VanillaField.ActionState, 7); Put(VanillaField.ClientReady, 1);
+                if (this.profile.MemoryMap.Fields.ContainsKey(VanillaField.CharacterSlot)) Put(VanillaField.CharacterSlot, 1);
                 memory.Put(moduleBase + VanillaMemoryMap.ParseAddress(this.profile.MemoryMap.Fields[VanillaField.StatusEffects].Address), BitConverter.GetBytes(10u).Concat(BitConverter.GetBytes(20u)).ToArray());
                 source = new MemoryStateSource(memory, this.profile.MemoryMap); adapter = new VanillaStateAdapter(profile, IdentityValue());
             }

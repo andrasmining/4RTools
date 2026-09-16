@@ -14,7 +14,6 @@ namespace _4RTools.Model.Vanilla
         {
             if (minimalAccountButtonsInstalled) return;
             minimalAccountButtonsInstalled = true;
-
             ReplaceAccountButton("Add", AddAccountMinimal);
             ReplaceAccountButton("Edit", EditAccountMinimal);
             ReplaceAccountButton("Remove", RemoveAccountMinimal);
@@ -34,73 +33,63 @@ namespace _4RTools.Model.Vanilla
             parent.Controls.Add(replacement);
             parent.Controls.SetChildIndex(replacement, index);
             help.SetToolTip(replacement, text == "Add"
-                ? "Add another saved Vanilla account profile. Any number may be stored; at most two may be enabled at once."
-                : text == "Edit"
-                    ? "Edit the selected account, including enabled state, proxy, character slot, password and resume hotkey."
-                    : "Remove the selected saved account profile.");
+                ? "Save another character, including another slot on the same username. At most two characters may be enabled."
+                : text == "Edit" ? "Edit description, username, slot, character name, password, proxy and resume hotkey."
+                : "Remove the selected character profile; a running client is left untouched.");
         }
 
         private void AddAccountMinimal()
         {
-            if (accountCatalog == null) return;
-            var account = new VanillaReconnectAccount
-            {
-                Label = "Client " + (accountCatalog.Count + 1),
-                Enabled = accountCatalog.Count(a => a.Enabled) < 2
-            };
-            VanillaProxyRoute route = settings.Proxy;
-            using (var dialog = new VanillaMinimalAccountDialog(supervisor, account, route))
-            {
-                if (dialog.ShowDialog(this) != DialogResult.OK) return;
-                if (!CanAcceptEnabledState(dialog.Account, null)) return;
-                accountCatalog.Add(dialog.Account);
-                VanillaAccountProxyPreferences.Set(dialog.Account.Id, dialog.ProxyRoute);
-                PersistCatalogAndRefresh("Account added");
-            }
+            if (accountCatalog == null || accountCatalogStore == null) return;
+            EditCharacter(new VanillaReconnectAccount
+            { Label = "Character " + (accountCatalog.Count + 1), Enabled = false, CharacterSlot = null, ProxyNeedsConfiguration = true }, null);
         }
 
         private void EditAccountMinimal()
         {
-            VanillaReconnectAccount selected = SelectedCatalogAccount();
-            if (selected == null) return;
-            VanillaProxyRoute route = VanillaAccountProxyPreferences.Get(selected.Id, settings.Proxy);
-            using (var dialog = new VanillaMinimalAccountDialog(supervisor, selected.Clone(), route))
-            {
-                if (dialog.ShowDialog(this) != DialogResult.OK) return;
-                if (!CanAcceptEnabledState(dialog.Account, selected.Id)) return;
-                int index = accountCatalog.FindIndex(a => string.Equals(a.Id, selected.Id, StringComparison.OrdinalIgnoreCase));
-                if (index < 0) return;
-                accountCatalog[index] = dialog.Account;
-                VanillaAccountProxyPreferences.Set(dialog.Account.Id, dialog.ProxyRoute);
-                settings.Proxy = dialog.ProxyRoute;
-                PersistCatalogAndRefresh("Account saved");
-            }
+            var selected = SelectedCatalogAccount();
+            if (selected != null && accountCatalogStore != null) EditCharacter(selected.Clone(), selected.Id);
         }
 
-        private bool CanAcceptEnabledState(VanillaReconnectAccount candidate, string replacingId)
+        private void EditCharacter(VanillaReconnectAccount copy, string replacingId)
         {
-            if (candidate == null || !candidate.Enabled) return true;
-            int otherEnabled = (accountCatalog ?? new List<VanillaReconnectAccount>()).Count(a => a.Enabled
-                && (string.IsNullOrWhiteSpace(replacingId) || !string.Equals(a.Id, replacingId, StringComparison.OrdinalIgnoreCase)));
-            if (otherEnabled < 2) return true;
-            MessageBox.Show(this,
-                "Only two Vanilla accounts can be enabled at the same time. Save this profile as disabled, or disable another profile first.",
-                "Two active clients maximum", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return false;
+            characterEditorOpen = true;
+            try
+            {
+                using (var dialog = new VanillaMinimalAccountDialog(supervisor, copy,
+                    VanillaAccountProxyPreferences.Get(copy.Id, settings.Proxy)))
+                {
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    var candidate = accountCatalog.Select(a => a.Clone()).ToList();
+                    int index = candidate.FindIndex(a => a.Id == replacingId);
+                    if (index < 0) candidate.Add(dialog.Account); else candidate[index] = dialog.Account;
+                    VanillaCharacterRoster.Validate(candidate);
+                    accountCatalogStore.Save(candidate);
+                    if (!dialog.Account.ProxyNeedsConfiguration)
+                        VanillaAccountProxyPreferences.Set(dialog.Account.Id, dialog.ProxyRoute);
+                    accountCatalog = candidate;
+                    PersistCatalogAndRefresh("Character saved");
+                }
+            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Character", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            finally { characterEditorOpen = false; }
         }
 
         private void RemoveAccountMinimal()
         {
-            VanillaReconnectAccount selected = SelectedCatalogAccount();
-            if (selected == null || accountCatalog == null) return;
-            if (accountCatalog.Count <= 1)
+            var selected = SelectedCatalogAccount();
+            if (selected == null || accountCatalog == null || accountCatalogStore == null) return;
+            try
             {
-                MessageBox.Show(this, "Keep at least one account profile.", "Accounts", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                var candidate = accountCatalog.Where(a => a.Id != selected.Id).Select(a => a.Clone()).ToList();
+                VanillaCharacterRoster.Validate(candidate);
+                accountCatalogStore.Save(candidate);
+                if (!string.IsNullOrWhiteSpace(selected.CharacterName)) ignoredDiscoveredCharacters.Add(selected.CharacterName);
+                accountCatalog = candidate;
+                VanillaAccountProxyPreferences.Remove(selected.Id);
+                PersistCatalogAndRefresh("Character removed");
             }
-            accountCatalog.RemoveAll(a => string.Equals(a.Id, selected.Id, StringComparison.OrdinalIgnoreCase));
-            VanillaAccountProxyPreferences.Remove(selected.Id);
-            PersistCatalogAndRefresh("Account removed");
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Characters", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
     }
 
@@ -108,16 +97,16 @@ namespace _4RTools.Model.Vanilla
     {
         private readonly VanillaReconnectSupervisor supervisor;
         private readonly CheckBox enabled = new CheckBox { Text = "Enabled", AutoSize = true };
-        private readonly TextBox label = new TextBox { Dock = DockStyle.Fill };
-        private readonly TextBox user = new TextBox { Dock = DockStyle.Fill };
+        private readonly TextBox label = new TextBox { Dock = DockStyle.Fill, MaxLength = 80 };
+        private readonly TextBox user = new TextBox { Dock = DockStyle.Fill, MaxLength = 128 };
+        private readonly TextBox slot = new TextBox { Width = 80, MaxLength = 2 };
+        private readonly ComboBox character = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDown, MaxLength = 80 };
         private readonly TextBox password = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
-        private readonly NumericUpDown slot = new NumericUpDown { Minimum = 1, Maximum = 15, Width = 80 };
         private readonly ComboBox proxy = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
         private readonly TextBox hotkey = new TextBox { Width = 160, ReadOnly = true };
         private readonly ToolTip help = new ToolTip { ShowAlways = true, AutoPopDelay = 30000 };
         private int key;
-        private bool ctrl, alt, shift;
-
+        private bool ctrl, alt, shift, passwordEdited, passwordUnavailable;
         public VanillaReconnectAccount Account { get; private set; }
         public VanillaProxyRoute ProxyRoute { get; private set; }
 
@@ -126,121 +115,118 @@ namespace _4RTools.Model.Vanilla
             this.supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
             Account = account ?? throw new ArgumentNullException(nameof(account));
             ProxyRoute = proxyRoute;
-            Text = "Account";
+            Text = "Character";
             Font = new Font("Segoe UI", 9F);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            ClientSize = new Size(470, 355);
+            MaximizeBox = MinimizeBox = false;
+            ClientSize = new Size(490, 375);
             KeyPreview = true;
             Build();
-
             enabled.Checked = account.Enabled;
             label.Text = account.Label;
             user.Text = account.UserName;
-            slot.Value = Math.Max(slot.Minimum, Math.Min(slot.Maximum, account.CharacterSlot));
+            slot.Text = account.CharacterSlot?.ToString() ?? string.Empty;
+            foreach (string name in supervisor.ObservedCharacters().Where(i => i != null && i.IsFresh(DateTimeOffset.UtcNow))
+                .Select(i => i.CharacterName).Distinct(StringComparer.Ordinal)) character.Items.Add(name);
+            character.Text = account.CharacterName;
+            character.SelectionChangeCommitted += (s, e) => FillSelectedIdentity();
             proxy.DataSource = Enum.GetValues(typeof(VanillaProxyRoute));
-            proxy.SelectedItem = proxyRoute;
-            key = account.ResumeKey;
-            ctrl = account.ResumeCtrl;
-            alt = account.ResumeAlt;
-            shift = account.ResumeShift;
+            if (account.ProxyNeedsConfiguration) proxy.SelectedIndex = -1; else proxy.SelectedItem = proxyRoute;
+            key = account.ResumeKey; ctrl = account.ResumeCtrl; alt = account.ResumeAlt; shift = account.ResumeShift;
             UpdateHotkey();
-            try { password.Text = supervisor.GetPassword(account); } catch { password.Text = string.Empty; }
+            try { password.Text = supervisor.GetPassword(account); }
+            catch { passwordUnavailable = true; }
+            password.TextChanged += (s, e) => passwordEdited = true;
             hotkey.KeyDown += CaptureHotkey;
+        }
+
+        private void FillSelectedIdentity()
+        {
+            var matches = supervisor.ObservedCharacters().Where(i => i != null && i.IsFresh(DateTimeOffset.UtcNow)
+                && VanillaCharacterRoster.Same(character.Text, i.CharacterName)).ToArray();
+            if (matches.Length != 1) return;
+            if (string.IsNullOrWhiteSpace(user.Text) && matches[0].UserName != null) user.Text = matches[0].UserName;
+            if (string.IsNullOrWhiteSpace(slot.Text) && matches[0].CharacterSlot.HasValue) slot.Text = matches[0].CharacterSlot.Value.ToString();
         }
 
         private void Build()
         {
-            var table = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 2, RowCount = 8 };
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            var table = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 2, RowCount = 9 };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 125));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 7; i++) table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            for (int i = 0; i < 8; i++) table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
             AddRow(table, 0, string.Empty, enabled);
-            AddRow(table, 1, "Account", label);
+            AddRow(table, 1, "Description", label);
             AddRow(table, 2, "Username", user);
-            AddRow(table, 3, "Password", password);
-            AddRow(table, 4, "Character slot", slot);
-            AddRow(table, 5, "Proxy", proxy);
-            AddRow(table, 6, "Resume hotkey", hotkey);
-
-            var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Anchor = AnchorStyles.Right };
+            AddRow(table, 3, "Slot", slot);
+            AddRow(table, 4, "Character name", character);
+            AddRow(table, 5, "Password", password);
+            AddRow(table, 6, "Proxy", proxy);
+            AddRow(table, 7, "Resume hotkey", hotkey);
+            var buttons = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.Right };
             var save = new Button { Text = "Save", AutoSize = true };
             var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
-            save.Click += Save;
-            buttons.Controls.Add(save);
-            buttons.Controls.Add(cancel);
-            table.Controls.Add(buttons, 1, 7);
-            Controls.Add(table);
-            AcceptButton = save;
-            CancelButton = cancel;
-
-            help.SetToolTip(enabled, "Enabled profiles are supervised/started. At most two profiles may be enabled at once; any number may be saved.");
-            help.SetToolTip(proxy, "Proxy route used for this account only.");
-            help.SetToolTip(hotkey, "Click here and press the key combination used to resume Vanilla auto-battle after login.");
-            help.SetToolTip(password, "Stored with Windows DPAPI for this Windows user and never written to logs.");
+            save.Click += Save; buttons.Controls.Add(save); buttons.Controls.Add(cancel);
+            table.Controls.Add(buttons, 1, 8); Controls.Add(table); AcceptButton = save; CancelButton = cancel;
+            help.SetToolTip(enabled, "Enable at most two character profiles. Multiple rows may use the same login account.");
+            help.SetToolTip(label, "Your description; it is not used to identify the running character.");
+            help.SetToolTip(character, "Saved expected character. The list contains freshly verified running character names.");
+            help.SetToolTip(user, "Filled automatically only from verified memory. Without a verified username mapping, the saved username remains editable.");
+            help.SetToolTip(slot, "1-based slot from 1 to 15; blank means unknown, not slot 1. Auto-filled only when verified memory provides it.");
+            help.SetToolTip(proxy, "Choose this character's proxy. Discovery never guesses this setting.");
+            help.SetToolTip(hotkey, "Press the key combination used to resume Vanilla Autobattle after login.");
+            help.SetToolTip(password, "Stored with Windows DPAPI for this Windows user. Discovery never reads or replaces passwords.");
         }
 
         private static void AddRow(TableLayoutPanel table, int row, string caption, Control control)
         {
-            if (!string.IsNullOrEmpty(caption))
-                table.Controls.Add(new Label { Text = caption, AutoSize = true, Margin = new Padding(0, 8, 8, 0) }, 0, row);
-            control.Margin = new Padding(0, 3, 0, 3);
-            table.Controls.Add(control, 1, row);
+            if (caption.Length > 0) table.Controls.Add(new Label { Text = caption, AutoSize = true, Margin = new Padding(0, 8, 8, 0) }, 0, row);
+            control.Margin = new Padding(0, 3, 0, 3); table.Controls.Add(control, 1, row);
         }
-
         private void CaptureHotkey(object sender, KeyEventArgs e)
         {
-            Keys candidate = e.KeyCode;
-            if (candidate == Keys.ControlKey || candidate == Keys.ShiftKey || candidate == Keys.Menu) return;
-            key = (int)candidate;
-            ctrl = e.Control;
-            alt = e.Alt;
-            shift = e.Shift;
-            UpdateHotkey();
-            e.SuppressKeyPress = true;
-            e.Handled = true;
+            if (e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.ShiftKey || e.KeyCode == Keys.Menu) return;
+            key = (int)e.KeyCode; ctrl = e.Control; alt = e.Alt; shift = e.Shift;
+            UpdateHotkey(); e.SuppressKeyPress = e.Handled = true;
         }
-
         private void UpdateHotkey()
-        {
-            var parts = new List<string>();
-            if (ctrl) parts.Add("Ctrl");
-            if (alt) parts.Add("Alt");
-            if (shift) parts.Add("Shift");
-            parts.Add(((Keys)key).ToString());
-            hotkey.Text = string.Join("+", parts);
-        }
+        { hotkey.Text = (ctrl ? "Ctrl+" : "") + (alt ? "Alt+" : "") + (shift ? "Shift+" : "") + ((Keys)key); }
 
         private void Save(object sender, EventArgs e)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(label.Text)) throw new ArgumentException("Enter an account name.");
-                if (string.IsNullOrWhiteSpace(user.Text)) throw new ArgumentException("Enter the Vanilla username.");
-                if (string.IsNullOrEmpty(password.Text)) throw new ArgumentException("Enter the password.");
-                if (!(proxy.SelectedItem is VanillaProxyRoute)) throw new ArgumentException("Select a proxy route.");
-
-                Account.Enabled = enabled.Checked;
-                Account.Label = label.Text.Trim();
-                Account.UserName = user.Text.Trim();
-                Account.ProtectedPassword = supervisor.ProtectPassword(password.Text);
-                Account.CharacterSlot = (int)slot.Value;
-                Account.ResumeKey = key;
-                Account.ResumeCtrl = ctrl;
-                Account.ResumeAlt = alt;
-                Account.ResumeShift = shift;
-                ProxyRoute = (VanillaProxyRoute)proxy.SelectedItem;
-                DialogResult = DialogResult.OK;
-                Close();
+                int parsed;
+                if (!string.IsNullOrWhiteSpace(slot.Text) && (!int.TryParse(slot.Text, out parsed) || parsed < 1 || parsed > 15))
+                    throw new ArgumentException("Slot must be 1 to 15, or blank if unknown.");
+                var candidate = Account.Clone();
+                candidate.Enabled = enabled.Checked; candidate.Label = label.Text.Trim();
+                candidate.UserName = user.Text.Trim(); candidate.CharacterName = character.Text.Trim();
+                candidate.CharacterSlot = string.IsNullOrWhiteSpace(slot.Text) ? (int?)null : int.Parse(slot.Text);
+                candidate.ProxyNeedsConfiguration = !(proxy.SelectedItem is VanillaProxyRoute);
+                // Preserve an inaccessible DPAPI value on a disabled row unless explicitly replaced.
+                if (!passwordUnavailable || passwordEdited) candidate.ProtectedPassword = string.IsNullOrEmpty(password.Text)
+                    ? string.Empty : supervisor.ProtectPassword(password.Text);
+                if (!VanillaCharacterRoster.Same(candidate.UserName, Account.UserName) && !passwordEdited
+                    && !string.IsNullOrWhiteSpace(Account.ProtectedPassword))
+                    throw new ArgumentException("Enter the password for the changed username; the old password will not be reused.");
+                candidate.ResumeKey = key; candidate.ResumeCtrl = ctrl; candidate.ResumeAlt = alt; candidate.ResumeShift = shift;
+                if (key < 8 || key > 254) throw new ArgumentException("Choose a valid resume hotkey.");
+                VanillaCharacterRoster.Validate(new[] { candidate });
+                if (candidate.Enabled)
+                {
+                    string missing = VanillaReconnectSupervisor.MissingCharacterConfiguration(candidate);
+                    if (missing != null || (passwordUnavailable && !passwordEdited))
+                        throw new ArgumentException((missing ?? "Enter this Windows user's password") + ". Save as disabled until configured.");
+                }
+                if (!candidate.ProxyNeedsConfiguration) ProxyRoute = (VanillaProxyRoute)proxy.SelectedItem;
+                Account = candidate; DialogResult = DialogResult.OK; Close();
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, "Account", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Character", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
+        protected override void Dispose(bool disposing)
+        { if (disposing) help.Dispose(); base.Dispose(disposing); }
     }
 }

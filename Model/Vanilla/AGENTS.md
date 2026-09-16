@@ -13,7 +13,7 @@ The Vanilla workspace is functionally dense, so keep its visible UI deliberately
 - On normal desktop widths, the Recovery & relog tab should use approximately two thirds of its width for launcher/actions/accounts and one third for the reconnect log. Stack only on genuinely narrow windows or when enlarged text cannot fit both panes readably.
 - Do not keep a separate large recovery-status panel when the same state can be expressed beside the corresponding account. Put compact PID/state information in the account table and keep verbose detail in hover text/logging.
 - The account table is the primary recovery-management surface. Reserve room for at least four account rows plus roughly one empty-row worth of breathing room. Let it consume available vertical space and show all saved profiles that fit; use an internal vertical scrollbar only when the profile list exceeds the available pane.
-- All account columns must remain inside the visible table. Measure compact fields and share remaining width among Account, Username and Status. Do not retain stale fill widths from the larger legacy layout.
+- All account columns must remain inside the visible table. Measure compact fields and share remaining width among Description, Username, Character name and Status. Do not retain stale fill widths from the larger legacy layout.
 - Any number of account profiles may be saved persistently, but at most two profiles may be enabled/actively supervised at once. Preserve the existing two-active-client recovery/runtime limit.
 - Account-specific settings belong in the account row/edit dialog. Proxy is account-specific and visible in the table; edit it through the account editor. Do not add a second selected-account proxy control below the table.
 - Do not expose redundant one-off actions such as a separate `Run login now` button when the normal supervisor/test flow already owns login/recovery behavior.
@@ -27,3 +27,8 @@ Use the existing standard Windows GitHub Actions runners for build, test and ren
 Preserve the native mock-data harness's checks for full-width embedding, column visibility, pane ratio, toolbar spacing, live-card fields, large profile lists, scrolling, tab selection and resize/text-size transitions. Add a regression assertion when a screenshot reveals a missed defect. Do not silently skip or weaken a failing check just to publish. Keep the release gated on these tests.
 
 Report actual Windows mock-data UI results separately from live gameplay/RDP testing. The harness must keep game observation, input, automatic startup, email and network update services inactive; test data must never be real credentials or user profiles.
+
+The table is a character roster: Description, Username, Slot, Character name,
+then the remaining fields. Multiple characters may share one username; at most
+two enabled rows. Unknown slots remain blank, not slot 1. Auto-discovered rows
+stay disabled. Native UI checks must cover discovery and the character editor.

@@ -483,3 +483,24 @@ login, verified Autobattle movement and minimization. Recover only the affected
 client; simultaneous failures remain sequential. Failure/backoff releases the
 lease without pretending the failed attempt succeeded. Verify process identity
 and cancellation before close/termination, and never treat denied access as exit.
+
+
+## Character roster and identity discovery
+
+The recovery table is a CHARACTER roster, not one row per login account. Keep
+Description, Username, Slot and Character name in that order after Enabled,
+then existing hotkey/password/proxy/PID/status fields. Several rows may share
+one username; at most two rows may be enabled. Preserve row IDs, encrypted
+passwords and proxy associations. Keep historical JSON names for migration.
+
+Discover running characters at startup and as fresh verified observations arrive.
+Add missing characters once, disabled. Never guess passwords, proxy, username or
+slot. Match processes by independently verified character identity, not PID order,
+description or username alone. Ambiguous matches remain unbound. Only populate
+fields supported by verified memory mappings. The current profile verifies names
+but not login usernames or slots: unknown fields stay unknown/editable. A name
+verified after this tool's own successful configured login can enrich that exact
+row, never transfer credentials to another character. Passive discovery must not
+cancel recovery; edits, disabling, character/session replacement, STOP and disposal
+must invalidate stale ownership. Cover migration, deduplication, multiple chars
+per username, null slots, enabled limits and ownership in regression/native UI tests.

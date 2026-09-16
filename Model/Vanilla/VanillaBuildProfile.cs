@@ -189,6 +189,9 @@ namespace _4RTools.Model.Vanilla
             ValidatePosition(state, VanillaField.X);
             ValidatePosition(state, VanillaField.Y);
             ValidateText(state, VanillaField.CharacterName);
+            ValidateText(state, VanillaField.UserName);
+            if (state.CharacterSlot.IsAvailable && (state.CharacterSlot.Value < 1 || state.CharacterSlot.Value > 15))
+                Invalid(state, VanillaField.CharacterSlot, "Character slot must be a verified one-based value from 1 to 15.");
             ValidateText(state, VanillaField.Map);
             result.HealthValidated = Valid(state, VanillaField.CurrentHP) && Valid(state, VanillaField.MaxHP);
             result.SpValidated = Valid(state, VanillaField.CurrentSP) && Valid(state, VanillaField.MaxSP);

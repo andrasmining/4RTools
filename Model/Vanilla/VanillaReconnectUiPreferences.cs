@@ -70,7 +70,14 @@ namespace _4RTools.Model.Vanilla
             simplifiedRecoveryUiInstalled = true;
 
             accountCatalogStore = new VanillaAccountCatalogStore();
-            accountCatalog = accountCatalogStore.Load(settings.Accounts);
+            try { accountCatalog = accountCatalogStore.Load(settings.Accounts); }
+            catch (Exception ex)
+            {
+                accountCatalogStore = null; // Preserve the damaged/future file; disable edits and discovery writes.
+                accountCatalog = settings.Accounts.Select(a => a.Clone()).ToList();
+                VanillaDebugLog.Write("SETTINGS", "Character catalog unavailable; no fallback will overwrite it: " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Character catalog could not be loaded", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
             VanillaAccountCatalogStore.NormalizeEnabledLimit(accountCatalog);
             SynchronizeSupervisorAccountsFromCatalog();
 
@@ -94,6 +101,7 @@ namespace _4RTools.Model.Vanilla
             SynchronizeDerivedUiValues();
             HookAutosave();
             RefreshAccountGridFromCatalog();
+            InstallCharacterDiscovery();
             supervisor.Updated += AccountRuntimeUpdated;
             ShowSaveToast("Auto-save on", false);
         }
@@ -101,7 +109,7 @@ namespace _4RTools.Model.Vanilla
         private void InstallAccountColumns()
         {
             foreach (VanillaReconnectAccount account in accountCatalog ?? Enumerable.Empty<VanillaReconnectAccount>())
-                VanillaAccountProxyPreferences.Ensure(account.Id, settings.Proxy);
+                if (!account.ProxyNeedsConfiguration) VanillaAccountProxyPreferences.Ensure(account.Id, settings.Proxy);
 
             if (!accounts.Columns.Contains("AccountProxy"))
             {
@@ -134,7 +142,7 @@ namespace _4RTools.Model.Vanilla
                 });
             }
             help.SetToolTip(accounts,
-                "Saved Vanilla account profiles. Double-click or Edit to change credentials, slot, proxy and hotkey. Any number may be saved; at most two may be enabled. Runtime PID/status is shown here; hover Status for full detail.");
+                "One row per character, including multiple characters on one username. At most two enabled rows. Running characters are discovered from verified memory. Unknown username/slot stay blank until verified or configured. Double-click to edit; passwords and proxies are never guessed.");
         }
 
         private void AccountRuntimeUpdated()
@@ -161,7 +169,7 @@ namespace _4RTools.Model.Vanilla
                 foreach (VanillaReconnectAccount account in accountCatalog)
                 {
                     int row = accounts.Rows.Add(account.Enabled ? "Yes" : "No", account.Label, account.UserName,
-                        account.CharacterSlot, account.HotkeyText,
+                        account.CharacterSlot.HasValue ? (object)account.CharacterSlot.Value : "—", account.CharacterName, account.HotkeyText,
                         string.IsNullOrWhiteSpace(account.ProtectedPassword) ? "Not set" : "Encrypted");
                     accounts.Rows[row].Tag = account.Id;
                     if (!string.IsNullOrWhiteSpace(selectedId)
@@ -211,22 +219,34 @@ namespace _4RTools.Model.Vanilla
                 string id = row.Tag as string;
                 if (string.IsNullOrWhiteSpace(id)) continue;
                 if (accounts.Columns.Contains("AccountProxy"))
-                    row.Cells["AccountProxy"].Value = VanillaAccountProxyPreferences.Ensure(id, settings.Proxy).ToString();
+                {
+                    var profile = accountCatalog.FirstOrDefault(a => a.Id == id);
+                    row.Cells["AccountProxy"].Value = profile != null && profile.ProxyNeedsConfiguration ? "Not set"
+                        : VanillaAccountProxyPreferences.Ensure(id, settings.Proxy).ToString();
+                }
+                var character = accountCatalog.FirstOrDefault(a => a.Id == id);
+                var observed = character == null ? null : VanillaCharacterRoster.FindUnique(character, supervisor.ObservedCharacters(),
+                    supervisor.ObservedCharacters().Where(i => i != null).Select(i => i.ProcessId), DateTimeOffset.UtcNow);
+                row.Cells["CharacterName"].ToolTipText = observed != null ? "Live verified character: " + observed.CharacterName : "Saved expected character name";
+                row.Cells["User"].ToolTipText = observed?.UserName != null ? "Verified login username from memory"
+                    : "Saved login username. The current shipped profile has no verified username mapping; unavailable values are not guessed.";
+                row.Cells["Slot"].ToolTipText = observed?.CharacterSlot != null ? "Verified character slot from memory (1-based)"
+                    : "Saved character slot (1-15). Unknown is not slot 1; the current shipped profile has no verified slot mapping.";
 
                 VanillaReconnectStatus runtime;
                 if (!byId.TryGetValue(id, out runtime))
                 {
-                    if (accounts.Columns.Contains("RuntimePid")) row.Cells["RuntimePid"].Value = "—";
+                    if (accounts.Columns.Contains("RuntimePid")) row.Cells["RuntimePid"].Value = observed == null ? "—" : observed.ProcessId.ToString();
                     if (accounts.Columns.Contains("RuntimeStatus"))
                     {
-                        row.Cells["RuntimeStatus"].Value = "Idle";
+                        row.Cells["RuntimeStatus"].Value = observed == null ? "Idle" : "Running · not managed";
                         row.Cells["RuntimeStatus"].ToolTipText = "Saved profile is not currently part of the active supervisor configuration.";
                     }
                     continue;
                 }
 
                 if (accounts.Columns.Contains("RuntimePid"))
-                    row.Cells["RuntimePid"].Value = runtime.ProcessId.HasValue ? runtime.ProcessId.Value.ToString() : "—";
+                    row.Cells["RuntimePid"].Value = runtime.ProcessId.HasValue ? runtime.ProcessId.Value.ToString() : observed == null ? "—" : observed.ProcessId.ToString();
                 if (accounts.Columns.Contains("RuntimeStatus"))
                 {
                     string compact = VanillaAutobattleStatus.Compact(runtime.Stage, runtime.Detail);
@@ -273,6 +293,7 @@ namespace _4RTools.Model.Vanilla
             SynchronizeSupervisorAccountsFromCatalog();
             RefreshAccountGridFromCatalog();
             QueueAutoSave(message);
+            SaveAutomaticallyNow(); // A character selection/edit cancels stale work immediately, not after the debounce.
         }
 
         // Existing callers use this name after Add/Edit; keep it as a compatibility wrapper.
@@ -321,8 +342,8 @@ namespace _4RTools.Model.Vanilla
             if (autosaveSuppress || IsDisposed) return;
             try
             {
-                if (accountCatalogStore != null && accountCatalog != null)
-                    accountCatalogStore.Save(accountCatalog);
+                if (accountCatalogStore == null) throw new InvalidOperationException("Character catalog is unavailable; settings were not overwritten.");
+                if (accountCatalog != null) accountCatalogStore.Save(accountCatalog);
                 SynchronizeSupervisorAccountsFromCatalog();
                 SynchronizeDerivedUiValues();
                 ReadTop();

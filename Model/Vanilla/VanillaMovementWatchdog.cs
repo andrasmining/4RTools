@@ -125,6 +125,7 @@ namespace _4RTools.Model.Vanilla
                 IClientReader reader;
                 if (readers.TryGetValue(pid, out reader))
                 { readers.Remove(pid); try { reader.Dispose(); } catch (Exception ex) { VanillaDebugLog.Write("RECOVERY", "Exited reader cleanup: " + ex.Message); } }
+                System.Threading.Volatile.Write(ref characterCache, Array.AsReadOnly(characterCache.Where(c => c.ProcessId != pid).ToArray()));
                 var next = positionCache.Where(p => p.Key != pid).ToDictionary(p => p.Key, p => p.Value);
                 System.Threading.Volatile.Write(ref positionCache, next);
             }

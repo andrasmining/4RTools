@@ -99,6 +99,7 @@ namespace _4RTools.Forms
             integratedReconnectSupervisor = new VanillaReconnectSupervisor(VanillaAppData.RootDirectory);
             integratedFleetMonitor = new VanillaFleetMonitor(AppDomain.CurrentDomain.BaseDirectory);
             integratedReconnectSupervisor.SetPositionSource(integratedFleetMonitor.LatestPosition, integratedFleetMonitor.ConfirmClientExited);
+            integratedReconnectSupervisor.SetCharacterSource(integratedFleetMonitor.LatestCharacters);
 
             var root = new TableLayoutPanel
             {

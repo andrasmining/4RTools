@@ -44,7 +44,7 @@ namespace _4RTools.Model.Vanilla
             if (responsiveRecoveryApplied || IsDisposed) return;
             TableLayoutPanel oldRoot = Controls.OfType<TableLayoutPanel>().FirstOrDefault();
             if (oldRoot == null) return;
-            responsiveAccountBox = FindGroupBoxStarting(oldRoot, "Accounts");
+            responsiveAccountBox = FindGroupBoxStarting(oldRoot, "Characters");
             responsiveLogBox = FindGroupBoxStarting(oldRoot, "Reconnect log");
             Button browse = FindButton(this, "Browse...") ?? FindButton(this, "Browseâ€¦");
             Button start = FindButton(this, "START SUPERVISOR");
@@ -85,8 +85,8 @@ namespace _4RTools.Model.Vanilla
                 responsiveAccountBox.MinimumSize = Size.Empty;
                 responsiveAccountBox.Margin = Padding.Empty;
                 responsiveAccountBox.Padding = new Padding(6);
-                responsiveAccountBox.Text = "Accounts";
-                help.SetToolTip(responsiveAccountBox, "Saved profiles; at most two enabled at once. Double-click or Edit a row. Hover a clipped value or Status for the full detail.");
+                responsiveAccountBox.Text = "Characters";
+                help.SetToolTip(responsiveAccountBox, "One row per character; at most two enabled at once. Double-click or Edit a row. Hover a clipped value or Status for the full detail.");
                 ConfigureAccountsGrid();
 
                 responsiveLogBox.Dock = DockStyle.None;
@@ -262,7 +262,8 @@ namespace _4RTools.Model.Vanilla
             switch (column.Name)
             {
                 case "Enabled": standard = 34; break;
-                case "Label": standard = 88; break;
+                case "Label": standard = 100; break;
+                case "CharacterName": standard = 110; break;
                 case "User": standard = 90; break;
                 case "Slot": standard = 38; break;
                 case "Hotkey": standard = 68; break;
@@ -287,7 +288,7 @@ namespace _4RTools.Model.Vanilla
             int available = Math.Max(0, accounts.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4);
             int[] widths = columns.Select(ColumnMinimumWidth).ToArray();
             int spare = Math.Max(0, available - widths.Sum());
-            string[] flexible = { "Label", "User", "RuntimeStatus" };
+            string[] flexible = { "Label", "User", "CharacterName", "RuntimeStatus" };
             int[] weights = columns.Select(c => flexible.Contains(c.Name) ? (c.Name == "RuntimeStatus" ? 2 : 3) : 0).ToArray();
             int totalWeight = weights.Sum();
             for (int i = 0; i < columns.Length; i++)

@@ -29,7 +29,18 @@ namespace _4RTools.Model.Vanilla
         public string Label { get; set; } = "Client";
         public string UserName { get; set; } = "";
         public string ProtectedPassword { get; set; } = "";
-        public int CharacterSlot { get; set; } = 1;
+        // One record is one character; Id is never a username/account identifier.
+        // Keep Label and the legacy serialized type for lossless configuration migration.
+        public string CharacterName { get; set; } = "";
+        public int? CharacterSlot { get; set; } = 1;
+        public bool ProxyNeedsConfiguration { get; set; }
+
+        public int RequiredCharacterSlot()
+        {
+            if (!CharacterSlot.HasValue || CharacterSlot.Value < 1 || CharacterSlot.Value > 15)
+                throw new InvalidOperationException(Label + ": character slot is unknown; no character-selection input sent.");
+            return CharacterSlot.Value;
+        }
         public int ResumeKey { get; set; } = (int)Keys.D2;
         public bool ResumeCtrl { get; set; } = true;
         public bool ResumeAlt { get; set; }
@@ -140,7 +151,7 @@ namespace _4RTools.Model.Vanilla
             bool defaultLabel = string.Equals(account.Label, "Client 1", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(account.Label, "Client 2", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(account.Label, "Client", StringComparison.OrdinalIgnoreCase);
-            return defaultLabel && string.IsNullOrWhiteSpace(account.UserName) && string.IsNullOrWhiteSpace(account.ProtectedPassword);
+            return defaultLabel && string.IsNullOrWhiteSpace(account.CharacterName) && string.IsNullOrWhiteSpace(account.UserName) && string.IsNullOrWhiteSpace(account.ProtectedPassword);
         }
 
         public void Validate()
@@ -175,7 +186,9 @@ namespace _4RTools.Model.Vanilla
                     throw new ArgumentException("Every account needs a label.");
                 if (account.UserName != null && account.UserName.Length > 128)
                     throw new ArgumentException("Username is too long.");
-                if (account.CharacterSlot < 1 || account.CharacterSlot > 15)
+                if (account.CharacterName != null && (account.CharacterName.Length > 80 || account.CharacterName.Any(char.IsControl)))
+                    throw new ArgumentException("Character name is invalid.");
+                if (account.CharacterSlot.HasValue && (account.CharacterSlot.Value < 1 || account.CharacterSlot.Value > 15))
                     throw new ArgumentException("Character slot must be between 1 and 15.");
                 if (account.ResumeKey < 8 || account.ResumeKey > 254)
                     throw new ArgumentException("Resume hotkey is invalid.");
@@ -512,6 +525,8 @@ namespace _4RTools.Model.Vanilla
         {
             public VanillaReconnectAccount Account;
             public int? ProcessId;
+            public Guid? CharacterSession;
+            public VanillaCharacterIdentity ConfirmedCharacter;
             public VanillaReconnectStage Stage = VanillaReconnectStage.WaitingForClient;
             public VanillaVisualState Visual;
             public string Detail = "Waiting";
@@ -685,7 +700,7 @@ namespace _4RTools.Model.Vanilla
                 RebuildRuntimes();
                 detected = AdoptExistingClients(running);
             }
-            if (detected > 0) Log("Detected and assigned " + detected + " running Vanilla client(s) in account-list order.");
+            if (detected > 0) Log("Matched " + detected + " running Vanilla client(s) by verified character identity.");
             RaiseUpdated();
             return detected;
         }
@@ -740,6 +755,7 @@ namespace _4RTools.Model.Vanilla
                     runtime.MovementRecoveryPending = false;
                     bool failedDuringRecovery = runtime.RecoveryOwned;
                     runtime.ProcessId = null;
+                    runtime.CharacterSession = null;
                     runtime.ResumeSent = false;
                     runtime.Visual = VanillaVisualState.Unknown;
                     runtime.LoginLikeSince = runtime.GameplaySince = null;
@@ -761,14 +777,17 @@ namespace _4RTools.Model.Vanilla
             var claimed = new HashSet<int>(runtimes.Values.Where(r => r.ProcessId.HasValue).Select(r => r.ProcessId.Value));
             foreach (var runtime in desired.Select(a => runtimes[a.Id]))
             {
+                if (runtime.ProcessId.HasValue && CharacterOwnershipChanged(runtime, runtime.ProcessId.Value))
+                { ReleaseChangedCharacter(runtime); continue; }
                 if (runtime.ScriptRunning) continue;
                 if (!runtime.ProcessId.HasValue)
                 {
-                    var candidate = alive.Where(p => !claimed.Contains(p.Id)).OrderBy(p => SafeStart(p)).FirstOrDefault();
+                    var candidate = FindUnclaimedCharacter(runtime, alive.Where(p => !claimed.Contains(p.Id)).Select(p => p.Id));
                     if (candidate != null)
                     {
-                        Bind(runtime, candidate.Id, runtime.RecoveryOwned, runtime.RecoveryOwned ? "New Vanilla client detected" : "Existing Vanilla client adopted");
-                        claimed.Add(candidate.Id);
+                        Bind(runtime, candidate.ProcessId, false, "Existing character matched");
+                        runtime.CharacterSession = candidate.Session;
+                        claimed.Add(candidate.ProcessId);
                     }
                     else if (CanLaunch(runtime, alive.Count, now)) Launch(runtime, now);
                     continue;
@@ -871,6 +890,18 @@ namespace _4RTools.Model.Vanilla
         private bool CanLaunch(Runtime runtime, int aliveCount, DateTimeOffset now)
         {
             if (!settings.AutoRecover || aliveCount >= settings.MaxClients || runtime.ScriptRunning) return false;
+            string missing = MissingCharacterConfiguration(runtime.Account);
+            if (missing != null)
+            {
+                runtime.RecoveryOwned = false;
+                SetStage(runtime, VanillaReconnectStage.NeedsConfiguration, missing);
+                return false;
+            }
+            if (characterSource != null && aliveCount > ObservedCharacters().Count(i => i != null && i.IsFresh(now)))
+            {
+                SetStage(runtime, VanillaReconnectStage.WaitingForClient, "Waiting for verified identities of running clients; no duplicate launch");
+                return false;
+            }
             Runtime owner = OtherRecoveryOwner(runtime);
             if (owner != null)
             {
@@ -966,6 +997,8 @@ namespace _4RTools.Model.Vanilla
         private void Bind(Runtime runtime, int pid, bool freshLaunch, string detail)
         {
             runtime.ProcessId = pid;
+            runtime.CharacterSession = freshLaunch ? (Guid?)null : CurrentCharacter(pid)?.Session;
+            runtime.ConfirmedCharacter = null;
             runtime.ClosingForRecovery = false;
             runtime.MovementRecoveryPending = false;
             runtime.MovementWatchdog.Reset();
@@ -996,10 +1029,10 @@ namespace _4RTools.Model.Vanilla
                 SetStage(runtime, VanillaReconnectStage.Backoff, BackoffDetail(runtime, now));
                 return;
             }
-            if (string.IsNullOrWhiteSpace(runtime.Account.UserName) || string.IsNullOrWhiteSpace(runtime.Account.ProtectedPassword))
+            if (MissingCharacterConfiguration(runtime.Account) != null)
             {
                 runtime.RecoveryOwned = false;
-                SetStage(runtime, VanillaReconnectStage.NeedsConfiguration, "Username/password missing");
+                SetStage(runtime, VanillaReconnectStage.NeedsConfiguration, MissingCharacterConfiguration(runtime.Account));
                 return;
             }
             runtime.ScriptRunning = true;
@@ -1067,7 +1100,7 @@ namespace _4RTools.Model.Vanilla
 
                     SelectDetectedGameServer(input, pid, config.StageDelayMs, account.Label + ": ");
 
-                    int slot = Math.Max(1, Math.Min(15, account.CharacterSlot)) - 1;
+                    int slot = account.RequiredCharacterSlot() - 1;
                     int col = slot % 5, row = slot / 5;
                     input.ClickNormalized(config.Anchors.CharacterGridX + col * config.Anchors.CharacterStepX,
                         config.Anchors.CharacterGridY + row * config.Anchors.CharacterStepY);
@@ -1357,43 +1390,38 @@ namespace _4RTools.Model.Vanilla
 
         private int AdoptExistingClients(bool supervise)
         {
-            var existing = GetVanillaProcesses().OrderBy(p => SafeStart(p)).ToList();
-            try
+            var existing = GetVanillaProcesses();
+            try { return AdoptCharacterClients(existing.Select(p => p.Id).ToArray(), supervise); }
+            finally { foreach (var process in existing) process.Dispose(); }
+        }
+
+        internal int AdoptCharacterClients(IEnumerable<int> alivePids, bool supervise)
+        {
+            lock (gate)
             {
-                var aliveIds = new HashSet<int>(existing.Select(p => p.Id));
-                var enabled = settings.Accounts.Where(a => a.Enabled).Take(settings.MaxClients).ToList();
-                var claimed = new HashSet<int>();
+                var alive = new HashSet<int>(alivePids);
+                foreach (var runtime in runtimes.Values.Where(r => r.ProcessId.HasValue).ToArray())
+                    if (CharacterOwnershipChanged(runtime, runtime.ProcessId.Value)
+                        || (!alive.Contains(runtime.ProcessId.Value) && !runtime.ScriptRunning && !runtime.RecoveryOwned))
+                        ReleaseChangedCharacter(runtime);
+                var claimed = new HashSet<int>(runtimes.Values.Where(r => r.ProcessId.HasValue).Select(r => r.ProcessId.Value));
                 int assigned = 0;
-                foreach (var account in enabled)
+                foreach (var account in settings.Accounts.Where(a => a.Enabled).Take(settings.MaxClients))
                 {
                     Runtime runtime = runtimes[account.Id];
-                    Process match = null;
-                    if (runtime.ProcessId.HasValue && aliveIds.Contains(runtime.ProcessId.Value) && !claimed.Contains(runtime.ProcessId.Value))
-                        match = existing.FirstOrDefault(p => p.Id == runtime.ProcessId.Value);
-                    if (match == null) match = existing.FirstOrDefault(p => !claimed.Contains(p.Id));
-                    if (match == null)
-                    {
-                        runtime.ProcessId = null;
-                        runtime.ResumeSent = false;
-                        continue;
-                    }
-                    claimed.Add(match.Id);
+                    if (runtime.ProcessId.HasValue) { assigned++; continue; }
+                    if (runtime.ScriptRunning || runtime.RecoveryOwned) continue;
+                    var match = FindUnclaimedCharacter(runtime, alive.Where(pid => !claimed.Contains(pid)));
+                    if (match == null) continue;
+                    Bind(runtime, match.ProcessId, false, "Running character '" + match.CharacterName + "' matched");
+                    runtime.CharacterSession = match.Session;
+                    claimed.Add(match.ProcessId);
                     assigned++;
-                    runtime.ProcessId = match.Id;
-                    runtime.MovementRecoveryPending = false;
-                    runtime.MovementWatchdog.Reset();
-                    runtime.ResumeSent = true;
-                    runtime.ScriptRunning = false;
-                    runtime.RecoveryOwned = false;
-                    runtime.Visual = VanillaVisualState.Unknown;
-                    runtime.LoginLikeSince = runtime.GameplaySince = null;
-                    SetStage(runtime, supervise ? VanillaReconnectStage.WaitingForGameplay : VanillaReconnectStage.Stopped,
-                        supervise ? "Existing Vanilla client adopted (PID " + match.Id + ")"
-                            : "Running Vanilla client detected (PID " + match.Id + "); start supervisor to monitor");
+                    if (!supervise) SetStage(runtime, VanillaReconnectStage.Stopped,
+                        "Character matched to PID " + match.ProcessId + "; supervisor is off");
                 }
                 return assigned;
             }
-            finally { foreach (var process in existing) process.Dispose(); }
         }
 
         private List<Process> GetVanillaProcesses()
@@ -1421,7 +1449,14 @@ namespace _4RTools.Model.Vanilla
                     runtime = new Runtime { Account = account.Clone() };
                     runtimes.Add(account.Id, runtime);
                 }
-                else runtime.Account = account.Clone();
+                else
+                {
+                    if (!account.Enabled || !VanillaCharacterRoster.Same(runtime.Account.CharacterName, account.CharacterName)
+                        || !VanillaCharacterRoster.Same(runtime.Account.UserName, account.UserName)
+                        || runtime.Account.CharacterSlot != account.CharacterSlot)
+                        ReleaseChangedCharacter(runtime);
+                    runtime.Account = account.Clone();
+                }
             }
         }
 
@@ -1563,12 +1598,14 @@ namespace _4RTools.Model.Vanilla
         private readonly Label testState = new Label { AutoSize = true, ForeColor = Color.DarkSlateBlue };
         private readonly ToolTip help = new ToolTip { InitialDelay = 650, ReshowDelay = 200, AutoPopDelay = 30000, ShowAlways = true };
         private bool exitRequested;
+        private readonly bool observeCharacterDiscovery;
         private bool testRunning;
         private int testGeneration;
 
         public VanillaReconnectForm(VanillaReconnectSupervisor supervisor, bool observeClients = true)
         {
             this.supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
+            observeCharacterDiscovery = observeClients;
             Text = "4RTools Vanilla â€” Restart & Relog";
             Font = new Font("Segoe UI", 9F);
             StartPosition = FormStartPosition.CenterScreen;
@@ -1647,12 +1684,13 @@ namespace _4RTools.Model.Vanilla
             root.Controls.Add(top, 0, 0);
 
             accounts.Columns.Add("Enabled", "Enabled");
-            accounts.Columns.Add("Label", "Account");
+            accounts.Columns.Add("Label", "Description");
             accounts.Columns.Add("User", "Username");
-            accounts.Columns.Add("Slot", "Char slot");
+            accounts.Columns.Add("Slot", "Slot");
+            accounts.Columns.Add("CharacterName", "Character name");
             accounts.Columns.Add("Hotkey", "Resume hotkey");
             accounts.Columns.Add("Secret", "Password");
-            var accountBox = new GroupBox { Text = "Accounts on this PC (Vanilla max 2 active clients)", Dock = DockStyle.Fill, Padding = new Padding(8) };
+            var accountBox = new GroupBox { Text = "Characters (max 2 enabled)", Dock = DockStyle.Fill, Padding = new Padding(8) };
             var accountLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
             accountLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             accountLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -1794,14 +1832,12 @@ namespace _4RTools.Model.Vanilla
         {
             try
             {
-                ReadTop(); supervisor.Apply(settings, true); LoadFromSupervisor();
+                DiscoverCharacters(true);
                 int detected = supervisor.DetectRunningClients();
-                RefreshStatus();
-                MessageBox.Show(this, detected == 0 ? "No running Vanilla MMO clients were found."
-                    : detected + " running Vanilla client(s) detected and assigned in account-list order.",
-                    "Running clients", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                RefreshAccountSupplementalColumns();
+                ShowSaveToast(detected + " enabled character(s) matched", false);
             }
-            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Running clients", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Character discovery", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
 
         private void RefreshAccounts()
@@ -1810,7 +1846,7 @@ namespace _4RTools.Model.Vanilla
             foreach (var account in settings.Accounts)
             {
                 int row = accounts.Rows.Add(account.Enabled ? "Yes" : "No", account.Label, account.UserName,
-                    account.CharacterSlot, account.HotkeyText, string.IsNullOrWhiteSpace(account.ProtectedPassword) ? "Not set" : "Encrypted");
+                    account.CharacterSlot.HasValue ? (object)account.CharacterSlot.Value : "—", account.CharacterName, account.HotkeyText, string.IsNullOrWhiteSpace(account.ProtectedPassword) ? "Not set" : "Encrypted");
                 accounts.Rows[row].Tag = account.Id;
             }
         }
@@ -2030,6 +2066,10 @@ namespace _4RTools.Model.Vanilla
         {
             if (disposing)
             {
+                StopCharacterDiscovery();
+                supervisor.Updated -= AccountRuntimeUpdated;
+                autosaveTimer?.Stop(); autosaveTimer?.Dispose(); autosaveTimer = null;
+                saveToastTimer?.Stop(); saveToastTimer?.Dispose(); saveToastTimer = null;
                 supervisor.Updated -= SupervisorUpdated;
                 supervisor.Logged -= SupervisorLogged;
             }
@@ -2065,7 +2105,7 @@ namespace _4RTools.Model.Vanilla
             enabled.Checked = account.Enabled;
             label.Text = account.Label;
             user.Text = account.UserName;
-            slot.Value = account.CharacterSlot;
+            slot.Value = account.CharacterSlot ?? 1;
             key = account.ResumeKey; ctrl = account.ResumeCtrl; alt = account.ResumeAlt; shift = account.ResumeShift;
             UpdateHotkey();
             try { password.Text = supervisor.GetPassword(account); }

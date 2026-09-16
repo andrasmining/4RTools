@@ -82,3 +82,13 @@ A popup is not required. Both known disconnect/logout messages are also detected
 and logged. Missing processes use the existing immediate sequential restart path.
 The watchdog is inactive during startup/recovery and after STOP. Both failed
 clients recover sequentially; another healthy client is left running.
+
+Character roster
+----------------
+One row represents one character, not one account. Several rows may share a
+username; at most two may be enabled. Description, Username, Slot and Character
+name precede the existing fields. Running characters are discovered automatically
+from fresh verified memory and added once, disabled. Existing secrets/proxies stay
+unchanged. The current profile verifies character names, not usernames or slots.
+Those remain unknown/editable unless configured or supplied by a verified mapping.
+Discovery never guesses slot 1, passwords or proxies.

@@ -1,72 +1,62 @@
-# 4RTools Vanilla 0.6.36
+# 4RTools Vanilla 0.6.37
 
-## Primary X/Y autofarming watchdog
+## Character roster
 
-The existing verified, read-only fleet observations now also drive a per-client
-movement watchdog. After startup/recovery, 120 seconds without verified movement
-queues that client for restart. This includes unchanged, missing, unreadable,
-unverified and stale X/Y readings. Unknown is never converted to coordinate zero.
-Neither an unrecognized popup nor a failed screenshot blocks this recovery path.
-Missing processes keep the existing immediate sequential relaunch behavior.
-Process presence comes from the process-list snapshot: a denied metadata query
-cannot silently discard a live PID or authorize a duplicate replacement.
+The recovery table now represents characters rather than login accounts. Its
+identity columns are Description, Username, Slot and Character name, after Enabled
+and before the existing hotkey, password, proxy, PID and status columns. Multiple
+characters can share one username while retaining independent slots, descriptions
+and recovery preferences. At most two rows may be enabled.
 
-Movement on either axis resets the deadline. The reader's movement timestamp also
-preserves intermediate movement when a character returns to the same position
-between supervisor polls. Deadlines use monotonic time. Stale/cached timestamps,
-a first late baseline and temporary read loss do not masquerade as movement.
-Valid session/map changes start a new baseline; unknown map fluctuations do not.
+The character editor exposes the same fields and offers freshly observed names.
+Empty slots are unknown, never silently slot 1. Passwords and proxies remain
+user-controlled. Disabled incomplete profiles can be saved; missing login
+configuration prevents unattended launch.
 
-STOP, configuration/client replacement and disposal cancel pending work. The
-watchdog does not accrue inactivity during startup, login or recovery. Automatic
-recovery must be ON; the visual-watchdog switch controls image observation, not
-the primary coordinate watchdog. No additional game-memory reader is created and
-no failed reader is reopened for the same live process. A confirmed process exit
-clears only that client's old reader so a recycled PID cannot inherit it.
+## Automatic discovery and safe ownership
 
-## Terminal dialogs and sequential recovery
+Startup and subsequent fresh fleet observations add unlisted running characters
+automatically, once, disabled. The existing fingerprinted read-only reader supplies
+identity fields; no extra memory reader or guessed offsets are introduced. Only
+missing verified fields are filled; saved descriptions, enabled flags, slots,
+passwords and proxies are not overwritten.
 
-The two reported messages, **Now Logging Out.** and **Disconnected from Server.**,
-are separately recognized from cropped dialog references, with two fresh matching
-observations before early recovery. They are also handled when already present
-on an assigned client before START. Unknown modals are not blindly acknowledged
-with Enter. Uniform failed captures remain unknown rather than gameplay.
+Existing processes are assigned by verified character identity rather than PID
+or start order. A username alone cannot identify a character. Ambiguous, stale or
+contradictory observations remain unassigned. Character/session changes prevent
+old workers from sending input or closing a replacement character. The expected
+name is checked before startup Autobattle hotkeys. A successful tool-owned
+configured login can learn the name for that exact legacy row.
 
-One account owns the entire close -> confirmed exit -> relaunch -> login ->
-verified Autobattle movement -> minimization sequence. If both clients fail, the
-second remains queued until the first completes or its attempt fails/backoffs.
-A healthy sibling is neither closed, restarted nor toggled. The recovery lease
-is retained across the polling handoff between close and relaunch.
+Passive discovery does not cancel recovery. Row edits, disabling, STOP and disposal
+cancel stale operations. Detection preserves failed-state latches and the
+close-to-relaunch lease. The existing 120-second movement watchdog, terminal
+dialog handling and sequential two-client recovery remain intact.
 
-Closing uses ordinary Windows lifecycle control with a process-identity-pinned,
-restricted handle (no game-memory write, injection or privilege changes). Normal
-window close waits up to three seconds; one termination request may then wait
-another three seconds. Unconfirmed exit, denied access or changed identity does
-not authorize a replacement launch. Cancellation is checked at every native
-operation boundary. Failed attempts retain the PID and exponential backoff.
+## Persistence and validation
 
-## Validation
+The full character catalog is authoritative; a stale two-row runtime subset
+cannot overwrite newer fields or resurrect removed rows. Historical JSON/file
+names, IDs, encrypted passwords and proxy associations remain compatible. Atomic
+saves preserve the previous file; malformed/future catalogs are not replaced
+with incomplete fallbacks.
 
-The existing Windows Debug/Release builds, full offline regression suite,
-shipped-profile validation, x86/version and package checksum checks, inert portable
-launch, and 18 native mock-data UI scenarios remain release gates. Additional
-regressions cover the exact 120-second boundary, axis/intermediate movement,
-unavailable/stale/unverified state, map/session/PID isolation, STOP/configuration
-cancellation, one/both/mixed client failures, close-to-relaunch lease continuity,
-backoff, initially present dialogs, and both supplied message images at resampled
-sizes. Native process control is tested separately using an inert test-owned child,
-not a game client.
+Release gates include Windows Debug/Release builds and the complete offline suite,
+character discovery/persistence/ownership regressions, portable package launch and
+hash checks, native test-owned process recovery, and native UI checks for the 18
+existing layouts plus actual character discovery and the character editor. Public
+assets and exact clean source identity are verified after publication; temporary
+transport files and the completed working branch are removed.
 
-The published ZIP/checksum and clean source identity are verified by downloading
-release assets after publication. Temporary patch/workflow infrastructure and the
-completed working branch are removed after integration and successful release.
+## Explicit limits
 
-## Limits
+The current shipped Vanilla memory profile verifies character names, not login
+usernames or one-based character slots. Optional trusted-field support is included,
+but values remain unknown/editable unless configured or available from a verified
+mapping. They are not inferred from names, PID order or account rows. Fully
+automatic username/slot discovery on the current client is not claimed: live
+client evidence needed to map those two fields is unavailable in this session.
 
-This engineering session has no live Vanilla/Gepard client or user RDP desktop.
-Automated state-machine, Windows package/UI and cropped-image checks do not prove
-live game recovery or minimized-client capture across every DPI/skin. The X/Y
-watchdog does not depend on such capture. A deliberately stationary character can
-also reach the timeout: this is the requested autofarming recovery rule, not proof
-of the underlying cause. Existing dependency/compiler warnings remain visible.
-The ten-second, three-total-attempt startup Autobattle verification is unchanged.
+No live Vanilla/Gepard client or user RDP desktop was available. Offline/native
+Windows checks do not prove live game behavior. Existing dependency/compiler
+warnings remain visible. No game-memory writes, injection or protection bypass.

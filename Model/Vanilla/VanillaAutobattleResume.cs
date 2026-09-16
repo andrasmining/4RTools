@@ -168,7 +168,7 @@ namespace _4RTools.Model.Vanilla
                 return disposed || generation != Volatile.Read(ref resumeVerificationGeneration)
                     || !runtimes.TryGetValue(owner.Account.Id, out current) || !ReferenceEquals(owner, current)
                     || current.ProcessId != pid || current.ResumeOperationGeneration != generation
-                    || !current.Account.Enabled || !current.ScriptRunning;
+                    || !current.Account.Enabled || !current.ScriptRunning || CharacterOwnershipChanged(current, pid);
             }
         }
 
@@ -206,6 +206,7 @@ namespace _4RTools.Model.Vanilla
                     input.CancellationRequested = cancelled;
                     var clock = Stopwatch.StartNew();
                     var verifier = new VanillaAutobattleResumeVerifier();
+                    VanillaClientState lastIdentity = null;
                     Func<VanillaClientState> read = () =>
                     {
                         var currentFile = new FileInfo(memory.ExecutablePath);
@@ -216,12 +217,26 @@ namespace _4RTools.Model.Vanilla
                         var state = source.Poll(DateTimeOffset.UtcNow);
                         if (source.IsStopped) throw new InvalidOperationException(state.Error ?? source.Status);
                         adapter.Observe(state, clock.Elapsed);
+                        ValidateExpectedCharacter(account, state);
+                        lastIdentity = state;
                         return state;
                     };
                     await verifier.VerifyAsync(pid, read, input.Activate,
                         () => input.ChordInVerifiedForeground(account.ResumeCtrl, account.ResumeAlt, account.ResumeShift,
                             (Keys)account.ResumeKey), cancelled, () => clock.Elapsed, () => DateTimeOffset.UtcNow,
                         milliseconds => Task.Delay(milliseconds), progress).ConfigureAwait(false);
+                    lock (gate)
+                    {
+                        Runtime owner;
+                        if (!cancelled() && runtimes.TryGetValue(account.Id, out owner) && owner.ProcessId == pid)
+                        {
+                            owner.ConfirmedCharacter = VanillaCharacterIdentity.FromState(lastIdentity);
+                            var fleetIdentity = CurrentCharacter(pid);
+                            if (fleetIdentity != null && owner.ConfirmedCharacter != null
+                                && VanillaCharacterRoster.Same(fleetIdentity.CharacterName, owner.ConfirmedCharacter.CharacterName))
+                                owner.CharacterSession = fleetIdentity.Session;
+                        }
+                    }
                 }
             }
         }
@@ -232,7 +247,7 @@ namespace _4RTools.Model.Vanilla
             {
                 Runtime current;
                 if (cancelled() || disposed || !runtimes.TryGetValue(owner.Account.Id, out current)
-                    || !ReferenceEquals(owner, current) || current.ProcessId != pid || !current.Account.Enabled)
+                    || !ReferenceEquals(owner, current) || current.ProcessId != pid || !current.Account.Enabled || CharacterOwnershipChanged(current, pid))
                     throw new OperationCanceledException("Client ownership changed; no window action performed.");
                 return action();
             }
