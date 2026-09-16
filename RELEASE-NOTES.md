@@ -1,4 +1,4 @@
-# 4RTools Vanilla 0.6.39
+# 4RTools Vanilla 0.6.40
 
 ## Resolution-agnostic character selection
 
@@ -16,10 +16,9 @@ actual gameplay identity before the Autobattle resume hotkey; a mismatch fails c
 The supplied incident screenshot showed slot 2 required while a coordinate click landed
 on an empty card, which is the regression this release removes.
 
-
 ## Username reader and diagnostics
 
-The shipped fingerprinted build profile now contains both user-supplied username
+The shipped fingerprinted build profile contains both user-supplied username
 locations: main module + `0xD343F8` and + `0xD39159`. At the supplied module base
 `0x00400000`, these resolve to `0x011343F8` and `0x01139159` respectively. They are
 read through the existing read-only source as `UserName` and `UserNameMirror`, not
@@ -34,7 +33,7 @@ another access method. No passwords are read from game memory.
 
 ## Composite character identity and legacy migration
 
-The logical unique key is now **username + character name** throughout discovery,
+The logical unique key is **username + character name** throughout discovery,
 validation, process matching and removal suppression. Persistent GUIDs remain
 unchanged for compatibility with encrypted passwords and per-row proxy settings.
 Several characters may share a username; the same name on different usernames
@@ -61,37 +60,28 @@ dialog handling, the 120-second movement watchdog and startup movement checks re
 ## VPS updater delivery
 
 Releases are explicitly marked Latest. Publication checks reject downgrades,
-verify the public latest endpoint, and run the real updater from the published
-0.6.37 executable to confirm discovery of the new version and its ZIP/checksum
-URLs. This runs on an isolated Windows Actions runner without launching the
-application UI, touching a game client or installing on the user's VPS.
+verify the public latest endpoint, and run the real updater from the previously
+published executable to confirm discovery of the new version and its ZIP/checksum
+URLs. The disposable GitHub Actions validation injects its workflow token only into
+the updater probe so shared-runner anonymous API limits cannot invalidate a release;
+normal VPS/end-user update checks remain anonymous and unchanged.
 
 ## Validation and limits
 
 Publication is gated on full Windows Debug/Release regression suites, shipped
 profile validation, x86/version and portable-package checks, an inert executable
 launch, native test-owned process recovery, and native UI rendering. Regression
-coverage includes the supplied offsets through the actual shared reader/adapter,
-relocated modules, copy conflicts, null/truncated values, two-client isolation,
-username/name key collisions, legacy migration, credential preservation and stale
-ownership. UI checks include the screenshot's legacy-row scenario and rendering
-both username values/addresses in the actual diagnostics form without a live reader.
+coverage includes all 15 character slots from all possible initial selections,
+the supplied username offsets through the shared reader/adapter, relocated modules,
+copy conflicts, null/truncated values, two-client isolation, username/name key
+collisions, legacy migration, credential preservation and stale ownership.
 
 The public release ZIP/checksum and exact clean source identity are verified after
-publication. Completed task branches and temporary validation transport are removed.
+publication. The previously published executable's real updater must discover this
+Latest release before completed task branches are removed.
 
-The username mappings are based on the user's supplied live screenshot, not a
-live test performed by this engineering session. No live Vanilla/Gepard client or
-user RDP desktop was available; independent relog/restart confirmation is not
-claimed. Character-slot memory mapping remains unavailable; configured slots are
-retained. Existing dependency/compiler warnings remain visible.
-
-<!-- BEGIN GENERATED RELEASE CHECKSUMS -->
-
-Release version: 0.6.39. SHA256:
-
-- `4RTools-Vanilla-v0.6.39-portable.zip`: `a6845122cd8105a3674ebbf13660a1478ce2a7bbbb9b1eaa5fcf5ed8647ea8d1`
-- `4RTools-Vanilla.exe`: `fb1278ecda7b50dce7fbe38ee4e4cd94167aef62e8e704c5b4062a192ce5554d`
-
-These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
-<!-- END GENERATED RELEASE CHECKSUMS -->
+The character-selection fix is validated with deterministic input/state tests and
+Windows packaging/UI checks, not a live Vanilla character-selection session. No live
+Vanilla/Gepard client or user RDP desktop was available in this engineering session.
+Character-slot memory mapping remains unavailable; configured slots are retained.
+Existing dependency/compiler warnings remain visible.
