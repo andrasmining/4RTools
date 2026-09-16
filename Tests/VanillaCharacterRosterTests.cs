@@ -17,7 +17,7 @@ namespace Vanilla.Diagnostics.Tests
         private const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
         internal static int Run()
         {
-            Test("Character discovery adds one disabled row with unknown username and slot", DiscoverUnknown);
+            Test("Incomplete identity defers discovery instead of adding a username-less row", DiscoverUnknown);
             Test("Verified username and one-based slot populate a discovered row", DiscoverKnown);
             Test("Repeated startup discovery preserves description, password, proxy and enabled state", DiscoverTwice);
             Test("Two characters on the same username remain distinct rows", SharedLogin);
@@ -31,8 +31,23 @@ namespace Vanilla.Diagnostics.Tests
             Test("Removed discovered character stays removed during this app session", Removed);
             Test("Only untouched synthetic defaults are removed after discovery", EmptyDefaults);
             Test("A third enabled character is rejected", EnabledLimit);
-            Test("Duplicate character rows are rejected but duplicate usernames are allowed", DuplicateNames);
+            Test("Duplicate username-character pairs are rejected but shared usernames are allowed", DuplicateNames);
             Test("Unknown slot remains null through legacy JSON cloning", UnknownSlot);
+            Test("Screenshot legacy rows learn names without a memory slot or extra rows", LegacyWithoutSlot);
+            Test("Empty old discovered duplicates fold into configured row IDs", LegacyWithOrphans);
+            Test("User-edited discovered rows are never automatically deleted", PreserveEditedOrphan);
+            Test("Composite identity permits the same name on different usernames", SameNameDifferentUsers);
+            Test("Composite key encoding has no delimiter collisions", KeyCollisions);
+            Test("Username-only migration defers when two same-account characters are observed", AmbiguousLiveAccount);
+            Test("Known slots disambiguate legacy rows but are never guessed", LegacySlotDisambiguation);
+            Test("Removed keys do not suppress another username's character", RemovedPairScope);
+            Test("Missing live username cannot assign a named saved character", RequireFullIdentity);
+            Test("Legacy migration preserves credentials across save and app restart", MigrationPersistence);
+            Test("Missing fields from contradictory identities are not filled", ContradictoryEnrichment);
+            Test("A partial character observation cannot mask an ambiguous legacy account", IncompleteLiveAccount);
+            Test("Same-PID contradictory snapshots cannot authorize discovery", ConflictingPidSnapshots);
+            Test("A transient unavailable username does not fabricate owner replacement", UsernameUnknownOwnership);
+            Test("A changed username on the same name and PID cancels old ownership", UsernameChangedOwnership);
             Test("Legacy JSON keeps configured slots and encrypted passwords", LegacyJson);
             Test("Character catalog persists multiple characters per account and IDs", CatalogRoundTrip);
             Test("Stale runtime subset cannot overwrite the authoritative character roster", CatalogAuthority);
@@ -59,15 +74,13 @@ namespace Vanilla.Diagnostics.Tests
 
         private static VanillaReconnectAccount Row(string name = "Alpha", string user = "login", int? slot = 1)
         { return new VanillaReconnectAccount { Label = "Description " + name, CharacterName = name, UserName = user, CharacterSlot = slot, Enabled = false }; }
-        private static VanillaCharacterIdentity Identity(string name = "Alpha", int pid = 101, string user = null, int? slot = null, DateTimeOffset? at = null, Guid? session = null)
+        private static VanillaCharacterIdentity Identity(string name = "Alpha", int pid = 101, string user = "login", int? slot = null, DateTimeOffset? at = null, Guid? session = null)
         { return new VanillaCharacterIdentity(pid, session ?? Session, at ?? DateTimeOffset.UtcNow, name, user, slot); }
         private static void DiscoverUnknown()
         {
             var rows = new List<VanillaReconnectAccount>();
-            Assert(VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(at: Now) }, Now));
-            var r = rows.Single();
-            Assert(r.CharacterName == "Alpha" && r.Label == "Alpha" && r.UserName == "" && r.CharacterSlot == null);
-            Assert(!r.Enabled && r.ProxyNeedsConfiguration && r.ProtectedPassword == "");
+            Assert(!VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(user: null, at: Now) }, Now));
+            Assert(rows.Count == 0);
         }
         private static void DiscoverKnown()
         {
@@ -117,7 +130,8 @@ namespace Vanilla.Diagnostics.Tests
             Assert(!VanillaCharacterRoster.Matches(Row(), Identity(user: "different", slot: 1, at: Now), Now));
             Assert(!VanillaCharacterRoster.Matches(Row(), Identity(user: "login", slot: 2, at: Now), Now));
             var rows = new List<VanillaReconnectAccount> { Row() };
-            Assert(!VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(user: "other", at: Now) }, Now) && rows.Count == 1);
+            Assert(VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(user: "other", at: Now) }, Now) && rows.Count == 2);
+            Assert(rows[0].UserName == "login" && rows[1].UserName == "other");
         }
         private static void DuplicateLive()
         {
@@ -134,7 +148,7 @@ namespace Vanilla.Diagnostics.Tests
             Assert(rows.Count == 0);
         }
         private static void Removed()
-        { var rows = new List<VanillaReconnectAccount>(); Assert(!VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(at: Now) }, Now, new HashSet<string> { "Alpha" })); }
+        { var rows = new List<VanillaReconnectAccount>(); Assert(!VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(at: Now) }, Now, new HashSet<string> { VanillaCharacterRoster.Key("login", "Alpha") })); }
         private static void EmptyDefaults()
         {
             var configured = Row("", "saved-login"); configured.Label = "Client 2";
@@ -146,6 +160,128 @@ namespace Vanilla.Diagnostics.Tests
         { var rows = new[] { Row(), Row("Beta"), Row("Gamma") }; foreach (var r in rows) r.Enabled = true; Expect<InvalidOperationException>(() => VanillaCharacterRoster.Validate(rows)); }
         private static void DuplicateNames()
         { Expect<InvalidOperationException>(() => VanillaCharacterRoster.Validate(new[] { Row(), Row() })); VanillaCharacterRoster.Validate(new[] { Row(), Row("Beta", slot: 2) }); }
+        private static void LegacyWithoutSlot()
+        {
+            var a = Row("", "account-a", 2); a.Label = "Client 1"; a.Enabled = true; a.ProtectedPassword = "secret-a";
+            var b = Row("", "account-b", 2); b.Label = "Client 2"; b.Enabled = true; b.ProtectedPassword = "secret-b";
+            var rows = new List<VanillaReconnectAccount> { a, b };
+            var identities = new[] { Identity("Beta", 102, "account-b", at: Now), Identity("Alpha", 101, "account-a", at: Now) };
+            Assert(VanillaCharacterRoster.MergeObserved(rows, identities, Now));
+            Assert(rows.Count == 2 && a.CharacterName == "Alpha" && b.CharacterName == "Beta");
+            Assert(a.Label == "Client 1" && a.Enabled && a.CharacterSlot == 2 && a.ProtectedPassword == "secret-a" && !a.ProxyNeedsConfiguration);
+            Assert(b.Label == "Client 2" && b.Enabled && b.CharacterSlot == 2 && b.ProtectedPassword == "secret-b" && !b.ProxyNeedsConfiguration);
+            Assert(!VanillaCharacterRoster.MergeObserved(rows, identities.Reverse(), Now));
+        }
+        private static VanillaReconnectAccount Orphan()
+        { var row = Row(user: "", slot: null); row.Label = row.CharacterName; row.ProxyNeedsConfiguration = true; return row; }
+        private static void LegacyWithOrphans()
+        {
+            var row = Row(""); row.ProtectedPassword = "keep"; row.Enabled = true; string id = row.Id;
+            var rows = new List<VanillaReconnectAccount> { Orphan(), row };
+            Assert(VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(at: Now) }, Now));
+            Assert(rows.Count == 1 && rows[0].Id == id && rows[0].CharacterName == "Alpha" && rows[0].ProtectedPassword == "keep" && rows[0].Enabled);
+        }
+        private static void PreserveEditedOrphan()
+        {
+            foreach (Action<VanillaReconnectAccount> change in new Action<VanillaReconnectAccount>[] {
+                r => r.ProtectedPassword = "configured", r => r.Label = "My description", r => r.Enabled = true,
+                r => r.ProxyNeedsConfiguration = false, r => r.CharacterSlot = 2, r => r.ResumeCtrl = false })
+            {
+                var orphan = Orphan(); change(orphan);
+                var rows = new List<VanillaReconnectAccount> { Row(""), orphan };
+                string before = JsonConvert.SerializeObject(rows);
+                Assert(!VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(at: Now) }, Now));
+                Assert(before == JsonConvert.SerializeObject(rows));
+            }
+        }
+        private static void SameNameDifferentUsers()
+        {
+            var rows = new List<VanillaReconnectAccount>();
+            var a = Identity(user: "account-a", at: Now); var b = Identity(pid: 102, user: "account-b", at: Now);
+            Assert(VanillaCharacterRoster.MergeObserved(rows, new[] { a, b }, Now));
+            Assert(rows.Count == 2); VanillaCharacterRoster.Validate(rows);
+            Assert(VanillaCharacterRoster.FindUnique(rows[0], new[] { a, b }, new[] { 101, 102 }, Now).ProcessId == 101);
+            Assert(VanillaCharacterRoster.FindUnique(rows[1], new[] { a, b }, new[] { 101, 102 }, Now).ProcessId == 102);
+        }
+        private static void KeyCollisions()
+        {
+            Assert(VanillaCharacterRoster.Key("a:b", "c") != VanillaCharacterRoster.Key("a", "b:c"));
+            Assert(VanillaCharacterRoster.Key("", "Alpha") == null && VanillaCharacterRoster.Key("login", "") == null);
+        }
+        private static void AmbiguousLiveAccount()
+        {
+            var rows = new List<VanillaReconnectAccount> { Row("") };
+            Assert(!VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(at: Now), Identity("Beta", 102, at: Now) }, Now));
+            Assert(rows.Count == 1 && rows[0].CharacterName == "");
+        }
+        private static void LegacySlotDisambiguation()
+        {
+            var rows = new List<VanillaReconnectAccount> { Row("", slot: 1), Row("", slot: 2) };
+            Assert(VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(slot: 1, at: Now), Identity("Beta", 102, slot: 2, at: Now) }, Now));
+            Assert(rows.Count == 2 && rows[0].CharacterName == "Alpha" && rows[1].CharacterName == "Beta");
+        }
+        private static void RemovedPairScope()
+        {
+            var rows = new List<VanillaReconnectAccount>();
+            var ignored = new HashSet<string> { VanillaCharacterRoster.Key("account-a", "Alpha") };
+            VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(user: "account-a", at: Now), Identity(pid: 102, user: "account-b", at: Now) }, Now, ignored);
+            Assert(rows.Count == 1 && rows[0].UserName == "account-b");
+        }
+        private static void RequireFullIdentity()
+        {
+            Assert(!VanillaCharacterRoster.Matches(Row(), Identity(user: null, at: Now), Now));
+            Assert(!VanillaCharacterRoster.Matches(Row(user: ""), Identity(at: Now), Now));
+        }
+        private static void MigrationPersistence()
+        {
+            Temp(root => {
+                var store = new VanillaAccountCatalogStore(root); var legacy = Row(""); legacy.ProtectedPassword = "preserved";
+                store.Save(new[] { legacy, Orphan() }); var rows = store.Load(new VanillaReconnectAccount[0]);
+                VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(at: Now) }, Now); store.Save(rows);
+                var reloaded = store.Load(new[] { legacy });
+                Assert(reloaded.Count == 1 && reloaded[0].Id == legacy.Id && reloaded[0].CharacterName == "Alpha" && reloaded[0].ProtectedPassword == "preserved");
+                Assert(!VanillaCharacterRoster.MergeObserved(reloaded, new[] { Identity(at: Now) }, Now));
+            });
+        }
+        private static void ContradictoryEnrichment()
+        {
+            var row = Row("", "correct", null);
+            Assert(!VanillaCharacterRoster.FillMissing(row, Identity(user: "wrong", slot: 4)));
+            Assert(row.CharacterName == "" && row.CharacterSlot == null);
+        }
+        private static void IncompleteLiveAccount()
+        {
+            var rows = new List<VanillaReconnectAccount> { Row("") };
+            Assert(!VanillaCharacterRoster.MergeObserved(rows, new[] { Identity(at: Now), Identity("Beta", 102, user: null, at: Now) }, Now));
+            Assert(rows.Count == 1 && rows[0].CharacterName == "");
+        }
+        private static void ConflictingPidSnapshots()
+        {
+            var rows = new List<VanillaReconnectAccount>();
+            var observed = new[] { Identity(at: Now), Identity(user: "other", at: Now) };
+            Assert(!VanillaCharacterRoster.MergeObserved(rows, observed, Now));
+            Assert(VanillaCharacterRoster.FindUnique(Row(), observed, new[] { 101 }, Now) == null);
+        }
+        private static void UsernameUnknownOwnership()
+        {
+            using (var h = new Harness()) {
+                h.Observed.Add(Identity()); h.Supervisor.AdoptCharacterClients(new[] { 101 }, false);
+                h.Observed[0] = Identity(user: null);
+                Assert(!(bool)Call(h.Supervisor, "CharacterOwnershipChanged", h.Runtime(h.A), 101));
+            }
+        }
+        private static void UsernameChangedOwnership()
+        {
+            using (var h = new Harness()) {
+                h.Observed.Add(Identity()); h.Supervisor.AdoptCharacterClients(new[] { 101 }, false);
+                h.Observed[0] = Identity(user: "other");
+                bool called = false;
+                Expect<OperationCanceledException>(() => Call(h.Supervisor, "RunOwnedClientStep", h.Runtime(h.A), 101,
+                    (Func<bool>)(() => false), (Func<bool>)(() => { called = true; return true; })));
+                Assert(!called);
+            }
+        }
+
         private static void UnknownSlot()
         { var r = Row(slot: null).Clone(); Assert(!r.CharacterSlot.HasValue); Expect<InvalidOperationException>(() => r.RequiredCharacterSlot()); }
         private static void LegacyJson()
@@ -245,6 +381,10 @@ namespace Vanilla.Diagnostics.Tests
             var state = State(); state.SampledAtUtc = DateTimeOffset.UtcNow; foreach (var v in state.Fields.Values) v.LastObservedAtUtc = state.SampledAtUtc;
             VanillaReconnectSupervisor.ValidateExpectedCharacter(Row(slot: 3), state);
             Expect<InvalidOperationException>(() => VanillaReconnectSupervisor.ValidateExpectedCharacter(Row("Beta", slot: 3), state));
+            Expect<InvalidOperationException>(() => VanillaReconnectSupervisor.ValidateExpectedCharacter(Row("", "other"), state));
+            VanillaReconnectSupervisor.ValidateExpectedCharacter(Row("", "login"), state);
+            state.Fields[VanillaField.UserName].Validation = StateValidation.Invalid;
+            Expect<InvalidOperationException>(() => VanillaReconnectSupervisor.ValidateExpectedCharacter(Row("", "login"), state));
         }
         private static void PassiveEnrichment()
         {

@@ -84,7 +84,8 @@ namespace _4RTools.Model.Vanilla
                 var candidate = accountCatalog.Where(a => a.Id != selected.Id).Select(a => a.Clone()).ToList();
                 VanillaCharacterRoster.Validate(candidate);
                 accountCatalogStore.Save(candidate);
-                if (!string.IsNullOrWhiteSpace(selected.CharacterName)) ignoredDiscoveredCharacters.Add(selected.CharacterName);
+                string removedKey = VanillaCharacterRoster.Key(selected);
+                if (removedKey != null) ignoredDiscoveredCharacters.Add(removedKey);
                 accountCatalog = candidate;
                 VanillaAccountProxyPreferences.Remove(selected.Id);
                 PersistCatalogAndRefresh("Character removed");
@@ -144,7 +145,8 @@ namespace _4RTools.Model.Vanilla
         private void FillSelectedIdentity()
         {
             var matches = supervisor.ObservedCharacters().Where(i => i != null && i.IsFresh(DateTimeOffset.UtcNow)
-                && VanillaCharacterRoster.Same(character.Text, i.CharacterName)).ToArray();
+                && VanillaCharacterRoster.Same(character.Text, i.CharacterName)
+                && (string.IsNullOrWhiteSpace(user.Text) || VanillaCharacterRoster.Same(user.Text, i.UserName))).ToArray();
             if (matches.Length != 1) return;
             if (string.IsNullOrWhiteSpace(user.Text) && matches[0].UserName != null) user.Text = matches[0].UserName;
             if (string.IsNullOrWhiteSpace(slot.Text) && matches[0].CharacterSlot.HasValue) slot.Text = matches[0].CharacterSlot.Value.ToString();

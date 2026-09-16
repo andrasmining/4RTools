@@ -207,7 +207,7 @@ namespace _4RTools.Model.Vanilla
             {
                 if (alreadyRunning.Count >= 2)
                     throw new InvalidOperationException("Two Vanilla clients are already running; no third client will be started.");
-                if (alreadyRunning.Any(p => CurrentCharacter(p.Id) == null))
+                if (alreadyRunning.Any(p => VanillaCharacterRoster.Key(CurrentCharacter(p.Id)) == null))
                     throw new InvalidOperationException("A running client has no verified character identity yet; no duplicate client will be started.");
             }
             finally { foreach (var process in alreadyRunning) process.Dispose(); }

@@ -37,7 +37,11 @@ namespace _4RTools.Model.Vanilla
             if (observed == null) return false;
             return (runtime.CharacterSession.HasValue && runtime.CharacterSession.Value != observed.Session)
                 || (!string.IsNullOrWhiteSpace(runtime.Account.CharacterName)
-                    && !VanillaCharacterRoster.Matches(runtime.Account, observed, DateTimeOffset.UtcNow));
+                    && !VanillaCharacterRoster.Same(runtime.Account.CharacterName, observed.CharacterName))
+                || (!string.IsNullOrWhiteSpace(runtime.Account.UserName) && observed.UserName != null
+                    && !VanillaCharacterRoster.Same(runtime.Account.UserName, observed.UserName))
+                || (runtime.Account.CharacterSlot.HasValue && observed.CharacterSlot.HasValue
+                    && runtime.Account.CharacterSlot != observed.CharacterSlot);
         }
 
         private void ReleaseChangedCharacter(Runtime runtime)
@@ -99,8 +103,9 @@ namespace _4RTools.Model.Vanilla
                         ObservedCharacters().Where(i => i != null).Select(i => i.ProcessId), DateTimeOffset.UtcNow);
                     if (sample == null) continue;
                     bool ownedConfirmation = runtime.ConfirmedCharacter != null && runtime.ProcessId == sample.ProcessId
-                        && runtime.ResumeSent && VanillaCharacterRoster.Same(runtime.ConfirmedCharacter.CharacterName, sample.CharacterName);
-                    if (!ownedConfirmation && !VanillaCharacterRoster.Matches(runtime.Account, sample, DateTimeOffset.UtcNow)) continue;
+                        && runtime.ResumeSent && VanillaCharacterRoster.Key(runtime.ConfirmedCharacter) != null
+                        && VanillaCharacterRoster.Key(runtime.ConfirmedCharacter) == VanillaCharacterRoster.Key(sample);
+                    if (!ownedConfirmation && !VanillaCharacterRoster.Compatible(runtime.Account, sample)) continue;
                     changed |= VanillaCharacterRoster.FillMissing(runtime.Account, sample);
                     var stored = settings.Accounts.FirstOrDefault(a => a.Id == row.Id);
                     if (stored != null) changed |= VanillaCharacterRoster.FillMissing(stored, sample);
@@ -111,8 +116,11 @@ namespace _4RTools.Model.Vanilla
 
         internal static void ValidateExpectedCharacter(VanillaReconnectAccount row, VanillaClientState state)
         {
-            if (string.IsNullOrWhiteSpace(row.CharacterName)) return; // legacy configured launch learns its name after verified resume
             var identity = VanillaCharacterIdentity.FromState(state);
+            if (identity == null || !identity.IsFresh(DateTimeOffset.UtcNow) || identity.UserName == null
+                || !VanillaCharacterRoster.Same(row.UserName, identity.UserName))
+                throw new InvalidOperationException(row.Label + ": expected login username is not verified in this client; no Autobattle hotkey sent.");
+            if (string.IsNullOrWhiteSpace(row.CharacterName)) return; // legacy configured launch learns its name after verified resume
             if (!VanillaCharacterRoster.Matches(row, identity, DateTimeOffset.UtcNow))
                 throw new InvalidOperationException(row.Label + ": expected character '" + row.CharacterName
                     + "' is not verified in this client; no Autobattle hotkey sent.");

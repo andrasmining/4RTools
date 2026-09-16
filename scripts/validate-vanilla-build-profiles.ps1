@@ -18,6 +18,7 @@ $allowed = @{
     MaxWeight         = @('UInt32')
     CharacterName     = @('Utf8')
     UserName          = @('Utf8')
+    UserNameMirror    = @('Utf8')
     CharacterSlot     = @('Int32')
     X                 = @('Int32')
     Y                 = @('Int32')

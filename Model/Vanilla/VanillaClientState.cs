@@ -10,7 +10,7 @@ namespace _4RTools.Model.Vanilla
     public enum VanillaField
     {
         CurrentHP, MaxHP, CurrentSP, MaxSP, CurrentWeight, MaxWeight, CharacterName, X, Y,
-        CurrentTargetId, ActionState, Map, AutobattleEnabled, StatusEffects, ClientReady, Loading, UserName, CharacterSlot
+        CurrentTargetId, ActionState, Map, AutobattleEnabled, StatusEffects, ClientReady, Loading, UserName, CharacterSlot, UserNameMirror
     }
 
     public enum StateValidation { Unavailable, Unverified, Valid, Invalid }
@@ -81,6 +81,7 @@ namespace _4RTools.Model.Vanilla
         public StateValue<uint> CurrentWeight { get { return Get<uint>(VanillaField.CurrentWeight); } }
         public StateValue<uint> MaxWeight { get { return Get<uint>(VanillaField.MaxWeight); } }
         public StateValue<string> UserName { get { return Get<string>(VanillaField.UserName); } }
+        public StateValue<string> UserNameMirror { get { return Get<string>(VanillaField.UserNameMirror); } }
         // One-based slot, 1..15. A profile must verify this semantic, not just a readable integer.
         public StateValue<int> CharacterSlot { get { return Get<int>(VanillaField.CharacterSlot); } }
         public StateValue<string> CharacterName { get { return Get<string>(VanillaField.CharacterName); } }
@@ -108,7 +109,7 @@ namespace _4RTools.Model.Vanilla
                 StateValue observation;
                 switch (field)
                 {
-                    case VanillaField.CharacterName: case VanillaField.Map: case VanillaField.UserName:
+                    case VanillaField.CharacterName: case VanillaField.Map: case VanillaField.UserName: case VanillaField.UserNameMirror:
                         observation = new StateValue<string>((string)value); break;
                     case VanillaField.X: case VanillaField.Y: case VanillaField.CharacterSlot:
                         observation = new StateValue<int>(available ? (int)value : 0); break;

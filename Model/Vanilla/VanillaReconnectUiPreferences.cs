@@ -229,7 +229,7 @@ namespace _4RTools.Model.Vanilla
                     supervisor.ObservedCharacters().Where(i => i != null).Select(i => i.ProcessId), DateTimeOffset.UtcNow);
                 row.Cells["CharacterName"].ToolTipText = observed != null ? "Live verified character: " + observed.CharacterName : "Saved expected character name";
                 row.Cells["User"].ToolTipText = observed?.UserName != null ? "Verified login username from memory"
-                    : "Saved login username. The current shipped profile has no verified username mapping; unavailable values are not guessed.";
+                    : "Saved login username. Live username requires fresh agreeing read-only copies; missing or conflicting values are not guessed.";
                 row.Cells["Slot"].ToolTipText = observed?.CharacterSlot != null ? "Verified character slot from memory (1-based)"
                     : "Saved character slot (1-15). Unknown is not slot 1; the current shipped profile has no verified slot mapping.";
 

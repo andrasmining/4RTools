@@ -78,6 +78,8 @@ internal static class UiLayoutHarness
                 RunCase(main, recovery, 1920, 1020, 4, 1F, false);
                 CheckCharacterDiscovery(main, recovery);
                 CheckCharacterEditor(main, recovery);
+                CheckLegacyUsernameDiscovery(main, recovery);
+                CheckUsernameDiagnostics();
                 Call(main, "AssertSmokeBackgroundServicesInactive");
                 report.AppendLine("Background services: inactive; fleet polls=0; no game input or email enabled.");
             }
@@ -98,7 +100,7 @@ internal static class UiLayoutHarness
         Type type = app.GetType("_4RTools.Model.Vanilla.VanillaCharacterIdentity", true);
         Array observed = Array.CreateInstance(type, 1);
         object identity = Activator.CreateInstance(type, BindingFlags.Instance | BindingFlags.NonPublic, null,
-            new object[] { 99101, Guid.NewGuid(), DateTimeOffset.UtcNow, "Auto discovered mock", null, null }, null);
+            new object[] { 99101, Guid.NewGuid(), DateTimeOffset.UtcNow, "Auto discovered mock", "mock-login", null }, null);
         observed.SetValue(identity, 0);
         fleet.GetType().GetField("characterCache", All).SetValue(fleet, observed);
         Call(recovery, "DiscoverCharacters", false);
@@ -109,13 +111,97 @@ internal static class UiLayoutHarness
         if (found.Length == 1)
         {
             Check(Convert.ToString(found[0].Cells["Enabled"].Value) == "No", "Discovery enabled a new client.");
+            Check(Convert.ToString(found[0].Cells["User"].Value) == "mock-login", "Username was not populated in the table.");
             Check(Convert.ToString(found[0].Cells["Slot"].Value) == "—", "Unknown discovered slot silently became slot 1.");
             Check(Convert.ToString(found[0].Cells["Secret"].Value) == "Not set", "Discovery populated a password.");
             Check(Convert.ToString(found[0].Cells["AccountProxy"].Value) == "Not set", "Discovery guessed a proxy.");
         }
         Check(Field(recovery, "characterDiscoveryTimer") == null, "Explicit inert discovery started a background timer.");
         SaveScreenshot(main, Path.Combine(output, "19-character-discovery.png"));
-        report.AppendLine("CASE 19 character discovery: one disabled row; unknown username/slot; no duplicate; no background observer.");
+        report.AppendLine("CASE 19 character discovery: one disabled row; verified username and unknown slot; no duplicate; no background observer.");
+    }
+
+    private static void CheckLegacyUsernameDiscovery(Form main, object recovery)
+    {
+        caseNumber++;
+        SeedAccounts(recovery, 2);
+        IList catalog = (IList)Field(recovery, "accountCatalog");
+        Type rowType = catalog[0].GetType();
+        for (int i = 0; i < 2; i++)
+        {
+            Property(catalog[i], "CharacterName", "");
+            Property(catalog[i], "UserName", "mock-login-" + i);
+            Property(catalog[i], "ProtectedPassword", "inert-encrypted-placeholder-" + i);
+            Property(catalog[i], "CharacterSlot", 2);
+        }
+        object orphan = Activator.CreateInstance(rowType);
+        Property(orphan, "Enabled", false); Property(orphan, "Label", "Discovered Alpha");
+        Property(orphan, "CharacterName", "Discovered Alpha"); Property(orphan, "CharacterSlot", null);
+        Property(orphan, "ProxyNeedsConfiguration", true); catalog.Add(orphan);
+        Call(recovery, "SynchronizeSupervisorAccountsFromCatalog");
+        object supervisor = Field(recovery, "supervisor");
+        Call(supervisor, "Apply", Field(recovery, "settings"), false);
+        Type identityType = app.GetType("_4RTools.Model.Vanilla.VanillaCharacterIdentity", true);
+        Array observed = Array.CreateInstance(identityType, 2);
+        for (int i = 0; i < 2; i++) observed.SetValue(Activator.CreateInstance(identityType, All, null,
+            new object[] { 99101 + i, Guid.NewGuid(), DateTimeOffset.UtcNow, i == 0 ? "Discovered Alpha" : "Discovered Beta", "mock-login-" + i, null }, null), i);
+        object fleet = Field(main, "integratedFleetMonitor");
+        SetField(fleet, "characterCache", observed);
+        Call(recovery, "DiscoverCharacters", false);
+        Call(recovery, "DiscoverCharacters", false);
+        DataGridView grid = (DataGridView)Field(recovery, "accounts");
+        Check(grid.Rows.Count == 2, "Username migration left or created duplicate character rows.");
+        if (grid.Rows.Count == 2)
+        {
+            Check(Convert.ToString(grid.Rows[0].Tag) == "layout-account-0", "Migration replaced configured row identity.");
+            Check(Convert.ToString(grid.Rows[0].Cells["CharacterName"].Value) == "Discovered Alpha", "Legacy character name stayed blank.");
+            Check(Convert.ToString(grid.Rows[1].Cells["CharacterName"].Value) == "Discovered Beta", "Second legacy character name stayed blank.");
+            Check(grid.Rows.Cast<DataGridViewRow>().All(r => Convert.ToString(r.Cells["Enabled"].Value) == "Yes"
+                && Convert.ToString(r.Cells["Slot"].Value) == "2" && Convert.ToString(r.Cells["Secret"].Value) == "Encrypted"),
+                "Migration lost enabled flags, slots or encrypted credentials.");
+        }
+        Check(Field(recovery, "characterDiscoveryTimer") == null, "Migration test activated background discovery.");
+        SaveScreenshot(main, Path.Combine(output, "21-legacy-username-reconciliation.png"));
+        report.AppendLine("CASE 21 username reconciliation: configured IDs, slots, passwords and enable flags retained; two rows, no duplicates.");
+    }
+
+    private static void CheckUsernameDiagnostics()
+    {
+        caseNumber++;
+        Type formType = app.GetType("_4RTools.Forms.VanillaDiagnosticsForm", true);
+        Type fieldType = app.GetType("_4RTools.Model.Vanilla.VanillaField", true);
+        Type validationType = app.GetType("_4RTools.Model.Vanilla.StateValidation", true);
+        Type valueType = app.GetType("_4RTools.Model.Vanilla.StateValue", true);
+        Type textType = app.GetType("_4RTools.Model.Vanilla.StateValue`1", true).MakeGenericType(typeof(string));
+        IDictionary fields = (IDictionary)Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(fieldType, valueType));
+        string[] names = { "UserName", "UserNameMirror" };
+        ulong[] addresses = { 0x011343F8, 0x01139159 };
+        for (int i = 0; i < 2; i++)
+        {
+            object value = Activator.CreateInstance(textType, All, null, new object[] { "mock-login" }, null);
+            Property(value, "IsAvailable", true); Property(value, "Validation", Enum.Parse(validationType, "Valid"));
+            Property(value, "Address", (ulong?)addresses[i]); Property(value, "LastObservedAtUtc", (DateTimeOffset?)DateTimeOffset.UtcNow);
+            Property(value, "Evidence", "Synthetic diagnostic sample at the supplied module-relative username mapping.");
+            fields.Add(Enum.Parse(fieldType, names[i]), value);
+        }
+        object snapshot = Activator.CreateInstance(app.GetType("_4RTools.Model.Vanilla.VanillaClientState", true));
+        Property(snapshot, "Fields", fields);
+        using (Form dialog = (Form)Activator.CreateInstance(formType, All, null, new object[] { null, false }, null))
+        {
+            SetField(dialog, "latest", snapshot); Call(dialog, "UpdateValuesGrid"); dialog.Show(); Pump();
+            var grid = (DataGridView)Field(dialog, "values");
+            Check(grid.Rows.Count == 2, "Diagnostics omits a username source.");
+            for (int i = 0; i < grid.Rows.Count; i++)
+            {
+                Check(Convert.ToString(grid.Rows[i].Cells[0].Value) == names[i]
+                    && Convert.ToString(grid.Rows[i].Cells[1].Value) == "mock-login"
+                    && Convert.ToString(grid.Rows[i].Cells[3].Value) == "0x" + addresses[i].ToString("X"), "Diagnostics lost a username value/address.");
+            }
+            Check(!((System.Windows.Forms.Timer)Field(dialog, "timer")).Enabled && Field(dialog, "source") == null,
+                "Diagnostics test opened a real reader or started polling.");
+            SaveScreenshot(dialog, Path.Combine(output, "22-username-diagnostics.png"));
+        }
+        report.AppendLine("CASE 22 native diagnostics: both username values and addresses visible; no reader, process enumeration or polling.");
     }
 
     private static void CheckCharacterEditor(Form main, object recovery)

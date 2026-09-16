@@ -89,6 +89,11 @@ One row represents one character, not one account. Several rows may share a
 username; at most two may be enabled. Description, Username, Slot and Character
 name precede the existing fields. Running characters are discovered automatically
 from fresh verified memory and added once, disabled. Existing secrets/proxies stay
-unchanged. The current profile verifies character names, not usernames or slots.
-Those remain unknown/editable unless configured or supplied by a verified mapping.
-Discovery never guesses slot 1, passwords or proxies.
+unchanged. The unique key is username plus character name, not name alone.
+The shared reader includes both supplied username addresses; agreeing values fill
+the username automatically. Both values/addresses are visible in Diagnostics as
+UserName and UserNameMirror. Missing/conflicting usernames do not create new rows.
+A unique configured legacy username row learns its matching character name in
+place, keeping its slot, password, proxy, enabled state and ID. Ambiguous matches
+are not guessed. Slots remain unmapped; configured slots are preserved and unknown
+slots stay blank. Discovery never guesses slot 1, passwords or proxies.

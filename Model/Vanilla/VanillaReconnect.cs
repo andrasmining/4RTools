@@ -897,7 +897,7 @@ namespace _4RTools.Model.Vanilla
                 SetStage(runtime, VanillaReconnectStage.NeedsConfiguration, missing);
                 return false;
             }
-            if (characterSource != null && aliveCount > ObservedCharacters().Count(i => i != null && i.IsFresh(now)))
+            if (characterSource != null && aliveCount > ObservedCharacters().Count(i => i != null && i.IsFresh(now) && VanillaCharacterRoster.Key(i) != null))
             {
                 SetStage(runtime, VanillaReconnectStage.WaitingForClient, "Waiting for verified identities of running clients; no duplicate launch");
                 return false;

@@ -118,7 +118,7 @@ namespace _4RTools.Model.Vanilla
         {
             switch (field)
             {
-                case VanillaField.CharacterName: case VanillaField.Map: case VanillaField.UserName: return encoding == VanillaValueEncoding.Utf8;
+                case VanillaField.CharacterName: case VanillaField.Map: case VanillaField.UserName: case VanillaField.UserNameMirror: return encoding == VanillaValueEncoding.Utf8;
                 case VanillaField.X: case VanillaField.Y: case VanillaField.CharacterSlot: return encoding == VanillaValueEncoding.Int32;
                 case VanillaField.CurrentTargetId: return encoding == VanillaValueEncoding.UInt32 || encoding == VanillaValueEncoding.UInt64;
                 case VanillaField.AutobattleEnabled: case VanillaField.ClientReady: case VanillaField.Loading:

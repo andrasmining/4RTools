@@ -95,23 +95,34 @@ are Enabled, **Description, Username, Slot, Character name**, then hotkey,
 password, proxy, PID and status. Multiple characters on one username remain
 independent saved profiles; at most two may be enabled.
 
-Fresh verified running characters are discovered at startup and as the existing
-fleet reader receives observations. Missing characters are added once, disabled.
-Existing descriptions, passwords, configured slots, enabled flags and proxies
-are preserved. Processes are matched by character identity, never PID order.
+The logical unique key is **username + character name**, consistently used for
+discovery, validation and process matching. Several characters may share a username;
+the same character name on different usernames does not collide. Persistent row
+IDs continue to retain passwords and proxy preferences across upgrades.
 
-**Current mapping limit:** the shipped profile verifies character names, but not
-login usernames or one-based character slots. These auto-fill only when verified
-mappings supply them; otherwise they remain unknown/editable. Existing configured
-values are retained. New discovered rows therefore need any missing login details
-as well as password/proxy before unattended restart can be enabled. A successful
-tool-owned configured login can learn the actual name for that exact legacy row.
+The existing reader now includes the supplied username offsets `0xD343F8` and
+`0xD39159`, relative to the fingerprinted main module. Both bounded, NUL-terminated
+UTF-8 values appear in diagnostics and exports as `UserName` and `UserNameMirror`.
+They must agree before the username is used for identity. No password is read.
+Missing or conflicting usernames defer discovery instead of creating incomplete rows.
+
+A unique legacy row with a configured username can learn the uniquely observed
+character's name without a memory-read slot. It keeps its description, slot,
+password, proxy, enabled flag and ID. Ambiguous rows/characters are not guessed.
+Only untouched empty name-only discovery duplicates from 0.6.37 may be folded into
+that configured row; user-edited profiles are preserved. New complete pairs are
+added once, disabled. Discovery never overwrites configured values.
+
+**Remaining mapping limit:** one-based character slots are not mapped. Existing
+configured slots are kept; a new row's slot stays unknown/editable until configured
+or supplied by a verified mapping. The supplied username screenshot establishes
+the current addresses, not independent live validation across client restarts.
 
 ## State validity and boundaries
 
 Shipped build profiles are matched to the executable fingerprint. The current
-profile records independently verified HP/SP, character name, carried weight,
-X/Y and map observations. Unsupported or unknown fields are not treated as valid
+profile records verified HP/SP, character name, carried weight, X/Y and map
+observations, plus the user-supplied corroborated username mappings. Unsupported or unknown fields are not treated as valid
 zero, idle or no-target states. Target/combat/status-dependent rules remain gated
 by their required evidence; enabling a UI option does not verify its game effect.
 
@@ -127,8 +138,9 @@ and actual live-game validation.
 The existing Windows build scripts restore dependencies, build Debug/Release and
 run the offline regression suite. Portable packaging checks x86/version metadata,
 licenses, payload checksums and a relocated inert executable launch. The native
-mock-data UI harness covers 18 scenarios, including Full-HD/RDP-sized layouts,
-smaller windows, enlarged text and large saved-account lists.
+mock-data UI harness covers responsive layouts, enlarged text, large saved-account
+lists, character discovery/editor behavior, legacy username migration and diagnostic
+username/address rendering without observing live clients.
 
 The release workflow runs these gates before publication, then downloads the
 public release assets and verifies their hashes and source identity against the

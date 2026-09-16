@@ -189,7 +189,7 @@ namespace _4RTools.Model.Vanilla
             ValidatePosition(state, VanillaField.X);
             ValidatePosition(state, VanillaField.Y);
             ValidateText(state, VanillaField.CharacterName);
-            ValidateText(state, VanillaField.UserName);
+            ValidateUserName(state);
             if (state.CharacterSlot.IsAvailable && (state.CharacterSlot.Value < 1 || state.CharacterSlot.Value > 15))
                 Invalid(state, VanillaField.CharacterSlot, "Character slot must be a verified one-based value from 1 to 15.");
             ValidateText(state, VanillaField.Map);
@@ -275,6 +275,33 @@ namespace _4RTools.Model.Vanilla
             if (value.IsAvailable && (value.Value < 0 || value.Value > profile.MaximumCoordinate))
                 Invalid(state, field, "Coordinate is outside the build sanity limit.");
         }
+        private void ValidateUserName(VanillaClientState state)
+        {
+            ValidateText(state, VanillaField.UserName);
+            ValidateText(state, VanillaField.UserNameMirror);
+            foreach (var field in new[] { VanillaField.UserName, VanillaField.UserNameMirror })
+            {
+                VanillaFieldMapping mapping;
+                var value = (StateValue<string>)state.Fields[field];
+                if (value.IsAvailable && profile.MemoryMap.Fields.TryGetValue(field, out mapping)
+                    && System.Text.Encoding.UTF8.GetByteCount(value.Value) >= mapping.ReadSize)
+                    Invalid(state, field, "Username is not NUL-terminated within its bounded read; no truncated identity accepted.");
+            }
+            // The supplied two copies are independent observations, not fallbacks. If a
+            // profile includes the mirror, both copies must be trusted and agree in this sample.
+            // Keep raw values and addresses visible in diagnostics even when they disagree.
+            if (profile.MemoryMap.Fields.ContainsKey(VanillaField.UserNameMirror)
+                && (!Valid(state, VanillaField.UserName) || !Valid(state, VanillaField.UserNameMirror)
+                    || state.UserName.LastObservedAtUtc != state.SampledAtUtc
+                    || state.UserNameMirror.LastObservedAtUtc != state.SampledAtUtc
+                    || !string.Equals(state.UserName.Value, state.UserNameMirror.Value, StringComparison.Ordinal)))
+            {
+                const string reason = "Username copies are missing, invalid, unverified or disagree; character ownership remains unknown.";
+                if (state.UserName.IsAvailable) Invalid(state, VanillaField.UserName, reason);
+                if (state.UserNameMirror.IsAvailable) Invalid(state, VanillaField.UserNameMirror, reason);
+            }
+        }
+
         private static void ValidateText(VanillaClientState state, VanillaField field)
         {
             var value = (StateValue<string>)state.Fields[field];

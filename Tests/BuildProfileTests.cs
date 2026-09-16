@@ -35,7 +35,15 @@ namespace Vanilla.Diagnostics.Tests
                 { "Verified activity timestamps track movement, target and combat transitions", Activity },
                 { "Activity continuity resets on map/loading/readiness changes", ActivityReset },
                 { "Unknown combat observations do not fabricate idle transitions", UnknownActivity },
-                { "Profile catalog rejects duplicate matches and malformed files", Catalog }
+                { "Profile catalog rejects duplicate matches and malformed files", Catalog },
+                { "Username copies are read and validated in the shared state", UsernameCopies },
+                { "Disagreeing username copies stay diagnostic-only and cannot create rows", UsernameConflict },
+                { "Empty username copy cannot authorize identity", UsernameEmpty },
+                { "Unterminated username copies are not truncated into a valid identity", UsernameUnterminated },
+                { "Unverified username mirror cannot promote the primary copy", UsernameUnverified },
+                { "Missing username mirror invalidates the primary without choosing a fallback", UsernameMissing },
+                { "Two clients retain independent usernames and relative addresses", UsernameIsolation },
+                { "Shipped profile includes both supplied username offsets and diagnostic provenance", ShippedUsernameProfile }
             };
             foreach (var test in tests)
             {
@@ -341,6 +349,91 @@ namespace Vanilla.Diagnostics.Tests
             }
         }
 
+        private static void UsernameCopies()
+        {
+            using (var f = new Fixture(Profile())) {
+                f.PutText(VanillaField.UserName, "mock-login"); f.PutText(VanillaField.UserNameMirror, "mock-login"); f.Observe();
+                Assert(f.Snapshot.UserName.Validation == StateValidation.Valid && f.Snapshot.UserNameMirror.Validation == StateValidation.Valid, "Username did not reach the shared typed state.");
+                var identity = VanillaCharacterIdentity.FromState(f.Snapshot);
+                Assert(identity.UserName == "mock-login", "Roster did not receive the validated username.");
+                string json = Newtonsoft.Json.JsonConvert.SerializeObject(f.Snapshot);
+                Assert(json.Contains("UserNameMirror") && json.Contains("mock-login") && f.Snapshot.UserNameMirror.Address.HasValue, "Diagnostics export lost username evidence.");
+            }
+        }
+        private static void UsernameConflict()
+        {
+            using (var f = new Fixture(Profile())) {
+                f.PutText(VanillaField.UserName, "one"); f.PutText(VanillaField.UserNameMirror, "two"); f.Observe();
+                Assert(f.Snapshot.UserName.Validation == StateValidation.Invalid && f.Snapshot.UserNameMirror.Validation == StateValidation.Invalid, "Conflicting copies were trusted.");
+                Assert(f.Snapshot.UserName.Value == "one" && f.Snapshot.UserNameMirror.Value == "two", "Raw diagnostics were lost.");
+                var rows = new List<VanillaReconnectAccount>();
+                Assert(!VanillaCharacterRoster.MergeObserved(rows, new[] { VanillaCharacterIdentity.FromState(f.Snapshot) }, f.Snapshot.SampledAtUtc), "Conflict created a row.");
+            }
+        }
+        private static void UsernameEmpty()
+        { using (var f = new Fixture(Profile())) { f.PutText(VanillaField.UserNameMirror, ""); f.Observe(); Assert(f.Snapshot.UserName.Validation == StateValidation.Invalid, "Empty copy authorized an identity."); } }
+        private static void UsernameUnterminated()
+        { using (var f = new Fixture(Profile())) { f.PutText(VanillaField.UserName, new string('x', 32)); f.PutText(VanillaField.UserNameMirror, new string('x', 32)); f.Observe(); Assert(f.Snapshot.UserName.Validation == StateValidation.Invalid, "Truncated username accepted."); } }
+        private static void UsernameUnverified()
+        {
+            var p = Profile(); p.VerifiedFields.Remove(VanillaField.UserNameMirror);
+            using (var f = new Fixture(p)) { f.Observe(); Assert(f.Snapshot.UserName.Validation == StateValidation.Invalid, "Unverified mirror authorized identity."); }
+        }
+        private static void UsernameMissing()
+        {
+            var p = Profile(); var adapter = new VanillaStateAdapter(p, IdentityValue());
+            using (var f = new Fixture(p)) {
+                var s = f.PollRaw(); s.Fields[VanillaField.UserNameMirror].IsAvailable = false;
+                adapter.Observe(s, TimeSpan.Zero);
+                Assert(s.UserName.Validation == StateValidation.Invalid && VanillaCharacterIdentity.FromState(s).UserName == null, "Missing mirror became a username fallback.");
+            }
+        }
+        private static void UsernameIsolation()
+        {
+            using (var a = new Fixture(Profile())) using (var b = new Fixture(Profile(), 0x700000)) {
+                a.PutText(VanillaField.UserName, "one"); a.PutText(VanillaField.UserNameMirror, "one");
+                b.PutText(VanillaField.UserName, "two"); b.PutText(VanillaField.UserNameMirror, "two"); a.Observe(); b.Observe();
+                Assert(a.Snapshot.UserName.Value == "one" && b.Snapshot.UserName.Value == "two", "Client usernames mixed.");
+                Assert(b.Snapshot.UserName.Address - a.Snapshot.UserName.Address == 0x300000, "Username mapping did not relocate with the module.");
+            }
+        }
+        private static void ShippedUsernameProfile()
+        {
+            var directory = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+            while (directory != null && !File.Exists(Path.Combine(directory.FullName, "VanillaBuilds", "vanilla-7eb420579690.json"))) directory = directory.Parent;
+            Assert(directory != null, "Shipped mapping missing from validation checkout.");
+            var p = VanillaBuildProfile.Parse(File.ReadAllText(Path.Combine(directory.FullName, "VanillaBuilds", "vanilla-7eb420579690.json")));
+            Assert(VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.UserName].Address) == 0xD343F8, "Wrong primary offset.");
+            Assert(VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.UserNameMirror].Address) == 0xD39159, "Wrong corroborating offset.");
+            foreach (var field in new[] { VanillaField.UserName, VanillaField.UserNameMirror }) {
+                var m = p.MemoryMap.Fields[field];
+                Assert(p.VerifiedFields.Contains(field) && m.Encoding == VanillaValueEncoding.Utf8 && m.ReadSize == 24
+                    && m.Module == p.MemoryMap.ProcessName && !string.IsNullOrWhiteSpace(m.Evidence), "Username mapping is not wired like other diagnostic fields.");
+            }
+            foreach (ulong module in new ulong[] { 0x400000, 0x700000 })
+            {
+                var memory = new FakeMemory { ProcessName = "Vanilla MMO", MainModuleBaseAddress = module };
+                foreach (var entry in p.MemoryMap.Fields) {
+                    byte[] bytes = new byte[entry.Value.ReadSize];
+                    if (entry.Value.Encoding == VanillaValueEncoding.Utf8) {
+                        string value = entry.Key == VanillaField.UserName || entry.Key == VanillaField.UserNameMirror ? "mock-login" : "Mock";
+                        Array.Copy(Encoding.UTF8.GetBytes(value), bytes, value.Length);
+                    }
+                    memory.Put(module + VanillaMemoryMap.ParseAddress(entry.Value.Address), bytes);
+                }
+                using (var source = new MemoryStateSource(memory, p.MemoryMap)) {
+                    var snapshot = source.Poll(DateTimeOffset.UtcNow);
+                    var adapter = new VanillaStateAdapter(p, new VanillaExecutableIdentity { Sha256 = p.Sha256, Machine = p.Machine, ImageSize = p.ImageSize });
+                    adapter.Observe(snapshot, TimeSpan.Zero);
+                    Assert(snapshot.UserName.Value == "mock-login" && snapshot.UserNameMirror.Value == "mock-login"
+                        && snapshot.UserName.Validation == StateValidation.Valid && snapshot.UserNameMirror.Validation == StateValidation.Valid,
+                        "Supplied mappings did not reach the shared reader/adapter.");
+                    Assert(snapshot.UserName.Address == module + 0xD343F8 && snapshot.UserNameMirror.Address == module + 0xD39159,
+                        "Supplied mappings were treated as absolute addresses.");
+                }
+            }
+        }
+
         private static VanillaBuildProfile Profile()
         {
             var profile = new VanillaBuildProfile { Label = "Offline fixture", Sha256 = new string('a', 64), Machine = 0x14c, ImageSize = 0x10000,
@@ -351,7 +444,7 @@ namespace Vanilla.Diagnostics.Tests
             {
                 var mapping = new VanillaFieldMapping { Module = "VanillaTestClient.exe", Address = (0x100 + (int)field * 0x100).ToString(), Evidence = "Simulated verified field for offline tests." };
                 if (field == VanillaField.X || field == VanillaField.Y || field == VanillaField.CharacterSlot) mapping.Encoding = VanillaValueEncoding.Int32;
-                else if (field == VanillaField.CharacterName || field == VanillaField.Map || field == VanillaField.UserName) { mapping.Encoding = VanillaValueEncoding.Utf8; mapping.ByteCount = 32; }
+                else if (field == VanillaField.CharacterName || field == VanillaField.Map || field == VanillaField.UserName || field == VanillaField.UserNameMirror) { mapping.Encoding = VanillaValueEncoding.Utf8; mapping.ByteCount = 32; }
                 else if (field == VanillaField.AutobattleEnabled || field == VanillaField.ClientReady || field == VanillaField.Loading) mapping.Encoding = VanillaValueEncoding.Boolean8;
                 else if (field == VanillaField.StatusEffects) { mapping.Encoding = VanillaValueEncoding.UInt32Array; mapping.ByteCount = 8; }
                 profile.MemoryMap.Fields.Add(field, mapping); profile.VerifiedFields.Add(field);
@@ -376,7 +469,7 @@ namespace Vanilla.Diagnostics.Tests
                 foreach (var pair in this.profile.MemoryMap.Fields)
                 {
                     var bytes = new byte[pair.Value.ReadSize];
-                    if (pair.Key == VanillaField.CharacterName || pair.Key == VanillaField.Map || pair.Key == VanillaField.UserName)
+                    if (pair.Key == VanillaField.CharacterName || pair.Key == VanillaField.Map || pair.Key == VanillaField.UserName || pair.Key == VanillaField.UserNameMirror)
                         Array.Copy(Encoding.UTF8.GetBytes(pair.Key == VanillaField.Map ? "test_map" : "Offline character"), bytes, pair.Key == VanillaField.Map ? 8 : 17);
                     memory.Put(moduleBase + VanillaMemoryMap.ParseAddress(pair.Value.Address), bytes);
                 }
@@ -411,7 +504,7 @@ namespace Vanilla.Diagnostics.Tests
         {
             private readonly Dictionary<ulong, byte> bytes = new Dictionary<ulong, byte>();
             public int ProcessId { get { return 42; } }
-            public string ProcessName { get { return "VanillaTestClient"; } }
+            public string ProcessName { get; set; } = "VanillaTestClient";
             public int PointerSize { get { return 4; } }
             public ulong MainModuleBaseAddress { get; set; }
             public bool IsStopped { get; private set; }

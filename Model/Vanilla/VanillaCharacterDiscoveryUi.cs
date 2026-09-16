@@ -34,7 +34,7 @@ namespace _4RTools.Model.Vanilla
                 foreach (var confirmed in supervisor.ConfirmedCharacters())
                 {
                     var row = candidate.FirstOrDefault(r => r.Id == confirmed.Key);
-                    if (row != null && !candidate.Any(r => r.Id != row.Id && VanillaCharacterRoster.Same(r.CharacterName, confirmed.Value.CharacterName)))
+                    if (row != null && !candidate.Any(r => r.Id != row.Id && VanillaCharacterRoster.Key(r) != null && VanillaCharacterRoster.Key(r) == VanillaCharacterRoster.Key(confirmed.Value)))
                         changed |= VanillaCharacterRoster.FillMissing(row, confirmed.Value);
                 }
                 changed |= VanillaCharacterRoster.MergeObserved(candidate, supervisor.ObservedCharacters()

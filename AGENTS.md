@@ -497,10 +497,29 @@ Discover running characters at startup and as fresh verified observations arrive
 Add missing characters once, disabled. Never guess passwords, proxy, username or
 slot. Match processes by independently verified character identity, not PID order,
 description or username alone. Ambiguous matches remain unbound. Only populate
-fields supported by verified memory mappings. The current profile verifies names
-but not login usernames or slots: unknown fields stay unknown/editable. A name
+fields supported by verified memory mappings. The current profile includes user-supplied login username copies at module offsets
+0xD343F8 and 0xD39159; use both in shared state/diagnostics and require agreement
+before identity use. Character slots are not yet mapped and stay unknown/editable. A name
 verified after this tool's own successful configured login can enrich that exact
 row, never transfer credentials to another character. Passive discovery must not
 cancel recovery; edits, disabling, character/session replacement, STOP and disposal
 must invalidate stale ownership. Cover migration, deduplication, multiple chars
 per username, null slots, enabled limits and ownership in regression/native UI tests.
+
+
+## Username + character-name identity
+
+The logical unique key is the complete username + character-name pair. Use it
+consistently in discovery, validation, process binding, removal suppression and
+confirmation; never substitute name-only or PID order. Keep persistent row GUIDs
+for credential/proxy compatibility. Missing/invalid username observations defer
+automatic row creation rather than creating new username-less rows.
+
+Enrich a configured legacy username-only row in place when one compatible row
+and one fresh observed character for that username identify it unambiguously.
+A missing memory slot is not a reason to duplicate that row. Preserve description,
+slot, password, proxy, enabled state and ID. Multiple candidate rows/characters
+remain unresolved, never guessed. Only untouched empty auto-discovery duplicates
+may be folded into that configured row; user-configured rows must survive.
+Record screenshot provenance accurately; automated tests do not prove independent
+live relog/restart validation of a supplied address.

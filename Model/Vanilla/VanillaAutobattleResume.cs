@@ -233,7 +233,8 @@ namespace _4RTools.Model.Vanilla
                             owner.ConfirmedCharacter = VanillaCharacterIdentity.FromState(lastIdentity);
                             var fleetIdentity = CurrentCharacter(pid);
                             if (fleetIdentity != null && owner.ConfirmedCharacter != null
-                                && VanillaCharacterRoster.Same(fleetIdentity.CharacterName, owner.ConfirmedCharacter.CharacterName))
+                                && VanillaCharacterRoster.Key(fleetIdentity) != null
+                                && VanillaCharacterRoster.Key(fleetIdentity) == VanillaCharacterRoster.Key(owner.ConfirmedCharacter))
                                 owner.CharacterSession = fleetIdentity.Session;
                         }
                     }

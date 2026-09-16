@@ -1,62 +1,62 @@
-# 4RTools Vanilla 0.6.37
+# 4RTools Vanilla 0.6.38
 
-## Character roster
+## Username reader and diagnostics
 
-The recovery table now represents characters rather than login accounts. Its
-identity columns are Description, Username, Slot and Character name, after Enabled
-and before the existing hotkey, password, proxy, PID and status columns. Multiple
-characters can share one username while retaining independent slots, descriptions
-and recovery preferences. At most two rows may be enabled.
+The shipped fingerprinted build profile now contains both user-supplied username
+locations: main module + `0xD343F8` and + `0xD39159`. At the supplied module base
+`0x00400000`, these resolve to `0x011343F8` and `0x01139159` respectively. They are
+read through the existing read-only source as `UserName` and `UserNameMirror`, not
+through an extra reader, a scan, or a protection workaround.
 
-The character editor exposes the same fields and offers freshly observed names.
-Empty slots are unknown, never silently slot 1. Passwords and proxies remain
-user-controlled. Disabled incomplete profiles can be saved; missing login
-configuration prevents unattended launch.
+Both fields appear in diagnostics and snapshot exports with values, addresses,
+validation and provenance. Both bounded UTF-8 copies must be NUL-terminated and
+agree in the same sample before username is used for identity. Missing, invalid,
+unverified or disagreeing copies remain unusable for identity; raw diagnostic
+values are retained. A failed memory read still stops the reader without retrying
+another access method. No passwords are read from game memory.
 
-## Automatic discovery and safe ownership
+## Composite character identity and legacy migration
 
-Startup and subsequent fresh fleet observations add unlisted running characters
-automatically, once, disabled. The existing fingerprinted read-only reader supplies
-identity fields; no extra memory reader or guessed offsets are introduced. Only
-missing verified fields are filled; saved descriptions, enabled flags, slots,
-passwords and proxies are not overwritten.
+The logical unique key is now **username + character name** throughout discovery,
+validation, process matching and removal suppression. Persistent GUIDs remain
+unchanged for compatibility with encrypted passwords and per-row proxy settings.
+Several characters may share a username; the same name on different usernames
+also remains separate. Missing usernames defer automatic row creation rather than
+creating new username-less rows.
 
-Existing processes are assigned by verified character identity rather than PID
-or start order. A username alone cannot identify a character. Ambiguous, stale or
-contradictory observations remain unassigned. Character/session changes prevent
-old workers from sending input or closing a replacement character. The expected
-name is checked before startup Autobattle hotkeys. A successful tool-owned
-configured login can learn the name for that exact legacy row.
+A configured legacy row with no character name is enriched in place when one
+compatible row and one fresh observed character unambiguously match its username.
+An unavailable memory slot no longer forces another row. Its description, configured
+slot, password, proxy, enabled flag and ID are preserved. Ambiguous observations,
+multiple legacy candidates and contradictory known slots are not guessed.
 
-Passive discovery does not cancel recovery. Row edits, disabling, STOP and disposal
-cancel stale operations. Detection preserves failed-state latches and the
-close-to-relaunch lease. The existing 120-second movement watchdog, terminal
-dialog handling and sequential two-client recovery remain intact.
+Untouched empty name-only discovery duplicates left by 0.6.37 can be folded into
+the matching configured row. Profiles with edited descriptions, credentials, slots,
+proxies, hotkeys or enabled flags are never automatically deleted. Repeated discovery
+and subsequent application reloads do not recreate the folded row.
 
-## Persistence and validation
+Transient unknown usernames do not fabricate character replacement or erase the
+existing recovery owner. An actually changed username cancels old ownership.
+Startup hotkeys validate the expected username even for legacy rows whose character
+name is being learned. Existing two-client limits, sequential recovery, terminal
+dialog handling, the 120-second movement watchdog and startup movement checks remain.
 
-The full character catalog is authoritative; a stale two-row runtime subset
-cannot overwrite newer fields or resurrect removed rows. Historical JSON/file
-names, IDs, encrypted passwords and proxy associations remain compatible. Atomic
-saves preserve the previous file; malformed/future catalogs are not replaced
-with incomplete fallbacks.
+## Validation and limits
 
-Release gates include Windows Debug/Release builds and the complete offline suite,
-character discovery/persistence/ownership regressions, portable package launch and
-hash checks, native test-owned process recovery, and native UI checks for the 18
-existing layouts plus actual character discovery and the character editor. Public
-assets and exact clean source identity are verified after publication; temporary
-transport files and the completed working branch are removed.
+Publication is gated on full Windows Debug/Release regression suites, shipped
+profile validation, x86/version and portable-package checks, an inert executable
+launch, native test-owned process recovery, and native UI rendering. Regression
+coverage includes the supplied offsets through the actual shared reader/adapter,
+relocated modules, copy conflicts, null/truncated values, two-client isolation,
+username/name key collisions, legacy migration, credential preservation and stale
+ownership. UI checks include the screenshot's legacy-row scenario and rendering
+both username values/addresses in the actual diagnostics form without a live reader.
 
-## Explicit limits
+The public release ZIP/checksum and exact clean source identity are verified after
+publication. Completed task branches and temporary validation transport are removed.
 
-The current shipped Vanilla memory profile verifies character names, not login
-usernames or one-based character slots. Optional trusted-field support is included,
-but values remain unknown/editable unless configured or available from a verified
-mapping. They are not inferred from names, PID order or account rows. Fully
-automatic username/slot discovery on the current client is not claimed: live
-client evidence needed to map those two fields is unavailable in this session.
-
-No live Vanilla/Gepard client or user RDP desktop was available. Offline/native
-Windows checks do not prove live game behavior. Existing dependency/compiler
-warnings remain visible. No game-memory writes, injection or protection bypass.
+The username mappings are based on the user's supplied live screenshot, not a
+live test performed by this engineering session. No live Vanilla/Gepard client or
+user RDP desktop was available; independent relog/restart confirmation is not
+claimed. Character-slot memory mapping remains unavailable; configured slots are
+retained. Existing dependency/compiler warnings remain visible.

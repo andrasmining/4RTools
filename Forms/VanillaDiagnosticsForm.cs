@@ -39,7 +39,10 @@ namespace _4RTools.Forms
         private string executablePath;
         private string buildProfile;
 
-        public VanillaDiagnosticsForm(Subject subject = null)
+        public VanillaDiagnosticsForm(Subject subject = null) : this(subject, true) { }
+
+        // Native UI regression harness can render snapshots without enumerating real clients.
+        internal VanillaDiagnosticsForm(Subject subject, bool enumerateProcesses)
         {
             this.subject = subject;
             subject?.Attach(this);
@@ -110,7 +113,7 @@ namespace _4RTools.Forms
             Controls.Add(layout);
             timer.Tick += (s, e) => Poll();
             LoadSettings();
-            RefreshProcesses();
+            if (enumerateProcesses) RefreshProcesses();
             Stop("Disconnected. Use Offline demo without a game, or explicitly connect read-only. Automation is not enabled.");
         }
 
