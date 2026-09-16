@@ -1,15 +1,22 @@
 name: Existing client memory validation
+
 on:
   push:
     branches: [fix/existing-client-gate-host-debug-v3]
-    paths: ['.github/workflows/existing-client-memory-validation.yml']
+    paths:
+      - '.github/workflows/existing-client-memory-validation.yml'
+  workflow_dispatch:
+
 permissions:
   contents: write
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: existing-client-memory-validation
   cancel-in-progress: false
+
 jobs:
   validate:
     runs-on: windows-2022
@@ -18,311 +25,46 @@ jobs:
       - name: Preserve source bytes
         shell: powershell
         run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Apply existing-client memory gate and diagnostics changes
+
+      - name: Apply reviewed source transformation
         shell: powershell
         run: |
-          @'
-          from pathlib import Path
-          import re
-
-          def read(path):
-              return Path(path).read_text(encoding='utf-8')
-          def write(path, text):
-              Path(path).write_text(text, encoding='utf-8', newline='\n')
-          def replace_once(path, old, new):
-              text = read(path)
-              count = text.count(old)
-              assert count == 1, f'{path}: expected one literal match, got {count}'
-              write(path, text.replace(old, new, 1))
-          def regex_once(path, pattern, replacement):
-              text = read(path)
-              new, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
-              assert count == 1, f'{path}: expected one regex match, got {count}'
-              write(path, new)
-
-          autobattle = 'Model/Vanilla/VanillaAutobattleResume.cs'
-          pattern = r'''        private void WaitForAutobattleReady\(VanillaReconnectAccount account, int pid, Func<bool> cancelled,\n            int timeoutMs, string context\)\n        \{.*?\n        \}\n\n        private async Task VerifyAutobattleResumeAsync'''
-          replacement = r'''        private void WaitForAutobattleReady(VanillaReconnectAccount account, int pid, Func<bool> cancelled,
-            int timeoutMs, string context)
-        {
-            WaitForVerifiedGameplayMemoryState(account, pid, cancelled, timeoutMs, context, true);
-        }
-
-        private void WaitForExistingClientGameplayReady(VanillaReconnectAccount account, int pid, Func<bool> cancelled,
-            int timeoutMs, string context)
-        {
-            WaitForVerifiedGameplayMemoryState(account, pid, cancelled, timeoutMs, context, false);
-        }
-
-        private void WaitForVerifiedGameplayMemoryState(VanillaReconnectAccount account, int pid, Func<bool> cancelled,
-            int timeoutMs, string context, bool postLoginHotkey)
-        {
-            if (account == null) throw new ArgumentNullException(nameof(account));
-            if (cancelled == null) throw new ArgumentNullException(nameof(cancelled));
-            string purpose = postLoginHotkey ? "mandatory post-login hotkey" : "existing-client adoption";
-            Log(account.Label + ": " + context + ": waiting for fresh verified username/character/X/Y/map/living HP for " + purpose + ".");
-            VanillaDebugLog.Write("MEMORY-GATE", "PID=" + pid + "; " + account.Label + ": " + context
-                + ": waiting for verified gameplay memory state; purpose=" + purpose + ".");
-            using (var memory = new ReadOnlyProcessMemory(pid))
-            {
-                var identity = VanillaExecutableIdentity.Read(memory.ExecutablePath);
-                var profile = VanillaBuildProfile.Find(AutobattleBuildProfileDirectory, identity,
-                    message => Log(account.Label + ": " + message));
-                if (profile == null) throw new InvalidOperationException("No verified Vanilla build profile; gameplay memory state cannot be proven.");
-                var adapter = new VanillaStateAdapter(profile, identity);
-                using (var source = new MemoryStateSource(memory, profile.MemoryMap))
-                {
-                    var watch = Stopwatch.StartNew();
-                    int consecutive = 0;
-                    string last = "no valid sample yet";
-                    while (watch.ElapsedMilliseconds < timeoutMs)
-                    {
-                        if (cancelled()) throw new OperationCanceledException(context + ": gameplay memory verification cancelled.");
-                        var now = DateTimeOffset.UtcNow;
-                        try
-                        {
-                            var state = source.Poll(now);
-                            if (source.IsStopped) throw new InvalidOperationException(state.Error ?? source.Status);
-                            adapter.Observe(state, watch.Elapsed);
-                            ValidateExpectedCharacter(account, state);
-                            VanillaAutobattleResumeVerifier.ValidateSample(state, null, pid, now);
-                            consecutive++;
-                            last = "verified " + state.UserName.Value + "/" + state.CharacterName.Value
-                                + " map=" + state.Map.Value + " xy=" + state.X.Value + "," + state.Y.Value
-                                + " hp=" + state.CurrentHP.Value + "/" + state.MaxHP.Value;
-                            if (consecutive >= 2)
-                            {
-                                Log(account.Label + ": " + context + ": gameplay memory state ready after "
-                                    + watch.ElapsedMilliseconds + "ms (" + last + ").");
-                                VanillaDebugLog.Write("MEMORY-GATE", "PID=" + pid + "; " + account.Label + ": " + context
-                                    + ": accepted by two fresh verified gameplay-memory samples; " + last + ".");
-                                return;
-                            }
-                        }
-                        catch (InvalidOperationException ex)
-                        {
-                            if (source.IsStopped) throw;
-                            consecutive = 0;
-                            last = ex.Message;
-                        }
-                        Thread.Sleep(150);
-                    }
-                    throw new InvalidOperationException(context + ": fresh verified gameplay memory state was not ready within "
-                        + (timeoutMs / 1000) + "s; "
-                        + (postLoginHotkey ? "no autobattle hotkey was sent. " : "existing client was not adopted. ")
-                        + "Last state: " + last);
-                }
-            }
-        }
-
-        private async Task VerifyAutobattleResumeAsync'''
-          regex_once(autobattle, pattern, replacement)
-
-          startup = 'Model/Vanilla/VanillaStartupOrchestrator.cs'
-          old_gate = '''        internal static bool SequentialStartupMayAdvance(bool gameplayConfirmed, bool movementVerified, bool minimized, bool failed)
-        {
-            return gameplayConfirmed && movementVerified && minimized && !failed;
-        }
-'''
-          new_gate = old_gate + '''
-        internal static bool ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState visual)
-        {
-            return visual == VanillaVisualState.LoginShell
-                || visual == VanillaVisualState.LoggingOut
-                || visual == VanillaVisualState.Disconnected;
-        }
-'''
-          replace_once(startup, old_gate, new_gate)
-
-          old_existing = '''                        using (var input = new VanillaForegroundInput(existingPid.Value))
-                        {
-                            input.CancellationRequested = () => StartupCancelled(generation);
-                            WaitForGameplayStable(input, existingPid.Value, generation, 15000, account.Label + " existing client");
-                        }
-'''
-          new_existing = '''                        WaitForExistingClientGameplayReady(account, existingPid.Value,
-                            () => StartupCancelled(generation), 15000, account.Label + " existing client");
-                        VanillaVisualState supplementalVisual = VanillaVisualState.Unknown;
-                        try
-                        {
-                            using (var process = Process.GetProcessById(existingPid.Value))
-                            {
-                                process.Refresh();
-                                supplementalVisual = VanillaVisualProbe.Classify(process.MainWindowHandle);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            VanillaDebugLog.Write("STARTUP", account.Label
-                                + ": supplemental visual probe failed after memory verification: " + ex.Message);
-                        }
-                        VanillaDebugLog.Write("STARTUP", account.Label + ": existing PID " + existingPid.Value
-                            + " accepted by fresh verified memory gameplay state; supplemental visual=" + supplementalVisual
-                            + (supplementalVisual == VanillaVisualState.Unknown ? " (Unknown is non-blocking)." : "."));
-                        if (ExistingClientVisualBlocksMemoryAdoption(supplementalVisual))
-                            throw new InvalidOperationException(account.Label
-                                + ": fresh verified memory says gameplay, but supplemental visual is " + supplementalVisual
-                                + "; existing client was not adopted.");
-'''
-          replace_once(startup, old_existing, new_existing)
-
-          debug = 'Model/Vanilla/VanillaDebugLog.cs'
-          old_init = '''            Write("APP", "Global debug logging initialized. version=" + SafeVersion()
-                + ", pid=" + Process.GetCurrentProcess().Id + ", base='" + AppDomain.CurrentDomain.BaseDirectory
-                + "', cwd='" + Environment.CurrentDirectory + "'.");
-'''
-          new_init = old_init + '''            try
-            {
-                Write("HOST", VanillaHostDiagnostics.Build().Replace("\\r", " ").Replace("\\n", " | "));
-            }
-            catch (Exception ex) { Write("HOST", "Host diagnostics failed: " + ex); }
-'''
-          replace_once(debug, old_init, new_init)
-          old_bundle = '''            text.AppendLine("Data root: " + VanillaAppData.RootDirectory);
-            text.AppendLine();
-
-            try
-'''
-          new_bundle = '''            text.AppendLine("Data root: " + VanillaAppData.RootDirectory);
-            text.AppendLine();
-            try { text.Append(VanillaHostDiagnostics.Build()); }
-            catch (Exception ex) { text.AppendLine("HOST DIAGNOSTICS FAILED: " + ex); }
-            text.AppendLine();
-
-            try
-'''
-          replace_once(debug, old_bundle, new_bundle)
-
-          ui = 'Model/Vanilla/VanillaGlobalDebugUi.cs'
-          old_clip = '''                Clipboard.SetText(string.IsNullOrWhiteSpace(contents) ? "(debug log is empty)" : contents);
-'''
-          new_clip = '''                Clipboard.SetDataObject(string.IsNullOrWhiteSpace(contents) ? "(debug log is empty)" : contents,
-                    true, 20, 100);
-'''
-          replace_once(ui, old_clip, new_clip)
-
-          tests = 'Tests/VanillaReconnectRegressionTests.cs'
-          old_test_list = '''            Test("Sequential startup advances only after gameplay resume and minimize", HardenedStartupAdvanceGate);
-            Test("Gepard splash is never an interactive input target", GepardSplashIsTransient);
-'''
-          new_test_list = '''            Test("Sequential startup advances only after gameplay resume and minimize", HardenedStartupAdvanceGate);
-            Test("Existing client startup accepts verified memory when visual is Unknown", ExistingClientMemoryGate);
-            Test("Host diagnostics include session display and window context", HostDiagnosticsBundle);
-            Test("Gepard splash is never an interactive input target", GepardSplashIsTransient);
-'''
-          replace_once(tests, old_test_list, new_test_list)
-          marker = '''        private static void GepardSplashIsTransient()
-'''
-          methods = '''        private static void ExistingClientMemoryGate()
-        {
-            Assert(!VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.Unknown),
-                "Unknown visual state must not override fresh verified gameplay memory.");
-            Assert(!VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.Gameplay),
-                "Gameplay unexpectedly blocked memory-backed adoption.");
-            Assert(VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.LoginShell),
-                "A verified login shell must block gameplay adoption.");
-            Assert(VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.LoggingOut),
-                "Logging-out state must block gameplay adoption.");
-            Assert(VanillaReconnectSupervisor.ExistingClientVisualBlocksMemoryAdoption(VanillaVisualState.Disconnected),
-                "Disconnected state must block gameplay adoption.");
-        }
-
-        private static void HostDiagnosticsBundle()
-        {
-            string value = VanillaHostDiagnostics.Build();
-            Assert(value.Contains("HOST / DISPLAY / SESSION DIAGNOSTICS")
-                && value.Contains("Session=") && value.Contains("Screens=")
-                && value.Contains("Vanilla processes="),
-                "Host diagnostics are missing required machine/session/display/process context.");
-        }
-
-'''
-          replace_once(tests, marker, methods + marker)
-
-          assembly = 'Properties/AssemblyInfo.cs'
-          text = read(assembly)
-          assert text.count('0.6.43.0') == 2, 'Unexpected 0.6.43 version occurrences'
-          write(assembly, text.replace('0.6.43.0', '0.6.44.0'))
-
-          notes = '''# 4RTools Vanilla 0.6.44
-
-## Existing running clients: verified memory is authoritative
-
-A cross-machine regression could correctly match running clients by username + character name,
-while START SUPERVISOR still failed because the screenshot classifier remained `Unknown`.
-The supplied debug bundle proved that both PIDs had read-only access, correct build profiles and
-verified character identity, but the old existing-client gate repeatedly restored the window and
-waited 15 seconds for a visual `Gameplay` classification.
-
-Existing clients are now adopted from two fresh verified read-only gameplay-memory samples:
-expected username + character, valid X/Y, map and living HP. A visual `Unknown` result is
-supplemental and no longer blocks adoption or causes the client to be repeatedly restored just to
-prove gameplay. Explicit LoginShell, LoggingOut and Disconnected visual states still fail closed.
-No resume/autobattle hotkey is sent when merely adopting an already-running client.
-
-Freshly restarted/relogged clients retain the 0.6.43 policy: after verified login readiness they
-wait a full 10 seconds and use the same TESTS -> Resume hotkey verifier, with at most three sends
-and a 10-second fresh X/Y movement window after each send.
-
-## Better cross-machine debug bundles
-
-COPY DEBUG LOG now adds host/session/display telemetry: real Windows product/build from the
-registry, process/OS architecture, CLR/culture/timezone, terminal/RDP session information,
-virtual desktop and every monitor's bounds/working area, system DPI, and every running Vanilla
-PID plus all of its top-level windows (handle, visibility, minimized state, client size, class and
-title). A compact copy is also written once to debug.log at application startup. Clipboard copy
-uses an extended retry window to tolerate transient RDP clipboard contention.
-
-## Validation limits
-
-Release validation covers Debug/Release regression suites, existing-client memory/visual policy,
-host diagnostics generation, native test-owned process recovery, portable package/launch checks,
-mock-data UI checks, public release assets/source identity and updater discovery. No independent
-live Vanilla/Gepard/RDP session is available to the build runner; the user-provided 0.6.43 debug
-bundle is the live evidence for this machine-specific failure.
-'''
-          write('RELEASE-NOTES.md', notes)
-
-          agents = 'Model/Vanilla/AGENTS.md'
-          text = read(agents)
-          addition = '''
-
-## Existing-client startup evidence
-
-- For an already-running, identity-matched Vanilla client, fresh verified read-only gameplay memory is the primary startup evidence: expected username + character, X/Y, map and living HP.
-- Visual recognition is supplemental for existing-client adoption. `Unknown` must not fail adoption, trigger hotkey input, or repeatedly restore/focus a client solely to prove gameplay. Explicit login/logout/disconnected evidence may still fail closed.
-- `COPY DEBUG LOG` must retain enough host/session/display/top-level-window telemetry to diagnose machine-specific visual/focus differences without requiring the user to reconstruct the environment manually.
-'''
-          if '## Existing-client startup evidence' not in text:
-              write(agents, text.rstrip() + addition)
-          '@ | python -
+          python .github/existing_client_transform.py
           if ($LASTEXITCODE -ne 0) { throw 'Source transformation failed.' }
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'Whitespace validation failed.' }
           git diff --stat
+
       - name: Restore dependencies
         shell: powershell
         run: |
           nuget restore 4RTools.sln -NonInteractive
           if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+
       - name: Validate shipped profiles
         shell: powershell
         run: ./scripts/validate-vanilla-build-profiles.ps1
+
       - name: Debug build and complete regression suite
         shell: powershell
         run: ./scripts/build.ps1 -Configuration Debug -VanillaRelease
+
       - name: Release build, tests, portable package and launch smoke
         shell: powershell
         run: ./scripts/build-release.ps1 -Version 0.6.44
+
       - name: Native process recovery
         shell: powershell
         run: ./scripts/test-recovery-native.ps1
+
       - name: Native responsive UI checks
         shell: powershell
         run: ./scripts/test-ui-layout.ps1
+
       - name: Commit validated source
         shell: powershell
         run: |
@@ -333,6 +75,7 @@ bundle is the live evidence for this machine-specific failure.
           if ($LASTEXITCODE -ne 0) { throw 'Validated source commit failed.' }
           git push origin "HEAD:$env:GITHUB_REF_NAME"
           if ($LASTEXITCODE -ne 0) { throw 'Push rejected; remote work was not overwritten.' }
+
       - name: Collect validation evidence
         if: always()
         shell: powershell
@@ -341,6 +84,7 @@ bundle is the live evidence for this machine-specific failure.
           git status --short | Out-File dist/evidence/worktree-status.txt -Encoding utf8
           git rev-parse HEAD | Out-File dist/evidence/source-commit.txt -Encoding utf8
           git diff origin/main...HEAD --stat | Out-File dist/evidence/change-stat.txt -Encoding utf8
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
