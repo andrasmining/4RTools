@@ -47,6 +47,10 @@ jobs:
         shell: powershell
         run: '& .\scripts\build-release.ps1 -Version $env:VERSION'
 
+      - name: Native test-owned process recovery checks
+        shell: powershell
+        run: '& .\scripts\test-recovery-native.ps1'
+
       - name: Render and validate mock-data UI
         shell: powershell
         run: '& .\scripts\test-ui-layout.ps1'
@@ -59,6 +63,7 @@ jobs:
           path: |
             dist/ui-layout/*.png
             dist/ui-layout/*.txt
+            dist/native-recovery.log
           if-no-files-found: warn
           retention-days: 14
 
