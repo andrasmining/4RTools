@@ -84,7 +84,7 @@ With automatic recovery enabled, 30 seconds without fresh verified X/Y movement
 starts hotkey recovery. Unchanged, unreadable, missing, unverified and stale
 coordinates never count as movement and are never treated as (0,0).
 
-After every login/relog, stable gameplay is followed by a 7-second settle, then
+After every login/relog, stable gameplay is followed by a 10-second settle, then
 the configured Autobattle/slave hotkey is sent. X/Y is checked for 10 seconds.
 Without movement the hotkey is tried again, for three total attempts. The same
 three-attempt hotkey sequence is used when the 30-second online watchdog fires.

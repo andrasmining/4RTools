@@ -184,33 +184,31 @@ enduring policy here without deleting unrelated valid rules. This automation
 repository is `andrasmining/4RTools`; the archived `andrasmining/cinder-index`
 market dashboard is a different project and must not receive autobattle changes.
 
-## Required autobattle resume verification
+## Restart-only autobattle verification and steady-state recovery
 
-After stable gameplay, obtain a fresh verified X/Y baseline for the intended
-client immediately before its configured resume hotkey. Observe coordinates
-throughout the following 10 seconds: a change in X OR Y verifies movement.
-Do not compare only the beginning/end positions or require both axes to change.
-If no movement is observed, refocus the intended client, refresh its baseline,
-and retry. Recheck movement after refocusing and before another toggle.
-Allow THREE total hotkey attempts (initial send plus at most two retries), each
-with its own ten-second observation window. Stop immediately upon movement.
-After three unsuccessful windows, display/log failure and latch it for that
-attempt; a subsequent gameplay poll must not reset the retry budget. Sending a
-key is not verified resume, and movement is not proof of combat.
+Automatic Autobattle/slave hotkeys are authorized only for a client that 4RTools
+itself has freshly launched/restarted/relogged. Adopting, restoring, maximizing,
+focusing or observing an already-running client must NEVER arm or send an automatic
+resume hotkey. Manual TESTS -> Resume hotkey remains an explicit diagnostic action.
 
-Share one cancellable, nonblocking verifier across startup, recovery, and the
-resume diagnostic. Keep per-client identity and the serialized input lease
-through verification and minimization. Do not toggle adopted healthy clients.
-Display compact attempt/retry progress in the account row and details in logs.
-Use the existing read-only fingerprinted coordinate provider, not guessed
-offsets, screenshots of coordinates, or stale values. Missing/unverified/stale
-state is not zero or stillness. STOP, configuration/identity changes, map
-transitions, disconnects, failed reads, and lost focus must prevent late keys.
-Use monotonic time and ensure an old worker cannot complete a newer operation.
-Cover first/second/third success, three-window failure, single-axis/intermediate
-movement, deadline/refocus races, cancellation, stale/missing state, identity
-changes, lease isolation and input cleanup with deterministic regression tests.
-Keep existing Windows build, portable launch and mock-data UI gates intact.
+After the restarted client reaches the expected username/character with fresh verified
+X/Y/map/living HP, wait a full 10 seconds, then call the exact same shared ResumeHotkey
+verifier used by the diagnostic. It may send at most three configured hotkeys, each
+followed by its own 10-second fresh X/Y observation window; stop immediately on X or Y
+movement. Missing/unverified/stale state is not zero or movement.
+
+During normal online supervision, do not send wakeup hotkeys. Track verified X/Y only.
+After five minutes without verified movement, an exact freshly confirmed `Now Logging
+Out.` or `Disconnected from Server.` dialog may trigger an early client restart. Without
+one of those exact dialogs, keep waiting. At ten minutes without verified X/Y movement,
+restart the affected client regardless of visual classification. A healthy sibling stays
+untouched and dual recovery remains globally serialized.
+
+Failed launch/login/restart cycles retry with exponential backoff using configured base
+delay, doubling to a maximum one-hour interval. Do not impose a finite three-client-
+restart terminal budget; retries continue until verified recovery or explicit STOP/
+configuration/client replacement. Every replacement again uses the 10-second settle and
+shared three-hotkey verifier.
 
 ## Terminal dialogs and sequential replacement
 

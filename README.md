@@ -73,7 +73,7 @@ a healthy sibling is not restarted or toggled. Unknown popups receive no blind i
 ### Autobattle movement verification
 
 After every actual login/relog, gameplay must first be stably detected. The client
-then settles for **7 seconds** and the configured resume hotkey is always sent. Fresh,
+then settles for **10 seconds** and the configured resume hotkey is always sent. Fresh,
 verified X/Y is observed for **10 seconds**. Movement on either axis succeeds. Without
 movement, the intended client is revalidated/focused and the hotkey is sent again.
 There are **three total hotkey attempts**.

@@ -547,9 +547,6 @@ namespace _4RTools.Model.Vanilla
             public bool ClosingForRecovery;
             public readonly VanillaMovementWatchdog MovementWatchdog = new VanillaMovementWatchdog();
             public bool MovementRecoveryPending;
-            public int AutobattleRestartAttempts;
-            public bool AutobattleRestartInProgress;
-            public bool AutobattleRecoveryExhausted;
             public DateTimeOffset? NonMinimizedSince;
             public int TerminalSamples;
             public VanillaVisualState TerminalVisual;
@@ -625,9 +622,6 @@ namespace _4RTools.Model.Vanilla
                 {
                     runtime.ClosingForRecovery = runtime.RecoveryOwned = false;
                     runtime.MovementRecoveryPending = false;
-                    runtime.AutobattleRestartAttempts = 0;
-                    runtime.AutobattleRestartInProgress = false;
-                    runtime.AutobattleRecoveryExhausted = false;
                     runtime.NonMinimizedSince = null;
                     runtime.MovementWatchdog.Reset();
                     ResetTerminalEvidence(runtime);
@@ -657,10 +651,7 @@ namespace _4RTools.Model.Vanilla
                     foreach (Runtime runtime in runtimes.Values)
                     {
                         runtime.MovementRecoveryPending = false;
-                        runtime.AutobattleRestartAttempts = 0;
-                        runtime.AutobattleRestartInProgress = false;
-                        runtime.AutobattleRecoveryExhausted = false;
-                        runtime.ResumeVerificationFailed = false;
+                                    runtime.ResumeVerificationFailed = false;
                         runtime.ResumeFailureDetail = null;
                         runtime.NextRecoveryAt = null;
                         runtime.NonMinimizedSince = null;
@@ -695,9 +686,6 @@ namespace _4RTools.Model.Vanilla
                     runtime.RecoveryOwned = false;
                     runtime.ClosingForRecovery = false;
                     runtime.MovementRecoveryPending = false;
-                    runtime.AutobattleRestartAttempts = 0;
-                    runtime.AutobattleRestartInProgress = false;
-                    runtime.AutobattleRecoveryExhausted = false;
                     runtime.NonMinimizedSince = null;
                     runtime.MovementWatchdog.Reset();
                     ResetTerminalEvidence(runtime);
@@ -715,7 +703,9 @@ namespace _4RTools.Model.Vanilla
                 Runtime runtime;
                 if (!runtimes.TryGetValue(accountId, out runtime)) throw new ArgumentException("Unknown account.");
                 if (!runtime.ProcessId.HasValue) throw new InvalidOperationException("This account has no assigned Vanilla client.");
-                QueueLogin(runtime, false, "Manual reconnect requested");
+                int pid = runtime.ProcessId.Value;
+                QueueClientRestart(runtime, restartEnvironment.UtcNow, "Manual restart/relogin requested", false,
+                    () => restartEnvironment.GetStartTimeUtc(pid));
             }
         }
 
@@ -780,8 +770,7 @@ namespace _4RTools.Model.Vanilla
                     int old = runtime.ProcessId.Value;
                     if (positionClientExited != null) positionClientExited(old);
                     runtime.MovementWatchdog.Reset();
-                    bool boundedAutobattleRecovery = runtime.MovementRecoveryPending;
-                    if (!boundedAutobattleRecovery) runtime.MovementRecoveryPending = false;
+                    runtime.MovementRecoveryPending = false;
                     bool failedDuringRecovery = runtime.RecoveryOwned;
                     runtime.ProcessId = null;
                     runtime.CharacterSession = null;
@@ -841,8 +830,12 @@ namespace _4RTools.Model.Vanilla
                 p.Refresh();
                 // Independent of visual recognition and window availability. A stale/failed
                 // coordinate reader is an unhealthy observation, never position (0,0).
-                if (CheckMovementWatchdog(runtime, now, () => p.StartTime.ToUniversalTime(),
-                    () => settings.VisualWatchdog ? VanillaVisualProbe.Classify(p.MainWindowHandle) : VanillaVisualState.Unknown)) return;
+                if (CheckMovementWatchdog(runtime, now, () => p.StartTime.ToUniversalTime())) return;
+                if (runtime.MovementRecoveryPending)
+                {
+                    QueueAutobattleClientRestartLocked(runtime, now, runtime.ResumeFailureDetail ?? "Restart-only autobattle verification failed");
+                    return;
+                }
                 if (p.MainWindowHandle == IntPtr.Zero)
                 {
                     SetStage(runtime, VanillaReconnectStage.WaitingForWindow, "Waiting for Vanilla main window");
@@ -856,31 +849,27 @@ namespace _4RTools.Model.Vanilla
                 {
                     runtime.LoginLikeSince = null;
                     runtime.HasBeenOnline = true;
-                    if (runtime.AutobattleRecoveryExhausted)
+                    runtime.ResumeVerificationFailed = false;
+                    runtime.ResumeFailureDetail = null;
+                    // Automatic hotkeys are restart-only. A manually restored/maximized or
+                    // adopted healthy client is monitored by X/Y only and is never toggled.
+                    if (runtime.RecoveryOwned && !runtime.ResumeSent && !runtime.ScriptRunning)
                     {
-                        SetStage(runtime, VanillaReconnectStage.Error, runtime.ResumeFailureDetail ?? "Autobattle recovery exhausted");
-                        return;
+                        if (!runtime.GameplaySince.HasValue)
+                        {
+                            runtime.GameplaySince = now;
+                            SetStage(runtime, VanillaReconnectStage.WaitingForGameplay,
+                                "Replacement gameplay confirmed; settling 10s before restart-only autobattle hotkey");
+                            Log(runtime.Account.Label + ": replacement gameplay confirmed; waiting 10s before sending " + runtime.Account.HotkeyText + ".");
+                        }
+                        if ((now - runtime.GameplaySince.Value).TotalMilliseconds >= VanillaAutobattleResumeVerifier.PostLoginSettleMs)
+                            RequestVerifiedResume(runtime, "Replacement post-login 10s settle complete.", false);
                     }
-                    if (runtime.ResumeVerificationFailed && !runtime.MovementRecoveryPending)
+                    else
                     {
-                        SetStage(runtime, VanillaReconnectStage.Error, runtime.ResumeFailureDetail);
-                        return;
-                    }
-                    if (!runtime.GameplaySince.HasValue)
-                    {
-                        runtime.GameplaySince = now;
-                        SetStage(runtime, VanillaReconnectStage.WaitingForGameplay,
-                            "Gameplay confirmed; settling 7s before autobattle hotkey");
-                        Log(runtime.Account.Label + ": gameplay confirmed; waiting 7s before sending " + runtime.Account.HotkeyText + ".");
-                    }
-                    if (!runtime.ResumeSent && !runtime.ScriptRunning
-                        && (now - runtime.GameplaySince.Value).TotalMilliseconds >= VanillaAutobattleResumeVerifier.PostLoginSettleMs)
-                    {
-                        RequestVerifiedResume(runtime, "Post-login settle complete.", runtime.MovementRecoveryPending);
-                    }
-                    else if (runtime.ResumeSent)
-                    {
-                        SetStage(runtime, VanillaReconnectStage.Online, "Gameplay detected; movement watchdog armed");
+                        runtime.GameplaySince = null;
+                        SetStage(runtime, VanillaReconnectStage.Online,
+                            "Gameplay detected; steady-state X/Y watchdog armed; automatic hotkeys are disabled outside restart/relogin");
                     }
                     return;
                 }
@@ -889,22 +878,16 @@ namespace _4RTools.Model.Vanilla
                 if (visual == VanillaVisualState.LoginShell)
                 {
                     if (!runtime.LoginLikeSince.HasValue) runtime.LoginLikeSince = now;
-                    if (runtime.HasBeenOnline && settings.AutoRecover
+                    if (runtime.RecoveryOwned && settings.AutoRecover
                         && (now - runtime.LoginLikeSince.Value).TotalMilliseconds >= settings.LoginStableMs)
                     {
-                        CloseForRecovery(runtime, p, now, "Login/service screen detected after gameplay disconnect", false);
-                        return;
+                        QueueLogin(runtime, true, "Replacement client login shell detected");
                     }
-                    if (settings.AutoRecover && (now - runtime.LoginLikeSince.Value).TotalMilliseconds >= settings.LoginStableMs)
-                    {
-                        if (runtime.RecoveryOwned && runtime.LastRecovery.HasValue && !runtime.ScriptRunning)
-                        {
-                            CloseForRecovery(runtime, p, now, "Login/service screen remained after a recovery attempt", true);
-                            return;
-                        }
-                        QueueLogin(runtime, runtime.RecoveryOwned, "Initial/recovery login shell detected");
-                    }
-                    else SetStage(runtime, VanillaReconnectStage.WaitingForGameplay, "Vanilla login/service screen detected");
+                    else if (runtime.RecoveryOwned)
+                        SetStage(runtime, VanillaReconnectStage.WaitingForGameplay, "Replacement login/service screen detected; waiting before login input");
+                    else
+                        SetStage(runtime, VanillaReconnectStage.WaitingForGameplay,
+                            "Login/service screen detected on existing client; no login or hotkey input sent. X/Y watchdog will restart it if the stall persists.");
                     return;
                 }
 
@@ -964,8 +947,6 @@ namespace _4RTools.Model.Vanilla
         }
         private void Launch(Runtime runtime, DateTimeOffset now)
         {
-            if (runtime.MovementRecoveryPending && !runtime.AutobattleRestartInProgress
-                && !TryBeginAutobattleRestartAttemptLocked(runtime, now, "Launching another replacement client")) return;
             string executable = settings.LaunchExecutable;
             string arguments = settings.LaunchArguments ?? "";
             string accountId = runtime.Account.Id;
@@ -1047,7 +1028,7 @@ namespace _4RTools.Model.Vanilla
             runtime.ConfirmedCharacter = null;
             runtime.ClosingForRecovery = false;
             runtime.NonMinimizedSince = null;
-            if (!runtime.AutobattleRestartInProgress) runtime.MovementRecoveryPending = false;
+            runtime.MovementRecoveryPending = false;
             runtime.MovementWatchdog.Reset();
             ResetTerminalEvidence(runtime);
             // Never toggle Autobattle merely because 4RTools adopted an already-running client.
@@ -1153,9 +1134,9 @@ namespace _4RTools.Model.Vanilla
 
                     WaitForAutobattleReady(account, pid, cancelled, 60000, "Recovery post-character");
                     autobattlePhase = true;
-                    ResumeProgress(owner, pid, generation, "Recovery login: gameplay confirmed; settling 7s before " + account.HotkeyText);
+                    ResumeProgress(owner, pid, generation, "Recovery login: verified character online; settling 10s before restart-only " + account.HotkeyText);
                     PauseCharacterSelection(cancelled, VanillaAutobattleResumeVerifier.PostLoginSettleMs);
-                    ResumeProgress(owner, pid, generation, "Recovery login: 7s settle complete; preparing autobattle hotkey verification 1/3");
+                    ResumeProgress(owner, pid, generation, "Recovery login: 10s settle complete; invoking the same ResumeHotkey verifier used by TESTS (1/3)");
                     VerifyAutobattleResumeAsync(account, pid, cancelled,
                         detail => ResumeProgress(owner, pid, generation, "Recovery login: " + detail))
                         .GetAwaiter().GetResult();
@@ -1368,29 +1349,6 @@ namespace _4RTools.Model.Vanilla
 
         private void ScheduleRecoveryFailureLocked(Runtime runtime, DateTimeOffset now, string reason)
         {
-            if (runtime.MovementRecoveryPending)
-            {
-                runtime.AutobattleRestartInProgress = false;
-                runtime.RecoveryOwned = false;
-                runtime.ScriptRunning = false;
-                runtime.ResumeSent = false;
-                runtime.ResumeVerificationFailed = true;
-                runtime.ResumeFailureDetail = reason;
-                if (runtime.AutobattleRestartAttempts >= VanillaAutobattleResumeVerifier.MaximumClientRestarts)
-                {
-                    FailAutobattleRecoveryPermanentlyLocked(runtime, reason);
-                    return;
-                }
-                const int delay = 5000;
-                runtime.NextRecoveryAt = now.AddMilliseconds(delay);
-                SetStage(runtime, VanillaReconnectStage.Backoff, reason + "; bounded client restart "
-                    + (runtime.AutobattleRestartAttempts + 1) + "/" + VanillaAutobattleResumeVerifier.MaximumClientRestarts
-                    + " queued in 5s");
-                Log(runtime.Account.Label + ": " + reason + "; bounded client restart "
-                    + (runtime.AutobattleRestartAttempts + 1) + "/" + VanillaAutobattleResumeVerifier.MaximumClientRestarts
-                    + " will be attempted in 5s.");
-                return;
-            }
             runtime.RecoveryFailures = Math.Min(30, runtime.RecoveryFailures + 1);
             int retryDelay = VanillaRecoveryPolicy.RetryDelayMs(runtime.RecoveryFailures, settings.RetryBackoffMs, settings.MaxRetryBackoffMs);
             runtime.NextRecoveryAt = now.AddMilliseconds(retryDelay);
@@ -1399,7 +1357,7 @@ namespace _4RTools.Model.Vanilla
             SetStage(runtime, VanillaReconnectStage.Backoff, reason + "; retry in " + FormatDelay(retryDelay)
                 + " (failure " + runtime.RecoveryFailures + ", capped at 1 hour)");
             Log(runtime.Account.Label + ": " + reason + "; next recovery attempt in " + FormatDelay(retryDelay)
-                + ". Backoff doubles after each failed attempt and is capped at 1 hour.");
+                + ". Backoff doubles after each failed attempt and is capped at 1 hour; retries continue until success or STOP.");
         }
 
         private string BackoffDetail(Runtime runtime, DateTimeOffset now)

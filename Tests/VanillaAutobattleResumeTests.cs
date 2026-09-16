@@ -29,7 +29,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Second attempt succeeds without a third key", () => Success(2, false));
             Test("Third attempt succeeds without a fourth key", () => Success(3, true));
             Test("No movement fails after exactly three 10-second windows", BoundedFailure);
-            Test("Post-login settle and restart budgets are explicitly bounded", RecoveryConstants);
+            Test("Restart-only post-login settle is 10 seconds and hotkey attempts stay bounded", RecoveryConstants);
             Test("Unknown visual state does not block verified post-login memory input", VisualGate);
             Test("A completed verifier cannot reset its retry budget", NoRestart);
             Test("Intermediate movement is seen even if the character returns", MovementAndReturn);
@@ -60,7 +60,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Account status exposes verification and retry progress", StatusProgress);
             Test("STOP invalidates a worker even when its PID is retained", WorkerStop);
             Test("Settings changes release the verification lease and latch failure", WorkerSettingsChange);
-            Test("Failed resume cannot be queued again by a later gameplay poll", WorkerFailureLatch);
+            Test("Normal supervision has no automatic resume queue after a failed diagnostic", WorkerFailureLatch);
             Test("A new operation cannot be completed by the old worker", WorkerReplacement);
             Test("Guarded chord releases every held key", ChordSuccess);
             Test("Cancellation between modifier and key releases the modifier", ChordCancellation);
@@ -229,10 +229,8 @@ namespace Vanilla.Diagnostics.Tests
                 RuntimeField(runtime, "ScriptRunning", false);
                 RuntimeField(runtime, "RecoveryOwned", false);
                 RuntimeField(runtime, "ResumeVerificationFailed", true);
-                typeof(VanillaReconnectSupervisor).GetMethods(PrivateInstance)
-                    .Single(m => m.Name == "QueueVerifiedResume" && m.GetParameters().Length == 1)
-                    .Invoke(supervisor, new[] { runtime });
-                Assert(!RuntimeFlag(runtime, "ScriptRunning") && !RuntimeFlag(runtime, "RecoveryOwned"), "Failure restarted input.");
+                Assert(!RuntimeFlag(runtime, "ScriptRunning") && !RuntimeFlag(runtime, "RecoveryOwned"),
+                    "A failed diagnostic unexpectedly armed automatic input.");
             });
         }
         private static void WorkerReplacement()
@@ -311,10 +309,13 @@ namespace Vanilla.Diagnostics.Tests
         }
         private static void RecoveryConstants()
         {
-            Assert(VanillaAutobattleResumeVerifier.PostLoginSettleMs == 7000, "Post-login hotkey settle changed unexpectedly.");
+            Assert(VanillaAutobattleResumeVerifier.PostLoginSettleMs == 10000, "Restart-only post-login settle must be ten seconds.");
             Assert(VanillaAutobattleResumeVerifier.MaximumAttempts == 3, "Hotkey attempt budget changed unexpectedly.");
             Assert(VanillaAutobattleResumeVerifier.ObservationWindowMs == 10000, "Movement verification window changed unexpectedly.");
-            Assert(VanillaAutobattleResumeVerifier.MaximumClientRestarts == 3, "Client restart budget changed unexpectedly.");
+            Assert(VanillaRecoveryPolicy.RetryDelayMs(1, 30000, 3600000) == 30000
+                && VanillaRecoveryPolicy.RetryDelayMs(8, 30000, 3600000) == 3600000
+                && VanillaRecoveryPolicy.RetryDelayMs(20, 30000, 3600000) == 3600000,
+                "Recovery backoff must continue and cap at one hour rather than a finite restart budget.");
         }
         private static void NoRestart()
         {

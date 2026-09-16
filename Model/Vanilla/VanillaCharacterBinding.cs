@@ -53,9 +53,6 @@ namespace _4RTools.Model.Vanilla
             runtime.ConfirmedCharacter = null;
             runtime.ScriptRunning = runtime.RecoveryOwned = runtime.ClosingForRecovery = false;
             runtime.ResumeSent = runtime.HasBeenOnline = runtime.MovementRecoveryPending = false;
-            runtime.AutobattleRestartAttempts = 0;
-            runtime.AutobattleRestartInProgress = false;
-            runtime.AutobattleRecoveryExhausted = false;
             runtime.NonMinimizedSince = null;
             runtime.MovementWatchdog.Reset();
             ResetTerminalEvidence(runtime);

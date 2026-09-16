@@ -22,7 +22,12 @@ namespace _4RTools.Model.Vanilla
 
     internal sealed class VanillaMovementWatchdog
     {
+        // Observe() retains the 30-second diagnostic signal, but automatic recovery
+        // is deliberately much slower: exact terminal dialogs may restart after five
+        // minutes without verified movement, otherwise the client restarts at ten.
         internal const int TimeoutSeconds = 30;
+        internal const int TerminalCheckSeconds = 300;
+        internal const int RestartSeconds = 600;
         private bool armed, baseline;
         private int pid, x, y;
         private Guid session;
@@ -30,6 +35,11 @@ namespace _4RTools.Model.Vanilla
         private TimeSpan progressAt, previousClock;
         private DateTimeOffset? observedAt;
         internal bool IsArmed { get { return armed; } }
+        internal double StalledSeconds(TimeSpan now)
+        {
+            if (!armed || now < progressAt) return 0;
+            return Math.Max(0, (now - progressAt).TotalSeconds);
+        }
 
         internal void Reset() { armed = baseline = false; observedAt = null; }
 
@@ -147,29 +157,22 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        private bool CheckMovementWatchdog(Runtime runtime, DateTimeOffset now, Func<DateTime> startTimeUtc,
-            Func<VanillaVisualState> readVisual)
+        private bool CheckMovementWatchdog(Runtime runtime, DateTimeOffset now, Func<DateTime> startTimeUtc)
         {
             if (!running || disposed || !settings.AutoRecover || !runtime.Account.Enabled || !runtime.ProcessId.HasValue
-                || runtime.ScriptRunning || runtime.RecoveryOwned || positionSource == null || runtime.AutobattleRecoveryExhausted
-                || (!runtime.ResumeSent && !runtime.HasBeenOnline && !runtime.MovementRecoveryPending))
+                || runtime.ScriptRunning || runtime.RecoveryOwned || positionSource == null
+                || (!runtime.ResumeSent && !runtime.HasBeenOnline))
             { runtime.MovementWatchdog.Reset(); return false; }
             VanillaPositionSample sample = null;
             try { sample = positionSource(runtime.ProcessId.Value); }
             catch (Exception ex) { Log(runtime.Account.Label + ": coordinate source unavailable: " + ex.Message); }
             string reason = runtime.MovementWatchdog.Observe(runtime.ProcessId.Value, sample, restartEnvironment.MonotonicNow, now);
-            if (reason == null) return false;
-            string visualEvidence;
-            try { runtime.Visual = readVisual(); visualEvidence = runtime.Visual.ToString(); }
-            catch (Exception ex) { visualEvidence = "capture unavailable: " + ex.Message; }
-            bool firstTrigger = !runtime.MovementRecoveryPending;
-            runtime.MovementRecoveryPending = true;
-            runtime.ResumeVerificationFailed = false;
-            runtime.ResumeFailureDetail = null;
-            string detail = reason + "; visual=" + visualEvidence
-                + ". Autofarming watchdog will try the configured hotkey before restarting the client.";
-            if (firstTrigger) Log(runtime.Account.Label + ": " + detail);
-            RequestVerifiedResume(runtime, "30s movement watchdog fired.", true);
+            double stalled = runtime.MovementWatchdog.StalledSeconds(restartEnvironment.MonotonicNow);
+            if (stalled < VanillaMovementWatchdog.RestartSeconds) return false;
+            string detail = (reason ?? ("No verified X/Y movement for " + (int)stalled + "s"))
+                + ". Ten-minute steady-state limit reached; restarting the affected client. No autobattle hotkey is sent before restart.";
+            Log(runtime.Account.Label + ": " + detail);
+            QueueClientRestart(runtime, now, detail, false, startTimeUtc);
             return true;
         }
     }

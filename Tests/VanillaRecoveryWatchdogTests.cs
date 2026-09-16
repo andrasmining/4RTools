@@ -39,7 +39,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Explicit watchdog reset clears the old deadline", Reset);
             Test("Another client's movement cannot satisfy this client", Isolation);
             Test("Healthy sibling remains untouched by a position restart", OneClient);
-            Test("Unavailable coordinates request hotkey recovery after 30 seconds", UnreadableRestart);
+            Test("Unavailable coordinates restart only after ten minutes", UnreadableRestart);
             Test("Both positional failures restart sequentially through the full lease", BothPosition);
             Test("Mixed dialog and position failures use one shared recovery lease", Mixed);
             Test("Movement while queued cancels the stale restart decision", QueuedMovement);
@@ -53,9 +53,9 @@ namespace Vanilla.Diagnostics.Tests
             Test("Visual watchdog OFF does not disable the position watchdog", VisualOff);
             Test("Startup and recovery do not accrue movement timeouts", StartupGrace);
             Test("Automatic minimization requires 60s visible and 60s cursor idle", MinimizeGrace);
-            Test("30s stillness requests hotkey recovery before client restart", WatchdogHotkeyFirst);
-            Test("Three failed client restarts stop the supervisor permanently", RestartBudget);
-            Test("Verified movement resets the client restart budget", RestartBudgetReset);
+            Test("Steady-state stillness never requests an autobattle hotkey", WatchdogHotkeyFirst);
+            Test("Recovery backoff continues beyond three failures and caps at one hour", RestartBudget);
+            Test("Verified restart recovery resets exponential backoff", RestartBudgetReset);
             Test("One terminal observation does not close a client", OneTerminal);
             Test("Unknown modal is never dismissed or closed as a disconnect", UnknownModal);
             Test("Changing terminal messages need new confirmation", ChangedTerminal);
@@ -188,9 +188,11 @@ namespace Vanilla.Diagnostics.Tests
             }
             internal void Sample(int pid, int x = 10) { Samples[pid] = S(E.Seconds, x, pid: pid); }
             internal bool Motion(object runtime)
-            { return (bool)Call(Supervisor, "CheckMovementWatchdog", runtime, E.UtcNow, (Func<DateTime>)(() => Epoch.UtcDateTime), (Func<VanillaVisualState>)(() => VanillaVisualState.Unknown)); }
+            { return (bool)Call(Supervisor, "CheckMovementWatchdog", runtime, E.UtcNow, (Func<DateTime>)(() => Epoch.UtcDateTime)); }
             internal void Terminal(object runtime, int kind = 0)
             { Call(Supervisor, "HandleTerminalVisual", runtime, kind == 0 ? VanillaVisualState.LoggingOut : VanillaVisualState.Disconnected, E.UtcNow, (Func<DateTime>)(() => Epoch.UtcDateTime)); }
+            internal void ArmFiveMinuteStall(object runtime, int pid)
+            { Sample(pid); Motion(runtime); E.Seconds = Math.Max(E.Seconds, 300); Sample(pid); Motion(runtime); }
             internal void FinishFirst()
             {
                 Call(Supervisor, "Bind", A, 201, true, "fake new client");
@@ -204,31 +206,48 @@ namespace Vanilla.Diagnostics.Tests
             public void Dispose() { Supervisor.Dispose(); if (Directory.Exists(root)) Directory.Delete(root, true); }
         }
         private static void OneClient()
-        { using (var h = new H()) { h.Sample(101); h.Motion(h.A); h.E.Seconds = 30; h.Sample(101); Assert(h.Motion(h.A)); Assert(h.Wakeups.Count == 1 && h.E.Work.Count == 0); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.A,h.E.UtcNow,"hotkeys failed"); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert(h.E.Closed.SequenceEqual(new[] { 101 })); Assert((int?)Get(h.B,"ProcessId") == 102 && (bool)Get(h.B,"ResumeSent")); Assert(h.Forgotten.SequenceEqual(new[] {101})); } }
+        { using (var h = new H()) { h.Sample(101); h.Motion(h.A); h.E.Seconds = 599; h.Sample(101); Assert(!h.Motion(h.A)); Assert(h.Wakeups.Count == 0 && h.E.Work.Count == 0); h.E.Seconds = 600; h.Sample(101); Assert(h.Motion(h.A)); Assert(h.Wakeups.Count == 0 && h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert(h.E.Closed.SequenceEqual(new[] { 101 })); Assert((int?)Get(h.B,"ProcessId") == 102 && (bool)Get(h.B,"ResumeSent")); Assert(h.Forgotten.SequenceEqual(new[] {101})); } }
         private static void UnreadableRestart()
-        { using (var h = new H()) { h.Motion(h.A); h.E.Seconds = 30; Assert(h.Motion(h.A)); Assert(h.Wakeups.Count == 1 && h.E.Work.Count == 0); } }
+        { using (var h = new H()) { h.Motion(h.A); h.E.Seconds = 599; Assert(!h.Motion(h.A)); Assert(h.E.Work.Count == 0); h.E.Seconds = 600; Assert(h.Motion(h.A)); Assert(h.Wakeups.Count == 0 && h.E.Work.Count == 1); } }
         private static void BothPosition()
-        { using (var h = new H()) { Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.A,h.E.UtcNow,"A hotkeys failed"); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B hotkeys failed"); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert((bool)Get(h.A,"RecoveryOwned") && Get(h.A,"ProcessId") == null); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B still queued"); Assert(h.E.Work.Count == 0); h.FinishFirst(); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B hotkeys failed"); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert(h.E.Closed.SequenceEqual(new[] {101,102})); } }
+        { using (var h = new H()) { h.Sample(101);h.Sample(102);h.Motion(h.A);h.Motion(h.B);h.E.Seconds=600;h.Sample(101);h.Sample(102);Assert(h.Motion(h.A));Assert(h.Motion(h.B));Assert(h.E.Work.Count==1);h.E.Work.Dequeue()();Assert((bool)Get(h.A,"RecoveryOwned")&&Get(h.A,"ProcessId")==null);Assert(h.E.Work.Count==0);h.FinishFirst();Assert(h.Motion(h.B));Assert(h.E.Work.Count==1);h.E.Work.Dequeue()();Assert(h.E.Closed.SequenceEqual(new[]{101,102}));} }
         private static void Mixed()
-        { using (var h = new H()) { h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B hotkeys failed"); Assert(h.E.Work.Count==1); h.E.Work.Dequeue()(); h.FinishFirst(); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B hotkeys failed"); Assert(h.E.Work.Count==1); } }
+        { using (var h = new H()) { h.ArmFiveMinuteStall(h.A,101);h.Terminal(h.A);h.E.Seconds=301;h.Terminal(h.A);h.Sample(102);h.Motion(h.B);h.E.Seconds=901;h.Sample(102);h.Motion(h.B);Assert(h.E.Work.Count==1);h.E.Work.Dequeue()();h.FinishFirst();Assert(h.Motion(h.B));Assert(h.E.Work.Count==1); } }
         private static void QueuedMovement()
-        { using (var h = new H()) { h.Sample(102); h.Motion(h.B); h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); h.E.Seconds=30; h.Sample(102); Assert(h.Motion(h.B)); Assert(h.Wakeups.Count==1); h.E.Seconds=31; h.Sample(102,11); Assert(!h.Motion(h.B)); } }
+        { using (var h = new H()) { h.Sample(101);h.Sample(102);h.Motion(h.A);h.Motion(h.B);h.E.Seconds=300;h.Sample(101);h.Terminal(h.A);h.E.Seconds=301;h.Terminal(h.A);h.E.Seconds=600;h.Sample(102);Assert(h.Motion(h.B));Assert(h.E.Work.Count==1);h.E.Seconds=601;h.Sample(102,11);Assert(!h.Motion(h.B));Assert(h.Wakeups.Count==0); } }
         private static void Stop()
-        { using (var h = new H()) { h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); h.Supervisor.Stop(); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count==0 && (int?)Get(h.A,"ProcessId")==101); Assert(!h.Motion(h.A)); } }
+        { using (var h = new H()) { h.ArmFiveMinuteStall(h.A,101); h.Terminal(h.A); h.E.Seconds=301; h.Terminal(h.A); h.Supervisor.Stop(); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count==0 && (int?)Get(h.A,"ProcessId")==101); Assert(!h.Motion(h.A)); } }
         private static void StopAtBoundary()
-        { using(var h=new H()){h.Terminal(h.A);h.E.Seconds=1;h.Terminal(h.A);h.E.BeforeClose=h.Supervisor.Stop;h.E.Work.Dequeue()();Assert(h.E.Closed.Count==0);} }
+        { using(var h=new H()){h.ArmFiveMinuteStall(h.A,101);h.Terminal(h.A);h.E.Seconds=301;h.Terminal(h.A);h.E.BeforeClose=h.Supervisor.Stop;h.E.Work.Dequeue()();Assert(h.E.Closed.Count==0);} }
         private static void Settings()
-        { using (var h = new H()) { h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); Set(h.Supervisor,"running",false); h.Supervisor.Apply(h.Supervisor.Settings,false); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count==0); } }
+        { using (var h = new H()) { h.ArmFiveMinuteStall(h.A,101); h.Terminal(h.A); h.E.Seconds=301; h.Terminal(h.A); Set(h.Supervisor,"running",false); h.Supervisor.Apply(h.Supervisor.Settings,false); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count==0); } }
         private static void ReplacedPid()
-        { using (var h = new H()) { h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); Set(h.A,"ProcessId",(int?)202); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count==0 && (int?)Get(h.A,"ProcessId")==202); } }
+        { using (var h = new H()) { h.ArmFiveMinuteStall(h.A,101); h.Terminal(h.A); h.E.Seconds=301; h.Terminal(h.A); Set(h.A,"ProcessId",(int?)202); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count==0 && (int?)Get(h.A,"ProcessId")==202); } }
         private static void ReplacedOperation()
-        { using (var h = new H()) { h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); Set(h.A,"ResumeOperationGeneration",99); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count==0); } }
+        { using (var h = new H()) { h.ArmFiveMinuteStall(h.A,101); h.Terminal(h.A); h.E.Seconds=301; h.Terminal(h.A); Set(h.A,"ResumeOperationGeneration",99); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count==0); } }
         private static void CloseFailure()
-        { using (var h = new H()) { h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); h.E.FailClose=true; h.E.Work.Dequeue()(); Assert((int?)Get(h.A,"ProcessId")==101 && h.Forgotten.Count==0 && (int)Get(h.A,"RecoveryFailures")==1); h.E.Seconds=2; h.Terminal(h.A); h.E.Seconds=3; h.Terminal(h.A); Assert(h.E.Work.Count==0); } }
+        {
+            using (var h = new H())
+            {
+                h.Sample(101);
+                Assert(!h.Motion(h.A));
+                h.E.Seconds = 600;
+                h.Sample(101);
+                Assert(h.Motion(h.A) && h.E.Work.Count == 1, "Ten-minute stall did not queue the close test.");
+                h.E.FailClose = true;
+                h.E.Work.Dequeue()();
+                Assert((int?)Get(h.A,"ProcessId") == 101 && h.Forgotten.Count == 0
+                    && (int)Get(h.A,"RecoveryFailures") == 1, "Close failure did not preserve PID/backoff state.");
+                Assert((DateTimeOffset?)Get(h.A,"NextRecoveryAt") > h.E.UtcNow, "Close failure did not schedule backoff.");
+                h.E.Seconds = 601;
+                h.Sample(101);
+                Assert(!h.Motion(h.A) && h.E.Work.Count == 0, "Backoff allowed an immediate replacement close.");
+            }
+        }
         private static void RecoveryOff()
         { using (var h = new H()) { var s=h.Supervisor.Settings;s.AutoRecover=false;Set(h.Supervisor,"settings",s);h.Motion(h.A);h.E.Seconds=31;h.Motion(h.A);Assert(h.Wakeups.Count==0 && h.E.Work.Count==0); } }
         private static void VisualOff()
-        { using (var h = new H()) { var s=h.Supervisor.Settings;s.VisualWatchdog=false;Set(h.Supervisor,"settings",s);h.Motion(h.A);h.E.Seconds=30;h.Motion(h.A);Assert(h.Wakeups.Count==1 && h.E.Work.Count==0); } }
+        { using (var h = new H()) { var s=h.Supervisor.Settings;s.VisualWatchdog=false;Set(h.Supervisor,"settings",s);h.Motion(h.A);h.E.Seconds=600;Assert(h.Motion(h.A));Assert(h.Wakeups.Count==0 && h.E.Work.Count==1); } }
         private static void StartupGrace()
         { using (var h = new H()) { Set(h.A,"ScriptRunning",true);h.Motion(h.A);h.E.Seconds=1000;h.Motion(h.A);Set(h.A,"ScriptRunning",false);Assert(!h.Motion(h.A) && h.E.Work.Count==0); } }
         private static void MinimizeGrace()
@@ -241,21 +260,21 @@ namespace Vanilla.Diagnostics.Tests
                 "Exactly 60 seconds of visibility and cursor idle should allow minimization.");
         }
         private static void WatchdogHotkeyFirst()
-        { using(var h=new H()){h.Sample(101);h.Motion(h.A);h.E.Seconds=30;h.Sample(101);Assert(h.Motion(h.A));Assert(h.Wakeups.Count==1,"Watchdog did not request hotkey recovery.");Assert(h.E.Work.Count==0&&h.E.Closed.Count==0,"Watchdog restarted before three hotkey attempts could run.");} }
+        { using(var h=new H()){h.Sample(101);h.Motion(h.A);h.E.Seconds=300;h.Sample(101);Assert(!h.Motion(h.A));Assert(h.Wakeups.Count==0&&h.E.Work.Count==0,"Five-minute steady state sent input or restarted without a terminal popup.");h.E.Seconds=600;h.Sample(101);Assert(h.Motion(h.A));Assert(h.Wakeups.Count==0,"Steady-state watchdog requested a hotkey.");Assert(h.E.Work.Count==1,"Ten-minute stillness did not queue a client restart.");} }
         private static void RestartBudget()
-        { using(var h=new H()){for(int attempt=1;attempt<=3;attempt++){Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.A,h.E.UtcNow,"three hotkeys produced no movement");Assert((int)Get(h.A,"AutobattleRestartAttempts")==attempt);Assert(h.E.Work.Count==1);h.E.Work.Dequeue()();Assert(h.E.Closed.Count==attempt);Call(h.Supervisor,"Bind",h.A,200+attempt,true,"replacement");Set(h.A,"ScriptRunning",false);Set(h.A,"RecoveryOwned",false);}Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.A,h.E.UtcNow,"replacement 3 still did not move");Assert(!(bool)Get(h.Supervisor,"running"),"Supervisor kept running after three failed restarts.");Assert((bool)Get(h.A,"AutobattleRecoveryExhausted"));Assert(h.E.Work.Count==0,"A fourth restart was queued.");} }
+        { Assert(VanillaRecoveryPolicy.RetryDelayMs(1,30000,3600000)==30000);Assert(VanillaRecoveryPolicy.RetryDelayMs(2,30000,3600000)==60000);Assert(VanillaRecoveryPolicy.RetryDelayMs(3,30000,3600000)==120000);Assert(VanillaRecoveryPolicy.RetryDelayMs(8,30000,3600000)==3600000);Assert(VanillaRecoveryPolicy.RetryDelayMs(20,30000,3600000)==3600000); }
         private static void RestartBudgetReset()
-        { using(var h=new H()){Set(h.A,"MovementRecoveryPending",true);Set(h.A,"AutobattleRestartAttempts",2);Set(h.A,"AutobattleRestartInProgress",true);Call(h.Supervisor,"CompleteAutobattleRecoverySuccessLocked",h.A);Assert((int)Get(h.A,"AutobattleRestartAttempts")==0&&!(bool)Get(h.A,"MovementRecoveryPending")&&!(bool)Get(h.A,"AutobattleRestartInProgress"));} }
+        { using(var h=new H()){Set(h.A,"RecoveryFailures",7);Set(h.A,"NextRecoveryAt",(DateTimeOffset?)h.E.UtcNow.AddHours(1));Set(h.A,"RecoveryOwned",true);Call(h.Supervisor,"CompleteAutobattleRecoverySuccessLocked",h.A);Assert((int)Get(h.A,"RecoveryFailures")==0&&Get(h.A,"NextRecoveryAt")==null&&!(bool)Get(h.A,"RecoveryOwned"));} }
         private static void OneTerminal()
-        { using(var h=new H()){h.Terminal(h.A);Assert(h.E.Work.Count==0);} }
+        { using(var h=new H()){h.Sample(101);h.Motion(h.A);h.E.Seconds=299;h.Sample(101);h.Terminal(h.A);h.E.Seconds=300;h.Sample(101);h.Terminal(h.A);Assert(h.E.Work.Count==0);h.E.Seconds=301;h.Terminal(h.A);Assert(h.E.Work.Count==1,"Confirmed terminal popup after five-minute stall did not queue restart.");} }
         private static void UnknownModal()
         { using(var h=new H()){Call(h.Supervisor,"HandleTerminalVisual",h.A,VanillaVisualState.ModalDialog,h.E.UtcNow,(Func<DateTime>)(()=>Epoch.UtcDateTime));Assert(h.E.Work.Count==0 && h.E.Closed.Count==0);} }
         private static void ChangedTerminal()
-        { using(var h=new H()){h.Terminal(h.A);h.E.Seconds=1;h.Terminal(h.A,1);Assert(h.E.Work.Count==0);} }
+        { using(var h=new H()){h.ArmFiveMinuteStall(h.A,101);h.Terminal(h.A);h.E.Seconds=301;h.Terminal(h.A,1);Assert(h.E.Work.Count==0); } }
         private static void StaleTerminal()
-        { using(var h=new H()){h.Terminal(h.A);h.E.Seconds=10;h.Terminal(h.A);Assert(h.E.Work.Count==0);} }
+        { using(var h=new H()){h.ArmFiveMinuteStall(h.A,101);h.Terminal(h.A);h.E.Seconds=310;h.Terminal(h.A);Assert(h.E.Work.Count==0); } }
         private static void BothTerminal(int a,int b)
-        { using(var h=new H()){h.Terminal(h.A,a);h.Terminal(h.B,b);h.E.Seconds=1;h.Terminal(h.A,a);h.Terminal(h.B,b);Assert(h.E.Work.Count==1);h.E.Work.Dequeue()();h.E.Seconds=2;h.Terminal(h.B,b);Assert(h.E.Work.Count==0);h.FinishFirst();h.E.Seconds=3;h.Terminal(h.B,b);Assert(h.E.Work.Count==1);h.E.Work.Dequeue()();Assert(h.E.Closed.SequenceEqual(new[]{101,102}));} }
+        { using(var h=new H()){h.Sample(101);h.Sample(102);h.Motion(h.A);h.Motion(h.B);h.E.Seconds=300;h.Sample(101);h.Sample(102);h.Terminal(h.A,a);h.Terminal(h.B,b);h.E.Seconds=301;h.Terminal(h.A,a);h.Terminal(h.B,b);Assert(h.E.Work.Count==1);h.E.Work.Dequeue()();h.E.Seconds=302;h.Terminal(h.B,b);Assert(h.E.Work.Count==0);h.FinishFirst();h.E.Seconds=303;h.Terminal(h.B,b);Assert(h.E.Work.Count==1);h.E.Work.Dequeue()();Assert(h.E.Closed.SequenceEqual(new[]{101,102}));} }
         private static void ColdStart()
         { using(var h=new H()){Set(h.Supervisor,"running",false);Set(h.Supervisor,"hardenedStartupRunning",true);Assert((bool)Call(h.Supervisor,"CloseTerminalBeforeStartup",h.A,101,0,h.Supervisor.Settings,(Func<VanillaVisualState>)(()=>VanillaVisualState.LoggingOut),(Func<DateTime>)(()=>Epoch.UtcDateTime),(Action<int>)(ms=>h.E.Seconds+=ms/1000.0)));Assert(h.E.Closed.SequenceEqual(new[]{101}) && (bool)Get(h.A,"RecoveryOwned"));} }
         private static void ColdStartChanged()

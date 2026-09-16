@@ -1,52 +1,55 @@
-# 4RTools Vanilla 0.6.42
+# 4RTools Vanilla 0.6.43
 
-## Post-login hotkey path hardened
+## Restart-only Autobattle/slave hotkeys
 
-Recovery/relogin no longer depends on the screenshot classifier reporting exactly
-`Gameplay` before the configured Autobattle/slave hotkey can run. After character
-selection, 4RTools waits for two fresh read-only samples proving the expected login
-username/character plus valid X/Y/map/living HP. It then keeps the existing 7-second
-settle and three-attempt hotkey verifier (10 seconds of X/Y observation per attempt).
-Known login, modal, logging-out and disconnected screens still block input.
+Automatic resume hotkeys are no longer a steady-state wakeup mechanism. Restoring,
+maximizing, focusing or merely observing an already-running client does not send the
+configured hotkey. Automatic hotkey input is authorized only after 4RTools itself
+freshly launches/restarts/relogs that character.
 
-The reconnect session log and global Debug log now both record readiness, the 7-second
-settle, every `Sending autobattle hotkey attempt X/3` event and every movement window.
-The 30-second steady-state movement watchdog and three-restart terminal budget remain.
+After verified username/character/X/Y/map/living-HP readiness, 4RTools waits a full
+10 seconds and then invokes the same shared ResumeHotkey verifier used by
+TESTS -> Resume hotkey. That verifier allows three total sends, each followed by its
+own 10-second fresh X/Y movement window, and stops immediately when either axis moves.
 
-## Human-presence-aware minimization
+## Five/ten-minute steady-state movement recovery
 
-A supervised game window is no longer minimized immediately after the user restores,
-maximizes or otherwise exposes it. Automatic minimization requires BOTH at least 60
-seconds continuously non-minimized and at least 60 seconds without machine cursor
-movement. Any cursor movement restarts the idle grace. If cursor state cannot be read,
-automatic minimization fails closed and waits another grace period. Explicit manual
-minimize remains immediate.
+Normal supervision now watches verified X/Y only and sends no wakeup hotkey. At five
+minutes without verified movement, a freshly confirmed exact `Now Logging Out.` or
+`Disconnected from Server.` popup can trigger an early restart. If neither popup is
+present, 4RTools keeps waiting. At ten minutes without verified X/Y movement, the
+affected client is restarted regardless of visual classification. Unknown, stale,
+unreadable and unverified coordinates remain invalid rather than becoming `(0,0)`.
 
-Startup/recovery keeps ownership while waiting for the same safe-minimize condition,
-so a later client does not steal the serialized startup/recovery gate while the user
-is actively working in the current client.
+Recovery stays per-client and globally serialized. A healthy sibling is not disturbed.
+Failed restart/login cycles use the existing exponential retry delay, doubling from the
+configured base interval and capping at one hour between attempts. There is no longer a
+three-client-restart permanent-stop budget; retries continue until recovery succeeds or
+the user presses STOP/changes ownership or configuration.
 
-## Slower single-action GAME START
+## Existing 0.6.42 safeguards retained
 
-The Vanilla launcher is allowed to settle for 2.5 seconds before any GAME START action.
-Each attempt now performs exactly ONE activation: a semantic native button invocation
-when available, otherwise one click only after two stable visual detections 750 ms
-apart. The old fallback coordinate sweep and the previous native-plus-visual double
-activation are removed. After a real activation, 4RTools waits at least 15 seconds for
-Vanilla/Gepard startup before another attempt.
+Cursor-aware minimization remains: automatic minimize requires at least 60 seconds with
+the client non-minimized and 60 seconds without machine cursor movement. Launcher GAME
+START remains single-action and deliberately paced with stable semantic/visual evidence.
+Character selection remains keyboard/state based rather than screen-coordinate based.
 
-This reduces duplicate/too-fast launcher input associated with the observed generic
-GDI+ launcher error while remaining resolution/DPI independent.
+## Validation limits
 
-## Validation and limits
+Release validation covers Debug/Release regression suites, the shared three-attempt
+resume verifier, restart-only ownership gating, five/ten-minute watchdog boundaries,
+terminal-popup confirmation, exponential backoff to one hour, dual-client serialization,
+native test-owned process recovery, portable package/launch checks and mock-data UI
+checks. Public release assets, source identity and updater discovery are verified after
+publication. No independent live Vanilla/Gepard/RDP session is available to the build
+runner; the user-provided screenshots/logs are the live evidence for the corrected bug.
 
-Release validation covers Debug/Release regression suites, post-login memory readiness,
-visual input blocking, three-hotkey/three-restart recovery, 30-second movement watchdog,
-60-second cursor/visibility minimization policy, launcher pacing/stable-candidate rules,
-native test-owned process recovery, portable launch/package checks and native mock-data
-UI checks. Public release assets, exact source identity and updater discovery are
-verified after publication.
+<!-- BEGIN GENERATED RELEASE CHECKSUMS -->
 
-No live Vanilla/Gepard/RDP session was available to the build runner. The user-supplied
-screenshots/log are live evidence for the defects; final automation behavior is validated
-by Windows/runtime/state tests rather than an independent live-game login.
+Release version: 0.6.43. SHA256:
+
+- `4RTools-Vanilla-v0.6.43-portable.zip`: `6cc09c4c806929fdbdcf0355cefe3fc899cf6039463a2ea9a4f1b18873c78c19`
+- `4RTools-Vanilla.exe`: `0f3d1852533d54b098067ea5b7a6a2b49d5cffa2dc869aaee01cc39987f94e46`
+
+These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
+<!-- END GENERATED RELEASE CHECKSUMS -->

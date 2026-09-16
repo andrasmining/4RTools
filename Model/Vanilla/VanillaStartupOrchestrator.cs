@@ -202,82 +202,78 @@ namespace _4RTools.Model.Vanilla
                 throw new InvalidOperationException("Set the Vanilla launch executable before starting the supervisor.");
             string missing = MissingCharacterConfiguration(account);
             if (missing != null) throw new InvalidOperationException(account.Label + ": " + missing + ".");
+            int failureCount = 0;
             Exception last = null;
-            try
+            while (true)
             {
-                RunOneColdStartAttempt(generation, account, config, ordinal, total);
-                return;
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { last = ex; }
-
-            for (int restart = 1; restart <= VanillaAutobattleResumeVerifier.MaximumClientRestarts; restart++)
-            {
-                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
-                Runtime runtime;
-                lock (gate) runtime = runtimes[account.Id];
-                Log(account.Label + ": startup/autobattle attempt failed: " + last.Message
-                    + ". Client restart attempt " + restart + "/" + VanillaAutobattleResumeVerifier.MaximumClientRestarts + " begins now.");
-                VanillaDebugLog.Write("STARTUP", account.Label + ": restart " + restart + "/"
-                    + VanillaAutobattleResumeVerifier.MaximumClientRestarts + " after: " + last.Message);
                 try
                 {
-                    CloseColdStartClientForRestart(generation, runtime, restart, last.Message);
                     RunOneColdStartAttempt(generation, account, config, ordinal, total);
                     return;
                 }
                 catch (OperationCanceledException) { throw; }
-                catch (Exception ex) { last = ex; }
-            }
+                catch (Exception ex) { last = ex; failureCount = Math.Min(30, failureCount + 1); }
 
-            string terminal = account.Label + ": FAILED permanently after "
-                + VanillaAutobattleResumeVerifier.MaximumClientRestarts
-                + " client restart attempts without completing verified autobattle movement: " + last.Message;
-            lock (gate)
-            {
-                Runtime runtime = runtimes[account.Id];
-                runtime.AutobattleRestartAttempts = VanillaAutobattleResumeVerifier.MaximumClientRestarts;
-                runtime.AutobattleRestartInProgress = false;
-                runtime.AutobattleRecoveryExhausted = true;
-                runtime.MovementRecoveryPending = false;
-                runtime.ResumeSent = false;
-                runtime.ResumeVerificationFailed = true;
-                runtime.ResumeFailureDetail = terminal;
-                runtime.ScriptRunning = false;
-                runtime.RecoveryOwned = false;
-                runtime.ClosingForRecovery = false;
-                SetStage(runtime, VanillaReconnectStage.Error, terminal);
+                Runtime runtime;
+                lock (gate) runtime = runtimes[account.Id];
+                Log(account.Label + ": startup/restart attempt failed: " + last.Message + ". Closing any failed client before retry.");
+                VanillaDebugLog.Write("STARTUP", account.Label + ": failure " + failureCount + ": " + last.Message);
+                try { CloseColdStartClientForRestart(generation, runtime, failureCount, last.Message); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception closeEx)
+                {
+                    last = closeEx;
+                    Log(account.Label + ": failed client could not be closed cleanly: " + closeEx.Message);
+                }
+                int delay = VanillaRecoveryPolicy.RetryDelayMs(failureCount, config.RetryBackoffMs, config.MaxRetryBackoffMs);
+                Log(account.Label + ": next sequential restart/login attempt in " + FormatDelay(delay)
+                    + "; retry intervals double and cap at 1 hour. Later clients remain blocked behind this recovery lease.");
+                PauseStartupRetry(generation, delay);
             }
-            Log(terminal + ". Sequential startup is stopped; no later client will start and no further automatic hotkeys/restarts will be sent.");
-            VanillaDebugLog.Write("STARTUP", terminal);
-            throw new InvalidOperationException(terminal, last);
         }
 
-        private void CloseColdStartClientForRestart(int generation, Runtime runtime, int restartAttempt, string reason)
+        private static void PauseStartupRetryCore(Func<bool> cancelled, int milliseconds)
+        {
+            int remaining = Math.Max(0, milliseconds);
+            while (remaining > 0)
+            {
+                if (cancelled()) throw new OperationCanceledException("Sequential startup cancelled during recovery backoff.");
+                int slice = Math.Min(500, remaining);
+                Thread.Sleep(slice);
+                remaining -= slice;
+            }
+        }
+
+        private void PauseStartupRetry(int generation, int milliseconds)
+        { PauseStartupRetryCore(() => StartupCancelled(generation), milliseconds); }
+
+        private void CloseColdStartClientForRestart(int generation, Runtime runtime, int failureCount, string reason)
         {
             int? pid;
-            int operation;
-            DateTime identity = DateTime.MinValue;
+            int operation = 0;
             lock (gate)
             {
                 if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
                 pid = runtime.ProcessId;
-                runtime.AutobattleRestartAttempts = restartAttempt;
-                runtime.AutobattleRestartInProgress = true;
-                runtime.MovementRecoveryPending = true;
+                runtime.MovementRecoveryPending = false;
                 runtime.ResumeSent = false;
                 runtime.ResumeVerificationFailed = true;
                 runtime.ResumeFailureDetail = reason;
-                if (!pid.HasValue) return;
+                if (!pid.HasValue)
+                {
+                    runtime.ScriptRunning = false;
+                    runtime.RecoveryOwned = true;
+                    return;
+                }
                 operation = Interlocked.Increment(ref resumeVerificationGeneration);
                 runtime.ResumeOperationGeneration = operation;
                 runtime.ScriptRunning = runtime.RecoveryOwned = runtime.ClosingForRecovery = true;
-                SetStage(runtime, VanillaReconnectStage.ClosingClient, "Sequential startup restart " + restartAttempt + "/"
-                    + VanillaAutobattleResumeVerifier.MaximumClientRestarts + ": closing failed client");
+                SetStage(runtime, VanillaReconnectStage.ClosingClient,
+                    "Sequential recovery failure " + failureCount + ": closing failed client before backoff");
             }
             try
             {
-                identity = restartEnvironment.GetStartTimeUtc(pid.Value);
+                DateTime identity = restartEnvironment.GetStartTimeUtc(pid.Value);
                 Func<bool> cancelled = () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, operation);
                 restartEnvironment.CloseClient(pid.Value, identity, cancelled, action =>
                     RunOwnedClientStep(runtime, pid.Value, cancelled, () => { action(); return true; }));
@@ -299,11 +295,9 @@ namespace _4RTools.Model.Vanilla
                     runtime.GameplaySince = runtime.LoginLikeSince = null;
                     runtime.MovementWatchdog.Reset();
                     ResetTerminalEvidence(runtime);
-                    SetStage(runtime, VanillaReconnectStage.WaitingForClient, "Sequential restart " + restartAttempt + "/"
-                        + VanillaAutobattleResumeVerifier.MaximumClientRestarts + ": previous client exited; relaunching");
+                    SetStage(runtime, VanillaReconnectStage.Backoff,
+                        "Failed client exited; waiting before sequential recovery retry " + (failureCount + 1));
                 }
-                Log(runtime.Account.Label + ": failed client exit confirmed for restart " + restartAttempt + "/"
-                    + VanillaAutobattleResumeVerifier.MaximumClientRestarts + ".");
             }
             catch
             {
@@ -408,9 +402,9 @@ namespace _4RTools.Model.Vanilla
                     WaitForAutobattleReady(account, pid.Value,
                         () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
                         60000, "Sequential startup post-character");
-                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: verified post-login state confirmed; settling 7s before " + account.HotkeyText);
+                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: verified character online; settling 10s before restart-only " + account.HotkeyText);
                     BriefPause(generation, VanillaAutobattleResumeVerifier.PostLoginSettleMs);
-                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: 7s settle complete; preparing autobattle hotkey verification 1/3");
+                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: 10s settle complete; invoking the same ResumeHotkey verifier used by TESTS (1/3)");
                     VerifyAutobattleResumeAsync(account, pid.Value,
                         () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
                         detail => ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: " + detail))
@@ -457,7 +451,7 @@ namespace _4RTools.Model.Vanilla
                     }
                 }
                 RaiseUpdated();
-                // The outer bounded startup owner decides whether this failed client is closed and retried.
+                // The outer sequential owner closes the failed client and retries with capped exponential backoff.
                 throw;
             }
         }

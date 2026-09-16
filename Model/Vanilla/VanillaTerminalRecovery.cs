@@ -113,6 +113,14 @@ namespace _4RTools.Model.Vanilla
                 if (running && !disposed) SetStage(runtime, VanillaReconnectStage.Error, reason + " Automatic recovery is disabled.");
                 return true;
             }
+            bool activeRecovery = runtime.RecoveryOwned || runtime.ScriptRunning;
+            double stalled = runtime.MovementWatchdog.StalledSeconds(restartEnvironment.MonotonicNow);
+            if (!activeRecovery && stalled < VanillaMovementWatchdog.TerminalCheckSeconds)
+            {
+                ResetTerminalEvidence(runtime);
+                SetStage(runtime, VanillaReconnectStage.Online, reason + " observed, but steady-state recovery waits for 5m without verified X/Y movement");
+                return true;
+            }
             double gap = runtime.TerminalObservedAt.HasValue ? (now - runtime.TerminalObservedAt.Value).TotalMilliseconds : double.MaxValue;
             runtime.TerminalSamples = runtime.TerminalVisual == visual && gap > 0 && gap <= Math.Max(5000, settings.PollMs * 2)
                 ? Math.Min(2, runtime.TerminalSamples + 1) : 1;
@@ -246,8 +254,6 @@ namespace _4RTools.Model.Vanilla
             ResetTerminalEvidence(runtime);
             if (error != null)
             {
-                // Retain the PID and failed state. An access/read error cannot create
-                // a free client slot or a successful close; census/observation decides.
                 runtime.ResumeVerificationFailed = true;
                 runtime.ResumeFailureDetail = "Client close failed: " + error;
                 ScheduleRecoveryFailureLocked(runtime, now, runtime.ResumeFailureDetail);
@@ -256,8 +262,7 @@ namespace _4RTools.Model.Vanilla
             int exitedPid = runtime.ProcessId.GetValueOrDefault();
             try { positionClientExited?.Invoke(exitedPid); }
             catch (Exception ex) { Log(runtime.Account.Label + ": exited reader cleanup failed: " + ex.Message); }
-            bool boundedAutobattleRecovery = runtime.MovementRecoveryPending;
-            if (!boundedAutobattleRecovery) runtime.MovementRecoveryPending = false;
+            runtime.MovementRecoveryPending = false;
             runtime.MovementWatchdog.Reset();
             runtime.ProcessId = null;
             runtime.ResumeSent = runtime.HasBeenOnline = runtime.ResumeVerificationFailed = false;
@@ -268,14 +273,12 @@ namespace _4RTools.Model.Vanilla
                 ScheduleRecoveryFailureLocked(runtime, now, reason + " Client exit confirmed after failed recovery");
             else
             {
-                // Keep the SAME lease across the poll/launcher handoff. In particular,
-                // the second terminal client must not be closed while this one relogs.
+                // Keep the SAME lease across close -> relaunch -> login -> the restart-only
+                // hotkey verifier -> movement proof -> safe minimize.
                 runtime.RecoveryOwned = true;
                 runtime.NextRecoveryAt = now;
-                string budget = boundedAutobattleRecovery ? " Restart attempt " + runtime.AutobattleRestartAttempts + "/"
-                    + VanillaAutobattleResumeVerifier.MaximumClientRestarts + " continues." : "";
-                SetStage(runtime, VanillaReconnectStage.WaitingForClient, reason + " Client exit confirmed; sequential relaunch queued." + budget);
-                Log(runtime.Account.Label + ": client exit confirmed; recovery lease retained through relaunch, verified movement and minimization." + budget);
+                SetStage(runtime, VanillaReconnectStage.WaitingForClient, reason + " Client exit confirmed; sequential relaunch queued.");
+                Log(runtime.Account.Label + ": client exit confirmed; recovery lease retained through relaunch, restart-only hotkey verification, verified movement and minimization.");
             }
         }
     }

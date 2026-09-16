@@ -13,8 +13,7 @@ namespace _4RTools.Model.Vanilla
     {
         internal const int MaximumAttempts = 3;
         internal const int ObservationWindowMs = 10000;
-        internal const int PostLoginSettleMs = 7000;
-        internal const int MaximumClientRestarts = 3;
+        internal const int PostLoginSettleMs = 10000;
         internal const int PollIntervalMs = 100;
         internal const int MaximumSampleAgeMs = 1000;
         private bool started;
@@ -246,7 +245,7 @@ namespace _4RTools.Model.Vanilla
                                 Log(account.Label + ": " + context + ": post-login memory state ready after "
                                     + watch.ElapsedMilliseconds + "ms (" + last + ").");
                                 VanillaDebugLog.Write("AUTOBATTLE", "PID=" + pid + "; " + account.Label + ": " + context
-                                    + ": readiness verified; mandatory 7s settle/hotkey sequence may proceed.");
+                                    + ": readiness verified; mandatory restart-only 10s settle/hotkey sequence may proceed.");
                                 return;
                             }
                         }
@@ -355,32 +354,9 @@ namespace _4RTools.Model.Vanilla
 
         private void CompleteAutobattleRecoverySuccessLocked(Runtime runtime)
         {
-            if (runtime.AutobattleRestartAttempts > 0 || runtime.MovementRecoveryPending)
-                Log(runtime.Account.Label + ": verified X/Y movement; bounded restart budget reset after "
-                    + runtime.AutobattleRestartAttempts + "/" + VanillaAutobattleResumeVerifier.MaximumClientRestarts + " restart attempts.");
             runtime.MovementRecoveryPending = false;
-            runtime.AutobattleRestartInProgress = false;
-            runtime.AutobattleRestartAttempts = 0;
-            runtime.AutobattleRecoveryExhausted = false;
             runtime.MovementWatchdog.Reset();
             ResetRecoverySuccessLocked(runtime);
-        }
-
-        private bool TryBeginAutobattleRestartAttemptLocked(Runtime runtime, DateTimeOffset now, string reason)
-        {
-            if (runtime.AutobattleRecoveryExhausted) return false;
-            if (runtime.AutobattleRestartAttempts >= VanillaAutobattleResumeVerifier.MaximumClientRestarts)
-            {
-                FailAutobattleRecoveryPermanentlyLocked(runtime, reason);
-                return false;
-            }
-            runtime.AutobattleRestartAttempts++;
-            runtime.AutobattleRestartInProgress = true;
-            runtime.MovementRecoveryPending = true;
-            runtime.NextRecoveryAt = null;
-            Log(runtime.Account.Label + ": client restart attempt " + runtime.AutobattleRestartAttempts + "/"
-                + VanillaAutobattleResumeVerifier.MaximumClientRestarts + " starting because " + reason + ".");
-            return true;
         }
 
         private void QueueAutobattleClientRestartLocked(Runtime runtime, DateTimeOffset now, string reason)
@@ -389,58 +365,24 @@ namespace _4RTools.Model.Vanilla
             runtime.ScriptRunning = false;
             runtime.ResumeSent = false;
             runtime.MovementRecoveryPending = true;
-            // The previous hotkey/replacement cycle has ended. A newly consumed restart
-            // attempt below owns the next replacement cycle.
-            runtime.AutobattleRestartInProgress = false;
             Runtime owner = OtherRecoveryOwner(runtime);
             if (owner != null)
             {
                 SetStage(runtime, VanillaReconnectStage.WaitingForClient,
-                    "Autobattle recovery queued behind " + owner.Account.Label + "; restart budget not consumed");
-                Log(runtime.Account.Label + ": autobattle recovery is queued behind " + owner.Account.Label
-                    + "; no restart attempt was consumed while waiting.");
+                    "Restart queued behind " + owner.Account.Label + "; no steady-state hotkey will be sent");
+                Log(runtime.Account.Label + ": restart is queued behind " + owner.Account.Label
+                    + "; the failed restart-only hotkey sequence will not be repeated on the existing client.");
                 return;
             }
-            if (!TryBeginAutobattleRestartAttemptLocked(runtime, now, reason)) return;
             int pid = runtime.ProcessId.GetValueOrDefault();
             if (pid <= 0)
             {
-                runtime.AutobattleRestartInProgress = false;
+                runtime.MovementRecoveryPending = false;
                 ScheduleRecoveryFailureLocked(runtime, now, reason + "; affected PID is no longer available");
                 return;
             }
-            QueueClientRestart(runtime, now, reason + ". Restart attempt " + runtime.AutobattleRestartAttempts + "/"
-                + VanillaAutobattleResumeVerifier.MaximumClientRestarts + ".", false, () => restartEnvironment.GetStartTimeUtc(pid));
-        }
-
-        private void FailAutobattleRecoveryPermanentlyLocked(Runtime runtime, string reason)
-        {
-            string detail = "FAILED permanently after " + VanillaAutobattleResumeVerifier.MaximumClientRestarts
-                + " client restart attempts without verified X/Y movement: " + reason;
-            runtime.AutobattleRecoveryExhausted = true;
-            runtime.AutobattleRestartInProgress = false;
-            runtime.MovementRecoveryPending = false;
-            runtime.ResumeSent = false;
-            runtime.ResumeVerificationFailed = true;
-            runtime.ResumeFailureDetail = detail;
-            runtime.ScriptRunning = false;
-            runtime.RecoveryOwned = false;
-            runtime.ClosingForRecovery = false;
-            running = false;
-            timer?.Change(Timeout.Infinite, Timeout.Infinite);
-            Interlocked.Increment(ref resumeVerificationGeneration);
-            Interlocked.Increment(ref diagnosticGeneration);
-            foreach (Runtime other in runtimes.Values)
-            {
-                other.ScriptRunning = false;
-                other.RecoveryOwned = false;
-                other.ClosingForRecovery = false;
-                if (ReferenceEquals(other, runtime)) SetStage(other, VanillaReconnectStage.Error, detail);
-                else if (other.Account.Enabled) SetStage(other, VanillaReconnectStage.Stopped,
-                    "Supervisor stopped after " + runtime.Account.Label + " exhausted its movement recovery budget");
-            }
-            Log(runtime.Account.Label + ": " + detail + ". Supervisor OFF; no further automatic hotkeys or restarts will be attempted until manually started again.");
-            VanillaDebugLog.Write("AUTOBATTLE", runtime.Account.Label + ": " + detail);
+            QueueClientRestart(runtime, now, reason + ". Closing this client before the next retry.", true,
+                () => restartEnvironment.GetStartTimeUtc(pid));
         }
 
         private void QueueVerifiedResume(Runtime runtime)
@@ -450,7 +392,7 @@ namespace _4RTools.Model.Vanilla
 
         private void QueueVerifiedResume(Runtime runtime, string trigger, bool movementRecovery)
         {
-            if (runtime.ScriptRunning || runtime.AutobattleRecoveryExhausted || !runtime.ProcessId.HasValue) return;
+            if (runtime.ScriptRunning || !runtime.ProcessId.HasValue) return;
             if (runtime.ResumeVerificationFailed && !movementRecovery) return;
             Runtime owner = OtherRecoveryOwner(runtime);
             if (owner != null)
@@ -466,7 +408,6 @@ namespace _4RTools.Model.Vanilla
             runtime.ScriptRunning = true;
             runtime.RecoveryOwned = true;
             runtime.ResumeSent = false;
-            if (movementRecovery) runtime.MovementRecoveryPending = true;
             string preparation = (string.IsNullOrWhiteSpace(trigger) ? "" : trigger + " ")
                 + "Preparing autobattle hotkey verification 1/3";
             SetStage(runtime, VanillaReconnectStage.VerifyingAutobattle, preparation);
