@@ -202,6 +202,127 @@ namespace _4RTools.Model.Vanilla
                 throw new InvalidOperationException("Set the Vanilla launch executable before starting the supervisor.");
             string missing = MissingCharacterConfiguration(account);
             if (missing != null) throw new InvalidOperationException(account.Label + ": " + missing + ".");
+            Exception last = null;
+            try
+            {
+                RunOneColdStartAttempt(generation, account, config, ordinal, total);
+                return;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { last = ex; }
+
+            for (int restart = 1; restart <= VanillaAutobattleResumeVerifier.MaximumClientRestarts; restart++)
+            {
+                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                Runtime runtime;
+                lock (gate) runtime = runtimes[account.Id];
+                Log(account.Label + ": startup/autobattle attempt failed: " + last.Message
+                    + ". Client restart attempt " + restart + "/" + VanillaAutobattleResumeVerifier.MaximumClientRestarts + " begins now.");
+                VanillaDebugLog.Write("STARTUP", account.Label + ": restart " + restart + "/"
+                    + VanillaAutobattleResumeVerifier.MaximumClientRestarts + " after: " + last.Message);
+                try
+                {
+                    CloseColdStartClientForRestart(generation, runtime, restart, last.Message);
+                    RunOneColdStartAttempt(generation, account, config, ordinal, total);
+                    return;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex) { last = ex; }
+            }
+
+            string terminal = account.Label + ": FAILED permanently after "
+                + VanillaAutobattleResumeVerifier.MaximumClientRestarts
+                + " client restart attempts without completing verified autobattle movement: " + last.Message;
+            lock (gate)
+            {
+                Runtime runtime = runtimes[account.Id];
+                runtime.AutobattleRestartAttempts = VanillaAutobattleResumeVerifier.MaximumClientRestarts;
+                runtime.AutobattleRestartInProgress = false;
+                runtime.AutobattleRecoveryExhausted = true;
+                runtime.MovementRecoveryPending = false;
+                runtime.ResumeSent = false;
+                runtime.ResumeVerificationFailed = true;
+                runtime.ResumeFailureDetail = terminal;
+                runtime.ScriptRunning = false;
+                runtime.RecoveryOwned = false;
+                runtime.ClosingForRecovery = false;
+                SetStage(runtime, VanillaReconnectStage.Error, terminal);
+            }
+            Log(terminal + ". Sequential startup is stopped; no later client will start and no further automatic hotkeys/restarts will be sent.");
+            VanillaDebugLog.Write("STARTUP", terminal);
+            throw new InvalidOperationException(terminal, last);
+        }
+
+        private void CloseColdStartClientForRestart(int generation, Runtime runtime, int restartAttempt, string reason)
+        {
+            int? pid;
+            int operation;
+            DateTime identity = DateTime.MinValue;
+            lock (gate)
+            {
+                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                pid = runtime.ProcessId;
+                runtime.AutobattleRestartAttempts = restartAttempt;
+                runtime.AutobattleRestartInProgress = true;
+                runtime.MovementRecoveryPending = true;
+                runtime.ResumeSent = false;
+                runtime.ResumeVerificationFailed = true;
+                runtime.ResumeFailureDetail = reason;
+                if (!pid.HasValue) return;
+                operation = Interlocked.Increment(ref resumeVerificationGeneration);
+                runtime.ResumeOperationGeneration = operation;
+                runtime.ScriptRunning = runtime.RecoveryOwned = runtime.ClosingForRecovery = true;
+                SetStage(runtime, VanillaReconnectStage.ClosingClient, "Sequential startup restart " + restartAttempt + "/"
+                    + VanillaAutobattleResumeVerifier.MaximumClientRestarts + ": closing failed client");
+            }
+            try
+            {
+                identity = restartEnvironment.GetStartTimeUtc(pid.Value);
+                Func<bool> cancelled = () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, operation);
+                restartEnvironment.CloseClient(pid.Value, identity, cancelled, action =>
+                    RunOwnedClientStep(runtime, pid.Value, cancelled, () => { action(); return true; }));
+                lock (gate)
+                {
+                    if (cancelled()) throw new OperationCanceledException("Sequential startup restart cancelled.");
+                    try { positionClientExited?.Invoke(pid.Value); }
+                    catch (Exception ex) { Log(runtime.Account.Label + ": exited reader cleanup failed: " + ex.Message); }
+                    runtime.ProcessId = null;
+                    runtime.CharacterSession = null;
+                    runtime.ConfirmedCharacter = null;
+                    runtime.ScriptRunning = false;
+                    runtime.RecoveryOwned = true;
+                    runtime.ClosingForRecovery = false;
+                    runtime.ResumeSent = false;
+                    runtime.ResumeVerificationFailed = false;
+                    runtime.ResumeFailureDetail = null;
+                    runtime.HasBeenOnline = false;
+                    runtime.GameplaySince = runtime.LoginLikeSince = null;
+                    runtime.MovementWatchdog.Reset();
+                    ResetTerminalEvidence(runtime);
+                    SetStage(runtime, VanillaReconnectStage.WaitingForClient, "Sequential restart " + restartAttempt + "/"
+                        + VanillaAutobattleResumeVerifier.MaximumClientRestarts + ": previous client exited; relaunching");
+                }
+                Log(runtime.Account.Label + ": failed client exit confirmed for restart " + restartAttempt + "/"
+                    + VanillaAutobattleResumeVerifier.MaximumClientRestarts + ".");
+            }
+            catch
+            {
+                lock (gate)
+                {
+                    runtime.ScriptRunning = false;
+                    runtime.RecoveryOwned = false;
+                    runtime.ClosingForRecovery = false;
+                }
+                throw;
+            }
+        }
+
+        private void RunOneColdStartAttempt(int generation, VanillaReconnectAccount account, VanillaReconnectSettings config, int ordinal, int total)
+        {
+            if (string.IsNullOrWhiteSpace(config.LaunchExecutable) || !File.Exists(config.LaunchExecutable))
+                throw new InvalidOperationException("Set the Vanilla launch executable before starting the supervisor.");
+            string missing = MissingCharacterConfiguration(account);
+            if (missing != null) throw new InvalidOperationException(account.Label + ": " + missing + ".");
             var alreadyRunning = GetVanillaProcesses();
             try
             {
@@ -285,7 +406,9 @@ namespace _4RTools.Model.Vanilla
                         account.Label + ": sequential: ");
 
                     WaitForGameplayStable(input, pid.Value, generation, 60000, account.Label + " post-character");
-                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: Preparing autobattle verification 1/3");
+                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: gameplay confirmed; settling 7s before " + account.HotkeyText);
+                    BriefPause(generation, VanillaAutobattleResumeVerifier.PostLoginSettleMs);
+                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: 7s settle complete; preparing autobattle hotkey verification 1/3");
                     VerifyAutobattleResumeAsync(account, pid.Value,
                         () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
                         detail => ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: " + detail))
@@ -308,8 +431,7 @@ namespace _4RTools.Model.Vanilla
                     runtime.HasBeenOnline = true;
                     runtime.ScriptRunning = false;
                     runtime.RecoveryOwned = false;
-                    runtime.RecoveryFailures = 0;
-                    runtime.NextRecoveryAt = null;
+                    CompleteAutobattleRecoverySuccessLocked(runtime);
                     SetStage(runtime, VanillaReconnectStage.Online, "Sequential startup complete: gameplay + movement verified + minimized");
                 }
                 RaiseUpdated();
@@ -327,14 +449,13 @@ namespace _4RTools.Model.Vanilla
                         runtime.ScriptRunning = false;
                         runtime.RecoveryOwned = false;
                         runtime.ResumeVerificationFailed = true;
-                        runtime.ResumeFailureDetail = "Sequential startup failed; later clients blocked: " + ex.Message;
+                        runtime.ResumeFailureDetail = "Sequential startup attempt failed: " + ex.Message;
                         SetStage(runtime, ex is OperationCanceledException ? VanillaReconnectStage.Stopped : VanillaReconnectStage.Error,
                             runtime.ResumeFailureDetail);
                     }
                 }
                 RaiseUpdated();
-                // Never close a newly created client because a transient visual/focus check failed.
-                // Fail closed and keep every later account blocked.
+                // The outer bounded startup owner decides whether this failed client is closed and retried.
                 throw;
             }
         }
@@ -558,12 +679,17 @@ namespace _4RTools.Model.Vanilla
 
         private void WaitForGameplayStable(VanillaForegroundInput input, int pid, int generation, int timeoutMs, string context)
         {
+            WaitForGameplayStableCancellable(input, pid, () => StartupCancelled(generation), timeoutMs, context);
+        }
+
+        private void WaitForGameplayStableCancellable(VanillaForegroundInput input, int pid, Func<bool> cancelled, int timeoutMs, string context)
+        {
             Stopwatch watch = Stopwatch.StartNew();
             int consecutive = 0;
             VanillaVisualState last = VanillaVisualState.Unknown;
             while (watch.ElapsedMilliseconds < timeoutMs)
             {
-                if (StartupCancelled(generation)) throw new OperationCanceledException("Sequential startup cancelled.");
+                if (cancelled()) throw new OperationCanceledException(context + ": gameplay wait cancelled.");
                 input.Activate();
                 using (var process = Process.GetProcessById(pid))
                 {
@@ -592,7 +718,7 @@ namespace _4RTools.Model.Vanilla
                 Thread.Sleep(180);
             }
             throw new InvalidOperationException(context + ": gameplay not stably confirmed within " + (timeoutMs / 1000)
-                + "s (last=" + last + "). Client was left running; later clients were NOT started.");
+                + "s (last=" + last + "). No autobattle hotkey was sent.");
         }
 
         private void BriefPause(int generation, int milliseconds)

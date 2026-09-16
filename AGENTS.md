@@ -478,25 +478,36 @@ completed work.
 
 ## Primary autofarming movement watchdog
 
-For enabled, supervised autofarming clients, X/Y health is the primary recovery
-signal. After startup/recovery has finished, restart an affected client when no
-fresh verified coordinate movement has been observed for 120 seconds. Missing,
-unreadable, unverified and stale coordinates remain invalid, not zero; their
-absence must not reset or indefinitely defer that deadline. Use monotonic elapsed
-time, the existing fingerprinted read-only fleet observations, and distinct
-per-client/session baselines. Credit intermediate movement even when the latest
-position returns to the previous coordinates. Reset on STOP, configuration/client
-replacement and valid map/session changes; do not accrue time during login or
-recovery. Never reopen a failed reader for the same client to evade a blocked read.
+For enabled supervised autofarming clients, verified X/Y movement is the primary
+health signal. After successful startup/recovery, 30 seconds without fresh verified
+movement starts bounded hotkey recovery; it does NOT restart the client immediately.
+Missing, unreadable, unverified and stale coordinates remain invalid, not zero, and
+do not reset the deadline. Use monotonic elapsed time, existing fingerprinted
+read-only observations and per-client/session baselines. Credit intermediate movement
+even when the latest coordinates return to the previous values. Do not accrue this
+deadline during login/recovery.
 
-A recognized terminal dialog can trigger recovery sooner after confirmation.
-Pattern recognition adds diagnostic evidence but is not required for a timed-out
-movement watchdog. Unknown popups must not receive blind Enter/click input. Keep
-the same global recovery lease from closing through verified exit, relaunch,
-login, verified Autobattle movement and minimization. Recover only the affected
-client; simultaneous failures remain sequential. Failure/backoff releases the
-lease without pretending the failed attempt succeeded. Verify process identity
-and cancellation before close/termination, and never treat denied access as exit.
+After gameplay is visually confirmed following a login/relog, wait approximately
+5-10 seconds (currently 7 seconds), then ALWAYS send that row's configured Autobattle/
+slave hotkey. Observe fresh verified X/Y for 10 seconds. If no movement is verified,
+refocus/recheck ownership and send the hotkey again, for at most three hotkey attempts
+total. Log the settle period, every hotkey attempt and every X/Y verification window.
+
+If all three hotkey attempts fail, restart only that client under the global recovery
+lease. A replacement client repeats the full login -> settle -> hotkey -> movement
+verification sequence. Permit at most three client restarts for the same movement
+failure incident. If verified movement still cannot be established after the third
+replacement cycle, stop the supervisor completely, mark a terminal failure and send
+no further automatic hotkeys/restarts until a manual Start resets the bounded budget.
+Any verified movement resets the restart budget to zero.
+
+Recognized terminal logout/disconnect dialogs may trigger replacement sooner after
+confirmation. Unknown popups receive no blind input. Keep one global recovery lease
+from close through verified exit, relaunch, login, Autobattle movement verification
+and minimization; simultaneous failures remain sequential and healthy siblings stay
+untouched. Verify process/session/character ownership before input/close. STOP,
+configuration or client replacement cancels stale work. Never reopen a failed reader
+to evade a blocked memory read.
 
 
 ## Character roster and identity discovery

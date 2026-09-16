@@ -52,71 +52,45 @@ This depends on a readable supported dialog capture, not merely frozen HP or X/Y
 
 ### Autofarming health watchdog
 
-The main health check uses the existing verified, read-only X/Y observations for
-each managed client. **120 seconds without verified movement** triggers recovery,
-including coordinates that remain unchanged, unavailable, unreadable or stale.
-A missing process is queued for restart immediately. The watchdog does not require
-a popup or a successful screenshot. It runs only while automatic recovery is ON,
-after startup/recovery; STOP and client/configuration changes cancel/reset it.
+The primary health signal is fresh verified read-only X/Y movement. **30 seconds
+without verified movement** starts bounded hotkey recovery; unchanged, unavailable,
+unreadable, unverified or stale coordinates do not reset the deadline and are never
+converted to zero. The watchdog is inactive during startup/recovery and after STOP.
 
-Both known terminal dialogs can be recognized sooner and are logged separately.
-Recovery keeps one account's lease through close, confirmed exit, relaunch, login,
-verified movement and minimization. Another affected account remains queued; a
-healthy sibling is not restarted or sent another Autobattle toggle. A failed
-attempt uses exponential backoff rather than repeatedly closing or launching.
-This is an autofarming policy: a deliberately stationary character can also reach
-the timeout. It is not a diagnosis of why the client stopped moving.
+When the watchdog fires, the configured Autobattle/slave hotkey is tried before a
+restart. Each hotkey attempt gets a 10-second X/Y verification window and there are
+three attempts total. Only after all three fail is that client restarted. Replacement
+clients repeat login, post-login settle, hotkey and movement verification. The same
+movement incident permits at most three client restarts; failure after the third
+replacement stops the supervisor and logs a terminal error. Verified movement resets
+the restart budget.
+
+Known logout/disconnect dialogs can trigger recovery sooner. Recovery remains globally
+serialized from close through relaunch, login, verified movement and minimization;
+a healthy sibling is not restarted or toggled. Unknown popups receive no blind input.
+
 
 ### Autobattle movement verification
 
-For a freshly started or recovered client, the configured resume hotkey is followed
-by a **10-second observation window** using fresh, verified X/Y readings. A change
-on either axis confirms movement immediately. Without movement, the intended
-client is focused again and movement is rechecked before another hotkey is sent.
-There are **three total attempts: the first press and at most two retries**.
+After every actual login/relog, gameplay must first be stably detected. The client
+then settles for **7 seconds** and the configured resume hotkey is always sent. Fresh,
+verified X/Y is observed for **10 seconds**. Movement on either axis succeeds. Without
+movement, the intended client is revalidated/focused and the hotkey is sent again.
+There are **three total hotkey attempts**.
 
-After three unsuccessful windows the account enters an explicit failed state;
-later observations do not silently restart the same budget. Cold startup does not
-advance to the next account after failure. A failed or interrupted startup is not
-subsequently adopted as a healthy client. The explicit Resume hotkey diagnostic
-can perform a new bounded verification; only success clears the failed latch.
-Already-running healthy clients are adopted without toggling Autobattle.
+Every settle, send and verification attempt is logged. If all three hotkeys fail,
+the affected client enters the bounded restart path rather than silently remaining
+online. Each replacement repeats the same procedure, for at most three client restarts
+for one movement incident. Failure after that stops automatic recovery completely
+until a manual Start. Already-running healthy clients adopted by 4RTools are not
+blindly toggled; if one later remains stationary for 30 seconds, the watchdog invokes
+the same bounded hotkey-first path.
 
-STOP, settings changes, replaced clients/sessions, map changes, death, failed reads,
-stale observations and lost input ownership prevent further automated input.
-Progress and failures appear in account status and logs. Movement confirms only
-movement: it is not proof of combat, and a character fighting without moving can
-fail this deliberately position-based check.
+STOP, settings changes, replaced PIDs/sessions/characters, map changes, death, failed
+reads, stale observations and lost input ownership prevent further automated input.
+Movement confirms only movement, not combat; a deliberately stationary character can
+therefore enter recovery by design.
 
-## Character roster and automatic discovery
-
-The recovery table is one row per **character**, not per login account. Columns
-are Enabled, **Description, Username, Slot, Character name**, then hotkey,
-password, proxy, PID and status. Multiple characters on one username remain
-independent saved profiles; at most two may be enabled.
-
-The logical unique key is **username + character name**, consistently used for
-discovery, validation and process matching. Several characters may share a username;
-the same character name on different usernames does not collide. Persistent row
-IDs continue to retain passwords and proxy preferences across upgrades.
-
-The existing reader now includes the supplied username offsets `0xD343F8` and
-`0xD39159`, relative to the fingerprinted main module. Both bounded, NUL-terminated
-UTF-8 values appear in diagnostics and exports as `UserName` and `UserNameMirror`.
-They must agree before the username is used for identity. No password is read.
-Missing or conflicting usernames defer discovery instead of creating incomplete rows.
-
-A unique legacy row with a configured username can learn the uniquely observed
-character's name without a memory-read slot. It keeps its description, slot,
-password, proxy, enabled flag and ID. Ambiguous rows/characters are not guessed.
-Only untouched empty name-only discovery duplicates from 0.6.37 may be folded into
-that configured row; user-edited profiles are preserved. New complete pairs are
-added once, disabled. Discovery never overwrites configured values.
-
-**Remaining mapping limit:** one-based character slots are not mapped. Existing
-configured slots are kept; a new row's slot stays unknown/editable until configured
-or supplied by a verified mapping. The supplied username screenshot establishes
-the current addresses, not independent live validation across client restarts.
 
 ## State validity and boundaries
 

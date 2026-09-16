@@ -73,15 +73,29 @@ Vanilla observation remains read-only. No game-memory writes, injections,
 packet manipulation, game-file changes or Gepard bypasses are performed.
 Unknown observations are never reinterpreted as valid gameplay state.
 
-Autofarming health watchdog (0.6.36)
+Autofarming health watchdog (0.6.41)
 ----------------------------------
-With automatic recovery enabled, an online managed client is restarted after
-120 seconds without fresh verified X/Y movement. Unchanged, unreadable, missing
-and stale coordinates all count as lack of verified movement, never as (0,0).
-A popup is not required. Both known disconnect/logout messages are also detected
-and logged. Missing processes use the existing immediate sequential restart path.
-The watchdog is inactive during startup/recovery and after STOP. Both failed
-clients recover sequentially; another healthy client is left running.
+With automatic recovery enabled, 30 seconds without fresh verified X/Y movement
+starts hotkey recovery. Unchanged, unreadable, missing, unverified and stale
+coordinates never count as movement and are never treated as (0,0).
+
+After every login/relog, stable gameplay is followed by a 7-second settle, then
+the configured Autobattle/slave hotkey is sent. X/Y is checked for 10 seconds.
+Without movement the hotkey is tried again, for three total attempts. The same
+three-attempt hotkey sequence is used when the 30-second online watchdog fires.
+
+Only after all three hotkeys fail is the affected client restarted. A replacement
+repeats the full login/settle/hotkey/movement sequence. At most three client
+restarts are allowed for one movement failure incident. If the third replacement
+still cannot establish verified movement, the supervisor stops and records a
+terminal failure. Manual Start begins a new bounded budget. Any verified movement
+resets the restart count.
+
+Both known disconnect/logout messages can trigger replacement sooner. If both
+clients fail, recovery stays sequential through close, exit confirmation, relaunch,
+login, movement verification and minimization. A healthy sibling remains untouched.
+STOP/configuration/client replacement cancels delayed work.
+
 
 Character roster
 ----------------

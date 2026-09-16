@@ -22,7 +22,7 @@ namespace _4RTools.Model.Vanilla
 
     internal sealed class VanillaMovementWatchdog
     {
-        internal const int TimeoutSeconds = 120;
+        internal const int TimeoutSeconds = 30;
         private bool armed, baseline;
         private int pid, x, y;
         private Guid session;
@@ -151,7 +151,7 @@ namespace _4RTools.Model.Vanilla
             Func<VanillaVisualState> readVisual)
         {
             if (!running || disposed || !settings.AutoRecover || !runtime.Account.Enabled || !runtime.ProcessId.HasValue
-                || runtime.ScriptRunning || runtime.RecoveryOwned || positionSource == null
+                || runtime.ScriptRunning || runtime.RecoveryOwned || positionSource == null || runtime.AutobattleRecoveryExhausted
                 || (!runtime.ResumeSent && !runtime.HasBeenOnline && !runtime.MovementRecoveryPending))
             { runtime.MovementWatchdog.Reset(); return false; }
             VanillaPositionSample sample = null;
@@ -162,9 +162,14 @@ namespace _4RTools.Model.Vanilla
             string visualEvidence;
             try { runtime.Visual = readVisual(); visualEvidence = runtime.Visual.ToString(); }
             catch (Exception ex) { visualEvidence = "capture unavailable: " + ex.Message; }
+            bool firstTrigger = !runtime.MovementRecoveryPending;
             runtime.MovementRecoveryPending = true;
-            QueueClientRestart(runtime, now, reason + "; visual=" + visualEvidence
-                + ". Autofarming movement watchdog requested restart.", runtime.ResumeVerificationFailed, startTimeUtc);
+            runtime.ResumeVerificationFailed = false;
+            runtime.ResumeFailureDetail = null;
+            string detail = reason + "; visual=" + visualEvidence
+                + ". Autofarming watchdog will try the configured hotkey before restarting the client.";
+            if (firstTrigger) Log(runtime.Account.Label + ": " + detail);
+            RequestVerifiedResume(runtime, "30s movement watchdog fired.", true);
             return true;
         }
     }

@@ -18,7 +18,7 @@ namespace Vanilla.Diagnostics.Tests
         private const BindingFlags Flags = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance;
         internal static int Run()
         {
-            Test("Unchanged coordinates expire at exactly 120 seconds", Deadline);
+            Test("Unchanged coordinates expire at exactly 30 seconds", Deadline);
             Test("X-only movement resets the deadline", () => Axis(true));
             Test("Y-only movement resets the deadline", () => Axis(false));
             Test("Zero is a valid coordinate, not an unavailable reading", Zero);
@@ -39,7 +39,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Explicit watchdog reset clears the old deadline", Reset);
             Test("Another client's movement cannot satisfy this client", Isolation);
             Test("Healthy sibling remains untouched by a position restart", OneClient);
-            Test("Unavailable coordinates restart after 120 seconds without popup detection", UnreadableRestart);
+            Test("Unavailable coordinates request hotkey recovery after 30 seconds", UnreadableRestart);
             Test("Both positional failures restart sequentially through the full lease", BothPosition);
             Test("Mixed dialog and position failures use one shared recovery lease", Mixed);
             Test("Movement while queued cancels the stale restart decision", QueuedMovement);
@@ -52,6 +52,9 @@ namespace Vanilla.Diagnostics.Tests
             Test("Recovery OFF disables position restarts", RecoveryOff);
             Test("Visual watchdog OFF does not disable the position watchdog", VisualOff);
             Test("Startup and recovery do not accrue movement timeouts", StartupGrace);
+            Test("30s stillness requests hotkey recovery before client restart", WatchdogHotkeyFirst);
+            Test("Three failed client restarts stop the supervisor permanently", RestartBudget);
+            Test("Verified movement resets the client restart budget", RestartBudgetReset);
             Test("One terminal observation does not close a client", OneTerminal);
             Test("Unknown modal is never dismissed or closed as a disconnect", UnknownModal);
             Test("Changing terminal messages need new confirmation", ChangedTerminal);
@@ -82,31 +85,31 @@ namespace Vanilla.Diagnostics.Tests
         private static string Check(VanillaMovementWatchdog w, double sec, VanillaPositionSample s, int pid = 101)
         { return w.Observe(pid, s, TimeSpan.FromSeconds(sec), Epoch.AddSeconds(sec)); }
         private static void Deadline()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 119.999, S(119.999)) == null); Assert(Check(w, 120, S(120)) != null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 29.999, S(29.999)) == null); Assert(Check(w, 30, S(30)) != null); }
         private static void Axis(bool x)
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Check(w, 119, S(119, x ? 11 : 10, x ? 20 : 21)); Assert(Check(w, 238, S(238, x ? 11 : 10, x ? 20 : 21)) == null); Assert(Check(w, 239, S(239, x ? 11 : 10, x ? 20 : 21)) != null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Check(w, 29, S(29, x ? 11 : 10, x ? 20 : 21)); Assert(Check(w, 58, S(58, x ? 11 : 10, x ? 20 : 21)) == null); Assert(Check(w, 59, S(59, x ? 11 : 10, x ? 20 : 21)) != null); }
         private static void Zero()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0, 0, 0)); Assert(Check(w, 119, S(119, 0, 1)) == null); Assert(Check(w, 120, S(120, 0, 1)) == null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0, 0, 0)); Assert(Check(w, 29, S(29, 0, 1)) == null); Assert(Check(w, 30, S(30, 0, 1)) == null); }
         private static void Missing()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, null); Assert(Check(w, 119, null) == null); Assert(Check(w, 120, null).Contains("unavailable")); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, null); Assert(Check(w, 29, null) == null); Assert(Check(w, 30, null).Contains("unavailable")); }
         private static void Invalid()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Check(w, 90, new VanillaPositionSample(101, Session, Epoch.AddSeconds(90), null, null, null, false, "read failed")); Assert(Check(w, 120, S(120)) != null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Check(w, 20, new VanillaPositionSample(101, Session, Epoch.AddSeconds(20), null, null, null, false, "read failed")); Assert(Check(w, 30, S(30)) != null); }
         private static void Unverified()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 120, S(120, 99, 99, verified: false)) != null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 30, S(30, 99, 99, verified: false)) != null); }
         private static void LateBaseline()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, null); Check(w, 119, S(119)); Assert(Check(w, 120, S(120)) != null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, null); Check(w, 29, S(29)); Assert(Check(w, 30, S(30)) != null); }
         private static void Stale()
-        { foreach (double stamp in new[] { 1.0, 121.0 }) { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 120, S(stamp, 99, 99)) != null); } }
+        { foreach (double stamp in new[] { 1.0, 31.0 }) { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 30, S(stamp, 99, 99)) != null); } }
         private static void Cached()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Check(w, 1, S(0, 99, 99)); Assert(Check(w, 120, S(120)) != null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Check(w, 1, S(0, 99, 99)); Assert(Check(w, 30, S(30)) != null); }
         private static void Intermediate()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0, moved: 0)); Check(w, 90, S(90, moved: 89)); Assert(Check(w, 120, S(120, moved: 89)) == null); Assert(Check(w, 210, S(210, moved: 89)) != null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0, moved: 0)); Check(w, 20, S(20, moved: 19)); Assert(Check(w, 30, S(30, moved: 19)) == null); Assert(Check(w, 50, S(50, moved: 19)) != null); }
         private static void FirstIntermediate()
         {
             var w = new VanillaMovementWatchdog(); Check(w, 0, S(0));
             Check(w, 1, S(1, moved: .5));
-            Assert(Check(w, 120, S(120, moved: .5)) == null, "First intermediate motion was lost.");
-            Assert(Check(w, 121, S(121, moved: .5)) != null, "Motion kept extending without another move.");
+            Assert(Check(w, 30, S(30, moved: .5)) == null, "First intermediate motion was lost.");
+            Assert(Check(w, 31, S(31, moved: .5)) != null, "Motion kept extending without another move.");
         }
         private static void FleetMovement()
         {
@@ -121,7 +124,7 @@ namespace Vanilla.Diagnostics.Tests
                 Assert(returned.MovementAt.HasValue && returned.MovementAt.Value == Epoch.AddSeconds(1),
                     "Verified X/Y motion depended on unavailable ClientReady or was lost between polls.");
                 Check(w, 1, returned);
-                Assert(Check(w, 120, S(120, moved: 1)) == null, "Healthy movement-and-return caused restart.");
+                Assert(Check(w, 30, S(30, moved: 1)) == null, "Healthy movement-and-return caused recovery.");
             }
         }
         private static void FleetInvalidMovement()
@@ -136,17 +139,17 @@ namespace Vanilla.Diagnostics.Tests
             }
         }
         private static void Context()
-        { foreach (bool newSession in new[] { false, true }) { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Guid g = newSession ? Guid.NewGuid() : Session; string m = newSession ? "map" : "map2"; Check(w, 119, S(119, session: g, map: m)); Assert(Check(w, 120, S(120, session: g, map: m)) == null); } }
+        { foreach (bool newSession in new[] { false, true }) { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Guid g = newSession ? Guid.NewGuid() : Session; string m = newSession ? "map" : "map2"; Check(w, 29, S(29, session: g, map: m)); Assert(Check(w, 30, S(30, session: g, map: m)) == null); } }
         private static void UnknownMap()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Check(w, 60, S(60, map: null)); Check(w, 119, S(119)); Assert(Check(w, 120, S(120)) != null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Check(w, 15, S(15, map: null)); Check(w, 29, S(29)); Assert(Check(w, 30, S(30)) != null); }
         private static void ProcessChange()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 120, S(120, pid: 102), 102) == null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 30, S(30, pid: 102), 102) == null); }
         private static void ClockRollback()
         { var w = new VanillaMovementWatchdog(); Check(w, 50, S(50)); Assert(Check(w, 1, S(1)) == null); }
         private static void Reset()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); w.Reset(); Assert(Check(w, 120, S(120)) == null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); w.Reset(); Assert(Check(w, 30, S(30)) == null); }
         private static void Isolation()
-        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 120, S(120, 99, 99, 102)) != null); }
+        { var w = new VanillaMovementWatchdog(); Check(w, 0, S(0)); Assert(Check(w, 30, S(30, 99, 99, 102)) != null); }
 
         private sealed class Env : IVanillaRecoveryRestartEnvironment
         {
@@ -157,6 +160,7 @@ namespace Vanilla.Diagnostics.Tests
             internal readonly List<int> Closed = new List<int>();
             public DateTimeOffset UtcNow { get { return Epoch.AddSeconds(Seconds); } }
             public TimeSpan MonotonicNow { get { return TimeSpan.FromSeconds(Seconds); } }
+            public DateTime GetStartTimeUtc(int pid) { return Epoch.UtcDateTime; }
             public void Queue(Action work) { Work.Enqueue(work); }
             public void CloseClient(int pid, DateTime expected, Func<bool> cancelled, Action<Action> owned)
             { BeforeClose?.Invoke(); if (cancelled()) throw new OperationCanceledException(); if (FailClose) throw new InvalidOperationException("denied"); owned(() => { if (cancelled()) throw new OperationCanceledException(); Closed.Add(pid); }); }
@@ -168,6 +172,7 @@ namespace Vanilla.Diagnostics.Tests
             internal readonly object A, B;
             internal readonly Dictionary<int, VanillaPositionSample> Samples = new Dictionary<int, VanillaPositionSample>();
             internal readonly List<int> Forgotten = new List<int>();
+            internal readonly List<string> Wakeups = new List<string>();
             private readonly string root = Path.Combine(Path.GetTempPath(), "4R-watchdog-" + Guid.NewGuid().ToString("N"));
             internal H()
             {
@@ -178,6 +183,7 @@ namespace Vanilla.Diagnostics.Tests
                 { Set(pair.Item1, "ProcessId", (int?)pair.Item2); Set(pair.Item1, "ResumeSent", true); Set(pair.Item1, "Stage", VanillaReconnectStage.Online); }
                 Set(Supervisor, "running", true); // No live Start(), timer or process enumeration.
                 Supervisor.SetPositionSource(pid => Samples.ContainsKey(pid) ? Samples[pid] : null, Forgotten.Add);
+                Supervisor.SetAutobattleResumeTestHook((id, reason, movement) => Wakeups.Add(id + "|" + reason + "|" + movement));
             }
             internal void Sample(int pid, int x = 10) { Samples[pid] = S(E.Seconds, x, pid: pid); }
             internal bool Motion(object runtime)
@@ -192,20 +198,20 @@ namespace Vanilla.Diagnostics.Tests
                 Set(A, "Stage", VanillaReconnectStage.VerifyingAutobattle);
                 Motion(B); Assert(E.Work.Count == 0, "Second close before verified movement/minimization.");
                 Set(A, "ScriptRunning", false); Set(A, "ResumeSent", true); Set(A, "HasBeenOnline", true);
-                Call(Supervisor, "ResetRecoverySuccessLocked", A);
+                Call(Supervisor, "CompleteAutobattleRecoverySuccessLocked", A);
             }
             public void Dispose() { Supervisor.Dispose(); if (Directory.Exists(root)) Directory.Delete(root, true); }
         }
         private static void OneClient()
-        { using (var h = new H()) { h.Sample(101); h.Motion(h.A); h.E.Seconds = 120; h.Sample(101); Assert(h.Motion(h.A)); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert(h.E.Closed.SequenceEqual(new[] { 101 })); Assert((int?)Get(h.B,"ProcessId") == 102 && (bool)Get(h.B,"ResumeSent")); Assert(h.Forgotten.SequenceEqual(new[] {101})); } }
+        { using (var h = new H()) { h.Sample(101); h.Motion(h.A); h.E.Seconds = 30; h.Sample(101); Assert(h.Motion(h.A)); Assert(h.Wakeups.Count == 1 && h.E.Work.Count == 0); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.A,h.E.UtcNow,"hotkeys failed"); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert(h.E.Closed.SequenceEqual(new[] { 101 })); Assert((int?)Get(h.B,"ProcessId") == 102 && (bool)Get(h.B,"ResumeSent")); Assert(h.Forgotten.SequenceEqual(new[] {101})); } }
         private static void UnreadableRestart()
-        { using (var h = new H()) { h.Motion(h.A); h.E.Seconds = 120; Assert(h.Motion(h.A)); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count == 1); } }
+        { using (var h = new H()) { h.Motion(h.A); h.E.Seconds = 30; Assert(h.Motion(h.A)); Assert(h.Wakeups.Count == 1 && h.E.Work.Count == 0); } }
         private static void BothPosition()
-        { using (var h = new H()) { h.Sample(101); h.Motion(h.A); h.Motion(h.B); h.E.Seconds = 120; h.Sample(101); h.Motion(h.A); h.Motion(h.B); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert((bool)Get(h.A,"RecoveryOwned") && Get(h.A,"ProcessId") == null); h.Motion(h.B); Assert(h.E.Work.Count == 0); h.FinishFirst(); h.Motion(h.B); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert(h.E.Closed.SequenceEqual(new[] {101,102})); } }
+        { using (var h = new H()) { Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.A,h.E.UtcNow,"A hotkeys failed"); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B hotkeys failed"); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert((bool)Get(h.A,"RecoveryOwned") && Get(h.A,"ProcessId") == null); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B still queued"); Assert(h.E.Work.Count == 0); h.FinishFirst(); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B hotkeys failed"); Assert(h.E.Work.Count == 1); h.E.Work.Dequeue()(); Assert(h.E.Closed.SequenceEqual(new[] {101,102})); } }
         private static void Mixed()
-        { using (var h = new H()) { h.Motion(h.B); h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); h.E.Seconds=120; h.Motion(h.B); Assert(h.E.Work.Count==1); h.E.Work.Dequeue()(); h.FinishFirst(); h.Motion(h.B); Assert(h.E.Work.Count==1); } }
+        { using (var h = new H()) { h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B hotkeys failed"); Assert(h.E.Work.Count==1); h.E.Work.Dequeue()(); h.FinishFirst(); Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.B,h.E.UtcNow,"B hotkeys failed"); Assert(h.E.Work.Count==1); } }
         private static void QueuedMovement()
-        { using (var h = new H()) { h.Sample(102); h.Motion(h.B); h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); h.E.Seconds=120; h.Sample(102); h.Motion(h.B); Assert(h.E.Work.Count==1); h.E.Seconds=121; h.Sample(102,11); Assert(!h.Motion(h.B)); } }
+        { using (var h = new H()) { h.Sample(102); h.Motion(h.B); h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); h.E.Seconds=30; h.Sample(102); Assert(h.Motion(h.B)); Assert(h.Wakeups.Count==1); h.E.Seconds=31; h.Sample(102,11); Assert(!h.Motion(h.B)); } }
         private static void Stop()
         { using (var h = new H()) { h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); h.Supervisor.Stop(); h.E.Work.Dequeue()(); Assert(h.E.Closed.Count==0 && (int?)Get(h.A,"ProcessId")==101); Assert(!h.Motion(h.A)); } }
         private static void StopAtBoundary()
@@ -219,11 +225,17 @@ namespace Vanilla.Diagnostics.Tests
         private static void CloseFailure()
         { using (var h = new H()) { h.Terminal(h.A); h.E.Seconds=1; h.Terminal(h.A); h.E.FailClose=true; h.E.Work.Dequeue()(); Assert((int?)Get(h.A,"ProcessId")==101 && h.Forgotten.Count==0 && (int)Get(h.A,"RecoveryFailures")==1); h.E.Seconds=2; h.Terminal(h.A); h.E.Seconds=3; h.Terminal(h.A); Assert(h.E.Work.Count==0); } }
         private static void RecoveryOff()
-        { using (var h = new H()) { var s=h.Supervisor.Settings;s.AutoRecover=false;Set(h.Supervisor,"settings",s);h.Motion(h.A);h.E.Seconds=121;h.Motion(h.A);Assert(h.E.Work.Count==0); } }
+        { using (var h = new H()) { var s=h.Supervisor.Settings;s.AutoRecover=false;Set(h.Supervisor,"settings",s);h.Motion(h.A);h.E.Seconds=31;h.Motion(h.A);Assert(h.Wakeups.Count==0 && h.E.Work.Count==0); } }
         private static void VisualOff()
-        { using (var h = new H()) { var s=h.Supervisor.Settings;s.VisualWatchdog=false;Set(h.Supervisor,"settings",s);h.Motion(h.A);h.E.Seconds=120;h.Motion(h.A);Assert(h.E.Work.Count==1); } }
+        { using (var h = new H()) { var s=h.Supervisor.Settings;s.VisualWatchdog=false;Set(h.Supervisor,"settings",s);h.Motion(h.A);h.E.Seconds=30;h.Motion(h.A);Assert(h.Wakeups.Count==1 && h.E.Work.Count==0); } }
         private static void StartupGrace()
         { using (var h = new H()) { Set(h.A,"ScriptRunning",true);h.Motion(h.A);h.E.Seconds=1000;h.Motion(h.A);Set(h.A,"ScriptRunning",false);Assert(!h.Motion(h.A) && h.E.Work.Count==0); } }
+        private static void WatchdogHotkeyFirst()
+        { using(var h=new H()){h.Sample(101);h.Motion(h.A);h.E.Seconds=30;h.Sample(101);Assert(h.Motion(h.A));Assert(h.Wakeups.Count==1,"Watchdog did not request hotkey recovery.");Assert(h.E.Work.Count==0&&h.E.Closed.Count==0,"Watchdog restarted before three hotkey attempts could run.");} }
+        private static void RestartBudget()
+        { using(var h=new H()){for(int attempt=1;attempt<=3;attempt++){Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.A,h.E.UtcNow,"three hotkeys produced no movement");Assert((int)Get(h.A,"AutobattleRestartAttempts")==attempt);Assert(h.E.Work.Count==1);h.E.Work.Dequeue()();Assert(h.E.Closed.Count==attempt);Call(h.Supervisor,"Bind",h.A,200+attempt,true,"replacement");Set(h.A,"ScriptRunning",false);Set(h.A,"RecoveryOwned",false);}Call(h.Supervisor,"QueueAutobattleClientRestartLocked",h.A,h.E.UtcNow,"replacement 3 still did not move");Assert(!(bool)Get(h.Supervisor,"running"),"Supervisor kept running after three failed restarts.");Assert((bool)Get(h.A,"AutobattleRecoveryExhausted"));Assert(h.E.Work.Count==0,"A fourth restart was queued.");} }
+        private static void RestartBudgetReset()
+        { using(var h=new H()){Set(h.A,"MovementRecoveryPending",true);Set(h.A,"AutobattleRestartAttempts",2);Set(h.A,"AutobattleRestartInProgress",true);Call(h.Supervisor,"CompleteAutobattleRecoverySuccessLocked",h.A);Assert((int)Get(h.A,"AutobattleRestartAttempts")==0&&!(bool)Get(h.A,"MovementRecoveryPending")&&!(bool)Get(h.A,"AutobattleRestartInProgress"));} }
         private static void OneTerminal()
         { using(var h=new H()){h.Terminal(h.A);Assert(h.E.Work.Count==0);} }
         private static void UnknownModal()

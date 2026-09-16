@@ -11,6 +11,7 @@ namespace _4RTools.Model.Vanilla
     {
         DateTimeOffset UtcNow { get; }
         TimeSpan MonotonicNow { get; }
+        DateTime GetStartTimeUtc(int pid);
         void Queue(System.Action work);
         void CloseClient(int pid, DateTime expectedStartTimeUtc, Func<bool> cancelled, System.Action<System.Action> ownedStep);
     }
@@ -20,6 +21,8 @@ namespace _4RTools.Model.Vanilla
         private readonly Stopwatch clock = Stopwatch.StartNew();
         public DateTimeOffset UtcNow { get { return DateTimeOffset.UtcNow; } }
         public TimeSpan MonotonicNow { get { return clock.Elapsed; } }
+        public DateTime GetStartTimeUtc(int pid)
+        { using (var process = Process.GetProcessById(pid)) return process.StartTime.ToUniversalTime(); }
         public void Queue(System.Action work)
         {
             Task.Run(work).ContinueWith(task => VanillaDebugLog.Write("RECOVERY", "Close worker failed: " + task.Exception),
@@ -253,7 +256,8 @@ namespace _4RTools.Model.Vanilla
             int exitedPid = runtime.ProcessId.GetValueOrDefault();
             try { positionClientExited?.Invoke(exitedPid); }
             catch (Exception ex) { Log(runtime.Account.Label + ": exited reader cleanup failed: " + ex.Message); }
-            runtime.MovementRecoveryPending = false;
+            bool boundedAutobattleRecovery = runtime.MovementRecoveryPending;
+            if (!boundedAutobattleRecovery) runtime.MovementRecoveryPending = false;
             runtime.MovementWatchdog.Reset();
             runtime.ProcessId = null;
             runtime.ResumeSent = runtime.HasBeenOnline = runtime.ResumeVerificationFailed = false;
@@ -268,8 +272,10 @@ namespace _4RTools.Model.Vanilla
                 // the second terminal client must not be closed while this one relogs.
                 runtime.RecoveryOwned = true;
                 runtime.NextRecoveryAt = now;
-                SetStage(runtime, VanillaReconnectStage.WaitingForClient, reason + " Client exit confirmed; sequential relaunch queued");
-                Log(runtime.Account.Label + ": client exit confirmed; recovery lease retained through relaunch, verified movement and minimization.");
+                string budget = boundedAutobattleRecovery ? " Restart attempt " + runtime.AutobattleRestartAttempts + "/"
+                    + VanillaAutobattleResumeVerifier.MaximumClientRestarts + " continues." : "";
+                SetStage(runtime, VanillaReconnectStage.WaitingForClient, reason + " Client exit confirmed; sequential relaunch queued." + budget);
+                Log(runtime.Account.Label + ": client exit confirmed; recovery lease retained through relaunch, verified movement and minimization." + budget);
             }
         }
     }

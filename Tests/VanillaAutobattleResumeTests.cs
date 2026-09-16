@@ -29,6 +29,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Second attempt succeeds without a third key", () => Success(2, false));
             Test("Third attempt succeeds without a fourth key", () => Success(3, true));
             Test("No movement fails after exactly three 10-second windows", BoundedFailure);
+            Test("Post-login settle and restart budgets are explicitly bounded", RecoveryConstants);
             Test("A completed verifier cannot reset its retry budget", NoRestart);
             Test("Intermediate movement is seen even if the character returns", MovementAndReturn);
             Test("Movement at the deadline prevents another toggle", DeadlineMovement);
@@ -215,7 +216,9 @@ namespace Vanilla.Diagnostics.Tests
                 RuntimeField(runtime, "ScriptRunning", false);
                 RuntimeField(runtime, "RecoveryOwned", false);
                 RuntimeField(runtime, "ResumeVerificationFailed", true);
-                typeof(VanillaReconnectSupervisor).GetMethod("QueueVerifiedResume", PrivateInstance).Invoke(supervisor, new[] { runtime });
+                typeof(VanillaReconnectSupervisor).GetMethods(PrivateInstance)
+                    .Single(m => m.Name == "QueueVerifiedResume" && m.GetParameters().Length == 1)
+                    .Invoke(supervisor, new[] { runtime });
                 Assert(!RuntimeFlag(runtime, "ScriptRunning") && !RuntimeFlag(runtime, "RecoveryOwned"), "Failure restarted input.");
             });
         }
@@ -231,7 +234,7 @@ namespace Vanilla.Diagnostics.Tests
         private static void StatusProgress()
         {
             Assert(VanillaAutobattleStatus.Compact(VanillaReconnectStage.VerifyingAutobattle,
-                "Sequential startup: Verifying autobattle 1/3 (10s)") == "Verify 1/3", "First attempt hidden.");
+                "Sequential startup: Autobattle hotkey sent; verifying X/Y movement 1/3 (10s)") == "Verify 1/3", "First attempt hidden.");
             Assert(VanillaAutobattleStatus.Compact(VanillaReconnectStage.VerifyingAutobattle,
                 "Retrying autobattle 2/3") == "Retry 2/3", "Retry hidden.");
             Assert(VanillaAutobattleStatus.Compact(VanillaReconnectStage.VerifyingAutobattle,
@@ -285,15 +288,25 @@ namespace Vanilla.Diagnostics.Tests
         private static void BoundedFailure()
         {
             var h = new Harness();
-            Expect<InvalidOperationException>(h.Run, "no movement after 3 attempts");
+            Expect<InvalidOperationException>(h.Run, "no verified X/Y movement after 3 autobattle hotkey attempts");
             Assert(h.Sends == 3 && h.Ms == 30000 && !h.Verifier.MovementVerified, "Unbounded or shortened attempts.");
             Assert(h.SentAt.SequenceEqual(new long[] { 0, 10000, 20000 }), "Unexpected hotkey timing.");
             Assert(h.Progress.Contains("Retrying autobattle 2/3") && h.Progress.Contains("Retrying autobattle 3/3"), "Retry progress missing.");
+            Assert(h.Progress.Contains("Sending autobattle hotkey attempt 1/3")
+                && h.Progress.Contains("Sending autobattle hotkey attempt 2/3")
+                && h.Progress.Contains("Sending autobattle hotkey attempt 3/3"), "Hotkey sends were not explicitly logged.");
+        }
+        private static void RecoveryConstants()
+        {
+            Assert(VanillaAutobattleResumeVerifier.PostLoginSettleMs == 7000, "Post-login hotkey settle changed unexpectedly.");
+            Assert(VanillaAutobattleResumeVerifier.MaximumAttempts == 3, "Hotkey attempt budget changed unexpectedly.");
+            Assert(VanillaAutobattleResumeVerifier.ObservationWindowMs == 10000, "Movement verification window changed unexpectedly.");
+            Assert(VanillaAutobattleResumeVerifier.MaximumClientRestarts == 3, "Client restart budget changed unexpectedly.");
         }
         private static void NoRestart()
         {
             var h = new Harness();
-            Expect<InvalidOperationException>(h.Run, "no movement");
+            Expect<InvalidOperationException>(h.Run, "no verified X/Y movement");
             Expect<InvalidOperationException>(h.Run, "cannot be restarted");
             Assert(h.Sends == 3, "Retry budget was reset.");
         }
@@ -393,7 +406,7 @@ namespace Vanilla.Diagnostics.Tests
         private static void WallClockChange()
         {
             var h = new Harness(); h.OnDelay = () => h.UtcOffset = h.Ms < 15000 ? -3600000 : 3600000;
-            Expect<InvalidOperationException>(h.Run, "no movement"); Assert(h.Ms == 30000 && h.Sends == 3, "Wall clock changed deadlines.");
+            Expect<InvalidOperationException>(h.Run, "no verified X/Y movement"); Assert(h.Ms == 30000 && h.Sends == 3, "Wall clock changed deadlines.");
         }
         private static void IndependentClients()
         {
