@@ -39,9 +39,10 @@ jobs:
         run: |
           if (-not $env:GH_TOKEN) { throw 'Workflow token unavailable.' }
           $text = Get-Content scripts/test-published-update.ps1 -Raw
-          if ($text -notmatch "Authorization = 'Bearer ' \+ \$token\.Trim\(\)") { throw 'Authenticated API header missing.' }
+          if (-not $text.Contains("Authorization = 'Bearer ' + `$token.Trim()")) { throw 'Authenticated API header missing.' }
+          if (-not $text.Contains("GetField('Http', `$flags)")) { throw 'Published baseline updater client injection missing.' }
           $updater = Get-Content Model/Vanilla/VanillaUpdater.cs -Raw
-          if ($updater -notmatch 'GITHUB_ACTIONS' -or $updater -notmatch 'GH_TOKEN') { throw 'Actions-only updater authentication missing.' }
+          if (-not $updater.Contains('GITHUB_ACTIONS') -or -not $updater.Contains('GH_TOKEN')) { throw 'Actions-only updater authentication missing.' }
       - name: Remove temporary validation workflow after success
         shell: powershell
         run: |
