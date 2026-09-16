@@ -55,6 +55,10 @@ jobs:
         shell: powershell
         run: '& .\scripts\build-release.ps1 -Version $env:VERSION'
 
+      - name: Native test-owned process recovery checks
+        shell: powershell
+        run: '& .\scripts\test-recovery-native.ps1'
+
       - name: Render and validate mock-data UI
         shell: powershell
         run: '& .\scripts\test-ui-layout.ps1'
@@ -184,6 +188,7 @@ jobs:
           New-Item -ItemType Directory -Path dist/evidence -Force | Out-Null
           git bundle create dist/evidence/source.bundle --all
           if ($LASTEXITCODE -ne 0) { throw 'Source evidence export failed.' }
+          if (Test-Path dist/native-recovery.log) { Copy-Item dist/native-recovery.log dist/evidence -Force }
           $cache = Join-Path $env:LOCALAPPDATA '4RTools-Engineering'
           foreach ($folder in @('builds', 'portable-tests')) {
             $source = Join-Path $cache $folder
