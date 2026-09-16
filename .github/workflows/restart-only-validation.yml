@@ -3,7 +3,10 @@ name: Restart-only autobattle validation
 on:
   push:
     branches: [fix/restart-only-autobattle]
-    paths: ['.github/workflows/restart-only-validation.yml']
+    paths:
+      - '.github/workflows/restart-only-validation.yml'
+      - '.github/restart-only-transform.py'
+      - '.github/restart-only-fix.py'
 
 permissions:
   contents: write
@@ -33,6 +36,8 @@ jobs:
         run: |
           python .github/restart-only-transform.py
           if ($LASTEXITCODE -ne 0) { throw 'Transformation failed.' }
+          python .github/restart-only-fix.py
+          if ($LASTEXITCODE -ne 0) { throw 'Finite-state cleanup failed.' }
           git -c core.whitespace=cr-at-eol diff --check
           if ($LASTEXITCODE -ne 0) { throw 'Whitespace validation failed.' }
           git diff --stat
@@ -49,7 +54,8 @@ jobs:
           if ($core -notmatch 'existing client; no login or hotkey input sent') { throw 'Existing-client no-input path is missing.' }
           $resume = Get-Content Model/Vanilla/VanillaAutobattleResume.cs -Raw
           if ($resume -notmatch 'PostLoginSettleMs = 10000') { throw 'Ten-second post-login settle is missing.' }
-          if ($resume -match 'MaximumClientRestarts') { throw 'Finite restart budget survived.' }
+          $finite = git grep -n "AutobattleRestartAttempts\|AutobattleRestartInProgress\|AutobattleRecoveryExhausted\|MaximumClientRestarts" -- Model/Vanilla Tests
+          if ($finite) { $finite | Write-Host; throw 'Obsolete finite restart state survived.' }
 
       - name: Restore dependencies
         shell: powershell
@@ -83,7 +89,7 @@ jobs:
           git config user.name '4RTools engineering'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add AGENTS.md Model/Vanilla Properties Tests README.md RELEASE-NOTES.md packaging/README.txt
-          git rm .github/restart-only-transform.py .github/workflows/restart-only-validation.yml
+          git rm .github/restart-only-transform.py .github/restart-only-fix.py .github/workflows/restart-only-validation.yml
           if ($LASTEXITCODE -ne 0) { throw 'Temporary validation cleanup failed.' }
           git -c core.whitespace=cr-at-eol diff --cached --check
           if ($LASTEXITCODE -ne 0) { throw 'Staged source validation failed.' }
