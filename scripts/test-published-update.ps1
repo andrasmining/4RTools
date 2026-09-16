@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string] $Version,
-    [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+$')][string] $BaselineTag = 'v0.6.37'
+    [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+$')][string] $BaselineTag = 'v0.6.38'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -9,6 +9,8 @@ $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -ne 'andrasmining/4RTools' -or -not $env:RUNNER_TEMP) {
     throw 'Published-update validation requires the repository Windows Actions runner.'
 }
+if (Test-Path Env:GH_TOKEN) { $token = $env:GH_TOKEN } else { $token = $null }
+if ([string]::IsNullOrWhiteSpace($token)) { throw 'Published-update validation requires the workflow GitHub token.' }
 if ([Environment]::Is64BitProcess) {
     $host32 = Join-Path $env:WINDIR 'SysWOW64/WindowsPowerShell/v1.0/powershell.exe'
     & $host32 -NoProfile -NonInteractive -File $PSCommandPath -Version $Version -BaselineTag $BaselineTag
@@ -17,7 +19,12 @@ if ([Environment]::Is64BitProcess) {
 }
 if ([version]$BaselineTag.Substring(1) -ge [version]$Version) { throw 'Updater baseline must be older than the release.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-$headers = @{ 'User-Agent' = '4RTools-Release-Verification'; Accept = 'application/vnd.github+json' }
+$headers = @{
+    'User-Agent' = '4RTools-Release-Verification'
+    Accept = 'application/vnd.github+json'
+    Authorization = 'Bearer ' + $token.Trim()
+    'X-GitHub-Api-Version' = '2022-11-28'
+}
 $api = 'https://api.github.com/repos/andrasmining/4RTools/releases'
 $baseline = Invoke-RestMethod "$api/tags/$BaselineTag" -Headers $headers -TimeoutSec 30
 if ($baseline.draft -or $baseline.prerelease) { throw 'Updater baseline must be a published stable release.' }
@@ -45,7 +52,9 @@ $updater = $assembly.GetType('_4RTools.Model.Vanilla.VanillaUpdater', $true)
 $current = $updater.GetProperty('CurrentVersion').GetValue($null, $null)
 if ($current -ne [version]$BaselineTag.Substring(1)) { throw 'Baseline executable version mismatch.' }
 # Invoke the previously published application's real HTTP updater without its UI,
-# game readers, input workers, installation helper or credential storage.
+# game readers, input workers, installation helper or credential storage. GH_TOKEN
+# is inherited only on the disposable Actions runner, so this probe gets GitHub's
+# authenticated rate limit while normal end-user updater requests remain anonymous.
 $task = $updater.GetMethod('CheckAsync').Invoke($null, $null)
 if (-not $task.Wait(30000)) { throw 'Published updater check timed out.' }
 $info = $task.Result
@@ -67,6 +76,7 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $report) -Force | Out-Nul
     zipUrl = $info.ZipUrl
     checksumUrl = $info.ChecksumUrl
     originalUpdaterCheckPassed = $true
+    authenticatedActionsProbe = $true
     publicLatestVerified = $true
     installedOnUserMachine = $false
 } | ConvertTo-Json | Out-File $report -Encoding utf8
