@@ -63,6 +63,8 @@ namespace Vanilla.Diagnostics.Tests
                 "Launcher retry delay must leave time for Gepard/client startup.");
             Equal(2500, (int)type.GetField("LauncherSettleMs", BindingFlags.Static | BindingFlags.NonPublic).GetRawConstantValue(),
                 "Launcher must settle before the first GAME START action.");
+            Equal(3000, (int)type.GetField("LauncherActivationTimeoutMs", BindingFlags.Static | BindingFlags.NonPublic).GetRawConstantValue(),
+                "Launcher foreground acquisition must be bounded and fail closed.");
         }
 
         private static void StableCandidate()

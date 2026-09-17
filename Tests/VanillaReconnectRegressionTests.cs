@@ -29,7 +29,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Sequential startup advances only after gameplay resume and minimize", HardenedStartupAdvanceGate);
             Test("Existing client startup accepts verified memory when visual is Unknown", ExistingClientMemoryGate);
             Test("Host diagnostics include session display and window context", HostDiagnosticsBundle);
-            Test("Gepard splash is never an interactive input target", GepardSplashIsTransient);
+            Test("Gepard splash and GDI hook helpers are never interactive targets", BootstrapHelpersAreTransient);
             Test("Real Vanilla game window outranks generic windows", GameWindowCandidateRanking);
             Test("Minimized Vanilla game window stays eligible for restore", MinimizedGameWindowCandidate);
             Test("Recovery workspace uses split layout on ordinary Full-HD widths", ResponsiveRecoveryBreakpoint);
@@ -230,13 +230,20 @@ namespace Vanilla.Diagnostics.Tests
                 "Host diagnostics are missing required machine/session/display/process context.");
         }
 
-        private static void GepardSplashIsTransient()
+        private static void BootstrapHelpersAreTransient()
         {
             Assert(VanillaForegroundInput.IsTransientBootstrapWindow("Gepard_Splash_Class", "GepardSplash"),
                 "Known Gepard splash must never receive automated input.");
+            Assert(VanillaForegroundInput.IsTransientBootstrapWindow("GDI+ Hook Window Class", "GDI+ Window (Vanilla MMO.exe)"),
+                "The hidden 1x1 GDI+ hook helper must never be restored, focused, or receive input.");
+            Assert(!VanillaForegroundInput.IsKnownVanillaGameWindow("GDI+ Hook Window Class", "GDI+ Window (Vanilla MMO.exe)"),
+                "GDI+ helper was still recognized as a real game window because its caption contains Vanilla MMO.");
             Assert(!VanillaForegroundInput.IsTransientBootstrapWindow(
                     "Vanilla MMO | Gepard Shield 3.0 (^-_-^)", "Vanilla MMO | Gepard Shield 3.0 (^-_-^)") ,
-                "Actual Vanilla game window was incorrectly classified as a splash.");
+                "Actual Vanilla game window was incorrectly classified as a helper.");
+            Assert(VanillaForegroundInput.WindowCandidateScore(true, true, 1, 1, true, false,
+                    "GDI+ Hook Window Class", "GDI+ Window (Vanilla MMO.exe)") == int.MinValue,
+                "GDI+ helper remained eligible for ShowWindow/focus automation.");
             Assert(VanillaForegroundInput.WindowCandidateScore(true, true, 780, 327, true, false,
                     "Gepard_Splash_Class", "GepardSplash") == int.MinValue,
                 "Transient splash remained an eligible input candidate.");

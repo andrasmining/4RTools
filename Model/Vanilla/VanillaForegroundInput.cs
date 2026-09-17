@@ -129,8 +129,13 @@ namespace _4RTools.Model.Vanilla
         {
             string cls = className ?? string.Empty;
             string caption = title ?? string.Empty;
+            // Vanilla creates a hidden 1x1 GDI+ hook/helper before the actual game window.
+            // It contains "Vanilla MMO" in its caption but is never an interactive game surface.
+            // Restoring it makes the helper visible in the taskbar, so reject it just like Gepard splash windows.
             return cls.IndexOf("Gepard_Splash", StringComparison.OrdinalIgnoreCase) >= 0
-                || caption.IndexOf("GepardSplash", StringComparison.OrdinalIgnoreCase) >= 0;
+                || caption.IndexOf("GepardSplash", StringComparison.OrdinalIgnoreCase) >= 0
+                || cls.IndexOf("GDI+ Hook Window Class", StringComparison.OrdinalIgnoreCase) >= 0
+                || caption.StartsWith("GDI+ Window (", StringComparison.OrdinalIgnoreCase);
         }
 
         internal static bool IsKnownVanillaGameWindow(string className, string title)

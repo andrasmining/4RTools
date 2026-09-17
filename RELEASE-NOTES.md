@@ -1,46 +1,49 @@
-# 4RTools Vanilla 0.6.44
+# 4RTools Vanilla 0.6.45
 
-## Existing running clients: verified memory is authoritative
+## Launcher foreground recovery when the desktop owns focus
 
-A cross-machine regression could correctly match running clients by username + character name,
-while START SUPERVISOR still failed because the screenshot classifier remained `Unknown`.
-The supplied debug bundle proved that both PIDs had read-only access, correct build profiles and
-verified character identity, but the old existing-client gate repeatedly restored the window and
-waited 15 seconds for a visual `Gameplay` classification.
+The supplied 0.6.44 live log showed the exact showstopper: after the affected client exited,
+the Vanilla launcher was visible but Windows `Program Manager`/desktop remained foreground.
+The old GAME START path called `SetForegroundWindow`, Windows applied its foreground-lock rule,
+the launcher only flashed orange on the taskbar, and the foreground-dependent click was rejected.
+The user had to click the launcher manually before GAME START rendered as the active yellow button.
 
-Existing clients are now adopted from two fresh verified read-only gameplay-memory samples:
-expected username + character, valid X/Y, map and living HP. A visual `Unknown` result is
-supplemental and no longer blocks adoption or causes the client to be repeatedly restored just to
-prove gameplay. Explicit LoginShell, LoggingOut and Disconnected visual states still fail closed.
-No resume/autobattle hotkey is sent when merely adopting an already-running client.
+Launcher startup now uses the verified launcher HWND and a bounded Win32 input-queue activation
+step. It temporarily joins only the current/launcher/foreground GUI input queues, requests focus
+for that exact launcher window, verifies that it really became foreground, and immediately detaches.
+If ownership/focus cannot be proven, no GAME START action is sent and the bounded launcher loop
+retries safely. There are no taskbar/desktop coordinates.
 
-Freshly restarted/relogged clients retain the 0.6.43 policy: after verified login readiness they
-wait a full 10 seconds and use the same TESTS -> Resume hotkey verifier, with at most three sends
-and a 10-second fresh X/Y movement window after each send.
+After two stable visual GAME START detections, the single activation is now sent as a direct
+client-window mouse message to the verified launcher HWND at the image-detected client point.
+It does not move the machine cursor and does not depend on a global SendInput click remaining in
+foreground. The existing 2.5-second launcher settle, double 750ms visual confirmation and 15-second
+post-activation retry spacing remain.
 
-## Better cross-machine debug bundles
+## GDI+ helper window is permanently non-interactive
 
-COPY DEBUG LOG now adds host/session/display telemetry: real Windows product/build from the
-registry, process/OS architecture, CLR/culture/timezone, terminal/RDP session information,
-virtual desktop and every monitor's bounds/working area, system DPI, and every running Vanilla
-PID plus all of its top-level windows (handle, visibility, minimized state, client size, class and
-title). A compact copy is also written once to debug.log at application startup. Clipboard copy
-uses an extended retry window to tolerate transient RDP clipboard contention.
+Vanilla creates a hidden 1x1 top-level `GDI+ Hook Window Class` named
+`GDI+ Window (Vanilla MMO.exe)` before the real game window. Because its caption contains
+`Vanilla MMO`, the old resolver mistakenly scored it as a real game window and called
+`ShowWindow(SW_RESTORE)`, which made the strange GDI+ taskbar window visible. That helper is now
+classified with the other non-interactive bootstrap windows: it is never restored, focused,
+selected for visual recognition, or sent input. 4RTools waits for the real Vanilla/Gepard window.
 
 ## Validation limits
 
-Release validation covers Debug/Release regression suites, existing-client memory/visual policy,
-host diagnostics generation, native test-owned process recovery, portable package/launch checks,
-mock-data UI checks, public release assets/source identity and updater discovery. No independent
-live Vanilla/Gepard/RDP session is available to the build runner; the user-provided 0.6.43 debug
-bundle is the live evidence for this machine-specific failure.
+Release validation covers Debug/Release regressions for GDI-helper exclusion and bounded launcher
+activation, portable launch/package checks, native test-owned process recovery and mock-data UI.
+Public assets, source identity and updater discovery are verified after publication. The build
+runner cannot reproduce the user's Chrome Remote Desktop foreground-lock state or run live
+Vanilla/Gepard; the supplied 0.6.44 screenshots/debug log are the live evidence for the repaired
+window-state paths.
 
 <!-- BEGIN GENERATED RELEASE CHECKSUMS -->
 
-Release version: 0.6.44. SHA256:
+Release version: 0.6.45. SHA256:
 
-- `4RTools-Vanilla-v0.6.44-portable.zip`: `4503f9fed9ba73ee013559f3726214c54ceae68014b4a6cb64242ab4f7d381d0`
-- `4RTools-Vanilla.exe`: `7511b58b9a020ce272b356f4ab0ee68486ff6b5cad66bb8781ea2f77491bffe3`
+- `4RTools-Vanilla-v0.6.45-portable.zip`: `e9b236b64d7fe662b28f4fbd165e6714b7bab380f14392006b8fe048166e0f70`
+- `4RTools-Vanilla.exe`: `48733af7a363be3bcb99567ae256062b523302ae8caac40c99acdb64431c8c4b`
 
 These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
 <!-- END GENERATED RELEASE CHECKSUMS -->

@@ -30,6 +30,16 @@ namespace _4RTools.Model.Vanilla
         private struct RECT { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)]
         private struct POINT { public int X, Y; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MSG
+        {
+            public IntPtr hwnd;
+            public uint message;
+            public UIntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public POINT pt;
+        }
         private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
         [DllImport("user32.dll", SetLastError = true)] private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
@@ -39,7 +49,17 @@ namespace _4RTools.Model.Vanilla
         [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT point);
         [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
+        [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
+        [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern IntPtr SetActiveWindow(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern IntPtr SetFocus(IntPtr hwnd);
+        [DllImport("user32.dll", SetLastError = true)] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+        [DllImport("user32.dll")] private static extern bool PeekMessage(out MSG message, IntPtr hwnd, uint min, uint max, uint remove);
+        [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
@@ -54,6 +74,8 @@ namespace _4RTools.Model.Vanilla
         private const uint WM_LBUTTONUP = 0x0202;
         private const uint BM_CLICK = 0x00F5;
         private const uint SMTO_ABORTIFHUNG = 0x0002;
+        private const int SW_RESTORE = 9;
+        internal const int LauncherActivationTimeoutMs = 3000;
 
         internal static bool IsPatcher(string executablePath)
         {
@@ -162,6 +184,16 @@ namespace _4RTools.Model.Vanilla
                                 log?.Invoke("Launcher window resolved: " + windowDescription + "; foreground=" + DescribeWindow(GetForegroundWindow())
                                     + "; childControls=" + childInventory + ".");
 
+                                string activationEvidence;
+                                if (!TryActivateLauncherWindow(patcherPid.Value, launcherHwnd, cancelled, out activationEvidence))
+                                {
+                                    log?.Invoke("Launcher is visible but Windows foreground activation is not ready; no GAME START action sent. "
+                                        + activationEvidence);
+                                    nextClick = DateTime.UtcNow.AddMilliseconds(1000);
+                                    continue;
+                                }
+                                log?.Invoke("Launcher foreground verified before GAME START detection. " + activationEvidence);
+
                                 clickAttempt++;
                                 if (nativeFound)
                                 {
@@ -201,11 +233,11 @@ namespace _4RTools.Model.Vanilla
                                         nextClick = DateTime.UtcNow.AddMilliseconds(1000);
                                         continue;
                                     }
-                                    string inputEvidence;
-                                    using (var input = new VanillaForegroundInput(patcherPid.Value, launcherHwnd))
-                                        inputEvidence = input.ClickNormalizedWithDiagnostics(secondX, secondY, requireForeground: false);
+                                    // The button location came from two stable launcher-client captures. Send the one
+                                    // click directly to that verified launcher HWND instead of depending on global cursor focus.
+                                    string inputEvidence = ClickTargetedWindowAtPoint(patcherPid.Value, secondX, secondY);
                                     log?.Invoke(string.Format(
-                                        "GAME START attempt #{0}: one visually confirmed click only at normalized=({1:0.000},{2:0.000}); first=[{3}]; second=[{4}]; input=[{5}]. Waiting {6}ms before any retry.",
+                                        "GAME START attempt #{0}: one visually confirmed launcher-window message at normalized=({1:0.000},{2:0.000}); first=[{3}]; second=[{4}]; input=[{5}]. No cursor movement or foreground-dependent SendInput was used. Waiting {6}ms before any retry.",
                                         clickAttempt, secondX, secondY, firstEvidence, secondEvidence, inputEvidence, retryMs));
                                 }
                             }
@@ -245,6 +277,103 @@ namespace _4RTools.Model.Vanilla
             {
                 if (launched != null) launched.Dispose();
             }
+        }
+
+
+        internal static bool TryActivateLauncherWindow(int processId, IntPtr hwnd, Func<bool> cancelled, out string evidence)
+        {
+            evidence = "launcher activation not attempted";
+            if (hwnd == IntPtr.Zero || !IsWindow(hwnd) || !IsWindowVisible(hwnd))
+            {
+                evidence = "launcher HWND is missing or not visible";
+                return false;
+            }
+            uint ownerPid;
+            uint targetThread = GetWindowThreadProcessId(hwnd, out ownerPid);
+            if (ownerPid != (uint)processId || targetThread == 0)
+            {
+                evidence = "launcher HWND ownership mismatch; expected PID=" + processId + ", actualPID=" + ownerPid;
+                return false;
+            }
+            if (cancelled != null && cancelled()) throw new OperationCanceledException("Patcher launch cancelled.");
+
+            IntPtr before = GetForegroundWindow();
+            if (before == hwnd)
+            {
+                evidence = "already foreground; target=" + DescribeWindow(hwnd);
+                return true;
+            }
+
+            // Windows foreground-lock rules can reject SetForegroundWindow when the desktop or
+            // another application owns the input queue. Temporarily attach only the involved
+            // GUI input queues, activate the verified launcher HWND, then detach immediately.
+            MSG message;
+            PeekMessage(out message, IntPtr.Zero, 0, 0, 0); // ensure this worker owns a message queue
+            uint currentThread = GetCurrentThreadId();
+            uint foregroundPid;
+            uint foregroundThread = before == IntPtr.Zero ? 0 : GetWindowThreadProcessId(before, out foregroundPid);
+            bool attachedTarget = false, attachedForeground = false;
+            int targetAttachError = 0, foregroundAttachError = 0;
+            bool top = false, foregroundRequested = false;
+            try
+            {
+                if (currentThread != targetThread)
+                {
+                    attachedTarget = AttachThreadInput(currentThread, targetThread, true);
+                    if (!attachedTarget) targetAttachError = Marshal.GetLastWin32Error();
+                }
+                if (foregroundThread != 0 && foregroundThread != currentThread && foregroundThread != targetThread)
+                {
+                    attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
+                    if (!attachedForeground) foregroundAttachError = Marshal.GetLastWin32Error();
+                }
+                bool targetQueueReady = currentThread == targetThread || attachedTarget;
+                bool foregroundQueueReady = foregroundThread == 0 || foregroundThread == currentThread
+                    || foregroundThread == targetThread || attachedForeground;
+                if (!targetQueueReady || !foregroundQueueReady)
+                {
+                    evidence = "foreground input queues could not be safely joined; currentThread=" + currentThread
+                        + ", targetThread=" + targetThread + ", foregroundThread=" + foregroundThread
+                        + ", attachTarget=" + attachedTarget + " err=" + targetAttachError
+                        + ", attachForeground=" + attachedForeground + " err=" + foregroundAttachError
+                        + ". No foreground request or GAME START action sent.";
+                    return false;
+                }
+
+                if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+                top = BringWindowToTop(hwnd);
+                SetActiveWindow(hwnd);
+                SetFocus(hwnd);
+                foregroundRequested = SetForegroundWindow(hwnd);
+
+                var watch = Stopwatch.StartNew();
+                while (watch.ElapsedMilliseconds < LauncherActivationTimeoutMs)
+                {
+                    if (cancelled != null && cancelled()) throw new OperationCanceledException("Patcher launch cancelled.");
+                    if (!IsWindow(hwnd) || !IsWindowVisible(hwnd)) break;
+                    if (GetForegroundWindow() == hwnd)
+                    {
+                        evidence = "foreground acquired in " + watch.ElapsedMilliseconds + "ms; target=" + DescribeWindow(hwnd)
+                            + ", before=" + DescribeWindow(before) + ", BringWindowToTop=" + top
+                            + ", SetForegroundWindow=" + foregroundRequested + ", attachedTarget=" + attachedTarget
+                            + ", attachedForeground=" + attachedForeground + ".";
+                        return true;
+                    }
+                    Thread.Sleep(50);
+                }
+            }
+            finally
+            {
+                if (attachedForeground) AttachThreadInput(currentThread, foregroundThread, false);
+                if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
+            }
+
+            evidence = "foreground activation timed out; target=" + DescribeWindow(hwnd)
+                + ", before=" + DescribeWindow(before) + ", after=" + DescribeWindow(GetForegroundWindow())
+                + ", BringWindowToTop=" + top + ", SetForegroundWindow=" + foregroundRequested
+                + ", attachTarget=" + attachedTarget + " err=" + targetAttachError
+                + ", attachForeground=" + attachedForeground + " err=" + foregroundAttachError + ".";
+            return false;
         }
 
         internal static bool SameGameStartCandidate(double firstX, double firstY, double secondX, double secondY)
@@ -405,29 +534,32 @@ namespace _4RTools.Model.Vanilla
         private static string ClickTargetedWindowAtPoint(int processId, double x, double y)
         {
             IntPtr main = ResolveLauncherWindow(processId);
-            if (main == IntPtr.Zero) throw new InvalidOperationException("Launcher main window handle is zero.");
+            if (main == IntPtr.Zero || !IsWindow(main) || !IsWindowVisible(main))
+                throw new InvalidOperationException("Launcher main window is no longer available.");
+            uint ownerPid;
+            GetWindowThreadProcessId(main, out ownerPid);
+            if (ownerPid != (uint)processId)
+                throw new InvalidOperationException("Launcher HWND ownership changed; no GAME START message sent.");
             RECT rect;
             if (!GetClientRect(main, out rect)) throw new InvalidOperationException("Cannot read launcher client rectangle; err=" + Marshal.GetLastWin32Error());
             int width = Math.Max(1, rect.Right - rect.Left), height = Math.Max(1, rect.Bottom - rect.Top);
+            if (width < 200 || height < 120) throw new InvalidOperationException("Launcher client is too small for verified GAME START input.");
             var clientPoint = new POINT
             {
                 X = Math.Max(0, Math.Min(width - 1, (int)Math.Round(x * width))),
                 Y = Math.Max(0, Math.Min(height - 1, (int)Math.Round(y * height)))
             };
-            var screenPoint = clientPoint;
-            if (!ClientToScreen(main, ref screenPoint)) throw new InvalidOperationException("Cannot map launcher click to screen; err=" + Marshal.GetLastWin32Error());
-            IntPtr hit = WindowFromPoint(screenPoint);
-            IntPtr target = hit != IntPtr.Zero && (hit == main || IsChild(main, hit)) ? hit : main;
-            var targetClient = screenPoint;
-            if (!ScreenToClient(target, ref targetClient)) throw new InvalidOperationException("Cannot map launcher click to hit window; err=" + Marshal.GetLastWin32Error());
-            IntPtr packed = new IntPtr((targetClient.Y << 16) | (targetClient.X & 0xFFFF));
-            bool moved = PostMessage(target, WM_MOUSEMOVE, IntPtr.Zero, packed);
-            bool down = PostMessage(target, WM_LBUTTONDOWN, new IntPtr(1), packed);
+            IntPtr packed = new IntPtr((clientPoint.Y << 16) | (clientPoint.X & 0xFFFF));
+            bool moved = PostMessage(main, WM_MOUSEMOVE, IntPtr.Zero, packed);
+            bool down = PostMessage(main, WM_LBUTTONDOWN, new IntPtr(1), packed);
             Thread.Sleep(100);
-            bool up = PostMessage(target, WM_LBUTTONUP, IntPtr.Zero, packed);
+            bool up = PostMessage(main, WM_LBUTTONUP, IntPtr.Zero, packed);
             int error = (!moved || !down || !up) ? Marshal.GetLastWin32Error() : 0;
-            return "main=" + DescribeWindow(main) + "; screenPoint=(" + screenPoint.X + "," + screenPoint.Y + "); hit=" + DescribeWindow(hit)
-                + "; messageTarget=" + DescribeWindow(target) + "; targetClient=(" + targetClient.X + "," + targetClient.Y + ")"
+            if (!moved || !down || !up)
+                throw new InvalidOperationException("Launcher rejected the verified GAME START window message; err=" + error + ".");
+            return "main=" + DescribeWindow(main) + "; ownerPID=" + ownerPid
+                + "; client=" + width + "x" + height + "; targetClient=(" + clientPoint.X + "," + clientPoint.Y + ")"
+                + "; foregroundAtMessage=" + DescribeWindow(GetForegroundWindow())
                 + "; PostMessage(move/down/up)=" + moved + "/" + down + "/" + up + "; err=" + error;
         }
 
