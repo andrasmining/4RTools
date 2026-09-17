@@ -162,7 +162,7 @@ namespace _4RTools.Model.Vanilla
                                 + "; existing client was not adopted.");
 
                         if (!WaitForOwnedClientSafeMinimize(runtime, existingPid.Value, () => StartupCancelled(generation),
-                            account.Label + ": existing client"))
+                            account.Label + ": existing client", false))
                             throw new InvalidOperationException(account.Label + ": existing gameplay client could not be confirmed minimized; next client was NOT started.");
 
                         lock (gate)
@@ -440,7 +440,7 @@ namespace _4RTools.Model.Vanilla
                     throw new OperationCanceledException("Sequential startup cancelled.");
                 bool minimized = WaitForOwnedClientSafeMinimize(runtime, pid.Value,
                     () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
-                    account.Label + ": sequential startup");
+                    account.Label + ": sequential startup", true);
                 if (!SequentialStartupMayAdvance(true, true, minimized, false))
                     throw new InvalidOperationException(account.Label + ": could not confirm minimization; next client was NOT started.");
 

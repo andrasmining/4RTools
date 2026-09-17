@@ -35,13 +35,15 @@ stay disabled. Native UI checks must cover discovery and the character editor.
 
 ## User-presence-aware minimization and launcher pacing
 
-Automatic minimization must respect active human use. If a managed Vanilla window
-is restored/maximized/otherwise visible, do not minimize it immediately. Require
-at least 60 seconds continuously visible AND at least 60 seconds without machine
-cursor movement. Any cursor movement restarts the idle grace; unavailable cursor
-state fails closed and defers minimization. Manual explicit minimize remains
-immediate. Startup/recovery that owns a serialized gate may wait for this grace
-rather than stealing a window from an active user.
+Automatic minimization normally respects active human use. For an adopted/already-running
+client or ordinary steady-state visibility, require at least 60 seconds continuously visible
+AND at least 60 seconds without machine cursor movement. Any cursor movement restarts the idle
+grace; unavailable cursor state fails closed and defers minimization. Manual explicit minimize
+remains immediate. The exception is a client that 4RTools itself has just launched/relogged and
+whose configured Autobattle hotkey has been verified by fresh X/Y movement: minimize that owned
+client immediately after movement proof and release the serialized recovery/startup gate without
+a 60-second wait. If the user needs to interact with a client during supervised recovery, pause
+or stop supervision before doing so.
 
 Launcher GAME START automation must never double-activate a control in one attempt.
 Wait for the launcher window to remain present for at least 2.5 seconds, then use

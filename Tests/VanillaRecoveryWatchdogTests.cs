@@ -53,6 +53,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Visual watchdog OFF does not disable the position watchdog", VisualOff);
             Test("Startup and recovery do not accrue movement timeouts", StartupGrace);
             Test("Automatic minimization requires 60s visible and 60s cursor idle", MinimizeGrace);
+            Test("Verified recovery movement bypasses the 60s minimize grace", VerifiedMovementMinimize);
             Test("Steady-state stillness never requests an autobattle hotkey", WatchdogHotkeyFirst);
             Test("Recovery backoff continues beyond three failures and caps at one hour", RestartBudget);
             Test("Verified restart recovery resets exponential backoff", RestartBudgetReset);
@@ -258,6 +259,13 @@ namespace Vanilla.Diagnostics.Tests
                 "Cursor activity grace was shorter than 60 seconds.");
             Assert(VanillaReconnectSupervisor.AutomaticMinimizeReady(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60)),
                 "Exactly 60 seconds of visibility and cursor idle should allow minimization.");
+        }
+        private static void VerifiedMovementMinimize()
+        {
+            Assert(!VanillaReconnectSupervisor.AutomaticMinimizeReady(TimeSpan.Zero, TimeSpan.Zero, false),
+                "Ordinary visible clients must still respect the user-presence grace.");
+            Assert(VanillaReconnectSupervisor.AutomaticMinimizeReady(TimeSpan.Zero, TimeSpan.Zero, true),
+                "Fresh verified recovery movement must allow immediate minimization.");
         }
         private static void WatchdogHotkeyFirst()
         { using(var h=new H()){h.Sample(101);h.Motion(h.A);h.E.Seconds=300;h.Sample(101);Assert(!h.Motion(h.A));Assert(h.Wakeups.Count==0&&h.E.Work.Count==0,"Five-minute steady state sent input or restarted without a terminal popup.");h.E.Seconds=600;h.Sample(101);Assert(h.Motion(h.A));Assert(h.Wakeups.Count==0,"Steady-state watchdog requested a hotkey.");Assert(h.E.Work.Count==1,"Ten-minute stillness did not queue a client restart.");} }

@@ -440,7 +440,7 @@ namespace _4RTools.Model.Vanilla
                         detail => ResumeProgress(runtime, pid, generation, detail)).ConfigureAwait(false);
                     if (!IsRunning || ResumeWorkerCancelled(runtime, pid, generation)) throw new OperationCanceledException();
                     if (!WaitForOwnedClientSafeMinimize(runtime, pid,
-                        () => !IsRunning || ResumeWorkerCancelled(runtime, pid, generation), account.Label + ": autobattle recovery"))
+                        () => !IsRunning || ResumeWorkerCancelled(runtime, pid, generation), account.Label + ": autobattle recovery", true))
                         throw new InvalidOperationException("Movement verified but client minimization could not be confirmed.");
                 }
                 catch (OperationCanceledException) { cancelled = true; }

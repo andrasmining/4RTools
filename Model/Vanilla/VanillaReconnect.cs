@@ -1141,7 +1141,7 @@ namespace _4RTools.Model.Vanilla
                         detail => ResumeProgress(owner, pid, generation, "Recovery login: " + detail))
                         .GetAwaiter().GetResult();
                     if (cancelled()) throw new OperationCanceledException("Recovery login cancelled after autobattle verification.");
-                    if (!WaitForOwnedClientSafeMinimize(owner, pid, cancelled, account.Label + ": recovery"))
+                    if (!WaitForOwnedClientSafeMinimize(owner, pid, cancelled, account.Label + ": recovery", true))
                         throw new InvalidOperationException("Movement verified but client minimization could not be confirmed.");
                 }
             }

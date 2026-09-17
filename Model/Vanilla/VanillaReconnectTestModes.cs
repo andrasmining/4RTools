@@ -23,18 +23,24 @@ namespace _4RTools.Model.Vanilla
 
         public bool MinimizeAssignedClient(string accountId)
         {
-            return MinimizeAssignedClientCore(accountId, true);
+            return MinimizeAssignedClientCore(accountId, true, false);
         }
 
         public bool KeepAssignedClientMinimized(string accountId)
         {
-            return MinimizeAssignedClientCore(accountId, false);
+            return MinimizeAssignedClientCore(accountId, false, false);
         }
 
         internal static bool AutomaticMinimizeReady(TimeSpan visibleFor, TimeSpan cursorIdleFor)
         {
-            return visibleFor >= TimeSpan.FromSeconds(AutomaticMinimizeIdleSeconds)
-                && cursorIdleFor >= TimeSpan.FromSeconds(AutomaticMinimizeIdleSeconds);
+            return AutomaticMinimizeReady(visibleFor, cursorIdleFor, false);
+        }
+
+        internal static bool AutomaticMinimizeReady(TimeSpan visibleFor, TimeSpan cursorIdleFor, bool verifiedMovement)
+        {
+            return verifiedMovement
+                || (visibleFor >= TimeSpan.FromSeconds(AutomaticMinimizeIdleSeconds)
+                    && cursorIdleFor >= TimeSpan.FromSeconds(AutomaticMinimizeIdleSeconds));
         }
 
         internal void SetMinimizePolicyTestServices(Func<DateTimeOffset> clock, Func<Point?> cursor)
@@ -49,11 +55,13 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        private bool WaitForOwnedClientSafeMinimize(Runtime owner, int pid, Func<bool> cancelled, string context)
+        private bool WaitForOwnedClientSafeMinimize(Runtime owner, int pid, Func<bool> cancelled, string context, bool verifiedMovement)
         {
             if (owner == null) throw new ArgumentNullException(nameof(owner));
             if (cancelled == null) throw new ArgumentNullException(nameof(cancelled));
-            Log(context + ": client ready; automatic minimize is waiting for 60s with the client visible and no cursor movement.");
+            Log(verifiedMovement
+                ? context + ": X/Y movement verified; minimizing the owned client immediately. Pause/stop supervision first if you need to interact with it."
+                : context + ": client ready without a fresh recovery movement handshake; automatic minimize is waiting for 60s with the client visible and no cursor movement.");
             while (true)
             {
                 if (cancelled()) throw new OperationCanceledException(context + ": minimization wait cancelled.");
@@ -62,9 +70,9 @@ namespace _4RTools.Model.Vanilla
                     Runtime current;
                     if (disposed || !runtimes.TryGetValue(owner.Account.Id, out current) || !ReferenceEquals(owner, current)
                         || current.ProcessId != pid || !current.Account.Enabled || CharacterOwnershipChanged(current, pid))
-                        throw new OperationCanceledException(context + ": client ownership changed during minimization grace.");
+                        throw new OperationCanceledException(context + ": client ownership changed during minimization.");
                 }
-                if (KeepAssignedClientMinimized(owner.Account.Id))
+                if (MinimizeAssignedClientCore(owner.Account.Id, false, verifiedMovement))
                 {
                     lock (gate)
                     {
@@ -96,7 +104,7 @@ namespace _4RTools.Model.Vanilla
             if (!string.IsNullOrWhiteSpace(text)) Log(text);
         }
 
-        private bool MinimizeAssignedClientCore(string accountId, bool testLog)
+        private bool MinimizeAssignedClientCore(string accountId, bool testLog, bool verifiedMovement)
         {
             int pid;
             string label;
@@ -131,7 +139,7 @@ namespace _4RTools.Model.Vanilla
                             current.NonMinimizedSince = null;
                             return true;
                         }
-                        if (!testLog)
+                        if (!testLog && !verifiedMovement)
                         {
                             if (!current.NonMinimizedSince.HasValue) current.NonMinimizedSince = now;
                             TimeSpan visibleFor = now - current.NonMinimizedSince.Value;
@@ -142,7 +150,7 @@ namespace _4RTools.Model.Vanilla
 
                     // Re-sample immediately before minimizing. A cursor move between policy
                     // evaluation and ShowWindow is treated as active user presence.
-                    if (!testLog)
+                    if (!testLog && !verifiedMovement)
                     {
                         DateTimeOffset finalNow = minimizeClock();
                         Point? finalCursor = null;
@@ -173,7 +181,9 @@ namespace _4RTools.Model.Vanilla
                             current.NonMinimizedSince = null;
                     }
                     Log((testLog ? "TEST " : string.Empty) + label + ": Vanilla client PID " + pid
-                        + (testLog ? " minimized and left running." : " minimized after 60s visible + cursor-idle grace."));
+                        + (testLog ? " minimized and left running."
+                            : verifiedMovement ? " minimized immediately after verified X/Y movement."
+                            : " minimized after 60s visible + cursor-idle grace."));
                     return true;
                 }
             }
