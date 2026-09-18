@@ -59,6 +59,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Recovery backoff continues beyond three failures and caps at one hour", RestartBudget);
             Test("Verified restart recovery resets exponential backoff", RestartBudgetReset);
             Test("Manual Cart hold survives unrelated recovery settings apply", WeightHoldSurvivesApply);
+            Test("Cancelled Cart retains its hold after the active runtime is removed", WeightHoldSurvivesRuntimeRemoval);
             Test("Clearing Cart holds leaves unrelated error states untouched", WeightHoldClearIsolation);
             Test("One terminal observation does not close a client", OneTerminal);
             Test("Unknown modal is never dismissed or closed as a disconnect", UnknownModal);
@@ -479,6 +480,24 @@ namespace Vanilla.Diagnostics.Tests
                 Assert(h.Supervisor.IsWeightManualHold(token.AccountId), "Manual Cart hold was not established.");
                 h.Supervisor.Apply(h.Supervisor.Settings, false);
                 Assert(h.Supervisor.IsWeightManualHold(token.AccountId), "Unrelated settings Apply erased the manual Cart hold.");
+            }
+        }
+
+        private static void WeightHoldSurvivesRuntimeRemoval()
+        {
+            using (var h = new H())
+            {
+                var accountA = (VanillaReconnectAccount)Get(h.A, "Account");
+                var token = new VanillaWeightMaintenanceToken
+                {
+                    AccountId = accountA.Id, ProcessId = 101, Generation = 1, Account = accountA.Clone()
+                };
+                var settings = h.Supervisor.Settings;
+                settings.Accounts.RemoveAll(a => a.Id == accountA.Id);
+                h.Supervisor.Apply(settings, false);
+                h.Supervisor.MarkWeightMaintenanceCancelled(token, true, "synthetic cancellation after runtime removal");
+                Assert(h.Supervisor.IsWeightManualHold(accountA.Id),
+                    "Cancelled Cart lost its stable-row hold after the runtime was removed.");
             }
         }
 
