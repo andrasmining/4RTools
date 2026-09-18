@@ -27,7 +27,7 @@ folders. See the included `README.txt`, `VERSION.txt` and `RELEASE-NOTES.md`.
 
 The compact top area shows up to two observed clients, including character name,
 HP/SP, location and activity when the corresponding state is valid. Recovery,
-automation, temporary actions, alerts, memory finding, diagnostics and data/update
+automation, temporary actions, weight/cart management, memory finding, diagnostics and data/update
 settings share the same workspace. Debug controls stay on the left of the header;
 update controls and version status stay on the right.
 
@@ -91,6 +91,23 @@ reads, stale observations and lost input ownership prevent further automated inp
 Movement confirms only movement, not combat; a deliberately stationary character can
 therefore enter recovery by design.
 
+
+
+### Weight / Cart management
+
+The **Weight** tab uses the verified read-only carried/max-weight fields. It can keep the existing
+optional e-mail warning and can also trigger UI-only Cart maintenance at a configurable weight
+percentage (50% by default). Use, Equip and Etc categories are independently selectable; Inventory
+and Cart hotkeys are configurable. The automation pauses the configured character Autobattle
+toggle, detects the Inventory/Cart panels and slot geometry from the current client image, performs
+ordinary drag-and-drop, then resumes through the same verified ResumeHotkey/X-Y movement routine
+and minimizes.
+
+Inventory contents are never read or modified through game memory. Stack `Enter` is sent only after
+a quantity dialog is positively recognized; single-quantity transfers do not receive Enter. If a
+drag makes no verifiable progress, the Cart appears unable to accept more, or UI ownership becomes
+uncertain, 4RTools stops input and holds only that character with Autobattle OFF for manual Cart
+emptying. Healthy siblings continue normally.
 
 ## State validity and boundaries
 

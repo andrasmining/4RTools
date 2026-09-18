@@ -51,6 +51,22 @@ Normal recovery minimizes a successfully verified client and leaves other
 healthy clients untouched. Proxy/login/startup/recovery input is serialized.
 Vanilla's own Autobattle remains responsible for movement and combat.
 
+
+Weight / Cart management
+------------------------
+The Weight tab can trigger ordinary UI-only Cart maintenance from verified read-only
+CurrentWeight/MaxWeight. The default trigger is 50% and is configurable. Use, Equip
+and Etc inventory categories are selectable, as are the Inventory and Cart hotkeys.
+4RTools pauses the configured Autobattle toggle, detects the opened panels/slots,
+drags items to Cart, then resumes through verified X/Y movement and minimizes.
+
+For stack transfers Enter is pressed only after a quantity dialog is positively
+detected. A quantity-one item has no dialog and receives no Enter. If the UI cannot
+be identified safely, the Cart rejects a transfer, or progress cannot be verified,
+input stops and only that character is held for manual Cart emptying with Autobattle
+left OFF. Memory access remains read-only; inventory state is never read/written from
+game memory.
+
 Persistent configuration and updates
 ------------------------------------
 User data is stored outside the versioned release folder under:

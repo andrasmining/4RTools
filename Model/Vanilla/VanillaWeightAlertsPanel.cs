@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
@@ -10,6 +11,17 @@ namespace _4RTools.Model.Vanilla
     public sealed class VanillaWeightAlertsPanel : UserControl
     {
         private readonly VanillaWeightAlertService service;
+        private readonly CheckBox autoCart = new CheckBox { Text = "Automatically move selected inventory categories to Cart", AutoSize = true };
+        private readonly NumericUpDown autoThreshold = Number(1, 100, 50, 1);
+        private readonly NumericUpDown autoRearm = Number(0, 99, 40, 1);
+        private readonly CheckBox transferUse = new CheckBox { Text = "Use", AutoSize = true, Checked = true };
+        private readonly CheckBox transferEquip = new CheckBox { Text = "Equip", AutoSize = true };
+        private readonly CheckBox transferEtc = new CheckBox { Text = "Etc", AutoSize = true, Checked = true };
+        private readonly TextBox inventoryHotkey = new TextBox { Width = 130, ReadOnly = true };
+        private readonly TextBox cartHotkey = new TextBox { Width = 130, ReadOnly = true };
+        private int inventoryKey, cartKey;
+        private bool inventoryCtrl, inventoryAlt, inventoryShift, cartCtrl, cartAlt, cartShift;
+
         private readonly CheckBox enabled = new CheckBox { Text = "Enable overweight e-mail alert", AutoSize = true };
         private readonly NumericUpDown threshold = Number(1, 100, 85, 1);
         private readonly NumericUpDown rearm = Number(0, 99, 80, 1);
@@ -23,8 +35,9 @@ namespace _4RTools.Model.Vanilla
         private readonly TextBox fromAddress = new TextBox { Width = 300 };
         private readonly TextBox toAddress = new TextBox { Width = 300 };
         private readonly TextBox subjectPrefix = new TextBox { Width = 220 };
-        private readonly Button save = new Button { Text = "SAVE ALERT SETTINGS", AutoSize = true };
+        private readonly Button save = new Button { Text = "SAVE WEIGHT SETTINGS", AutoSize = true };
         private readonly Button test = new Button { Text = "SEND TEST E-MAIL", AutoSize = true };
+        private readonly Button clearHold = new Button { Text = "CLEAR MANUAL CART HOLD", AutoSize = true };
         private readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(1150, 0), ForeColor = Color.DimGray };
         private readonly DataGridView live = new DataGridView
         {
@@ -42,23 +55,61 @@ namespace _4RTools.Model.Vanilla
             BuildLayout(); LoadSettings();
             save.Click += (s, e) => Guard(SaveSettings);
             test.Click += async (s, e) => await SendTestAsync();
+            clearHold.Click += (s, e) => service.ClearManualHolds();
+            inventoryHotkey.KeyDown += (s, e) => CaptureHotkey(e, true);
+            cartHotkey.KeyDown += (s, e) => CaptureHotkey(e, false);
             timer.Tick += (s, e) => RefreshStatus();
             timer.Start(); RefreshStatus();
         }
 
         private void BuildLayout()
         {
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 5 };
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, RowCount = 6 };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.Controls.Add(new Label { AutoSize = true, Font = new Font("Segoe UI", 10F, FontStyle.Bold), Text = "Weight / overweight alert" }, 0, 0);
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.Controls.Add(new Label { AutoSize = true, Font = new Font("Segoe UI", 10F, FontStyle.Bold), Text = "Weight / Cart management" }, 0, 0);
             root.Controls.Add(new Label
             {
                 AutoSize = true, MaximumSize = new Size(1150, 0), ForeColor = Color.DimGray, Margin = new Padding(0, 5, 0, 10),
-                Text = "The alert is driven only by verified CurrentWeight and MaxWeight memory mappings. Set any warning percentage you want. One e-mail is sent when the character crosses the threshold; it re-arms only after weight falls below the re-arm percentage, with an additional cooldown to prevent spam. SMTP password is protected with Windows DPAPI and is never written as plaintext to the settings file."
+                Text = "Weight decisions use only verified read-only CurrentWeight/MaxWeight. Cart maintenance uses ordinary UI hotkeys, visual slot detection and drag/drop; it never reads or writes inventory memory. It pauses the configured character Autobattle toggle, opens Inventory + Cart, moves every visible item from the selected categories, presses Enter only when a quantity dialog is positively detected, then uses the shared verified ResumeHotkey routine and minimizes. If a transfer makes no progress (for example a full cart), Autobattle stays OFF and only that character is held for manual emptying."
             }, 0, 1);
 
+            root.Controls.Add(BuildCartGroup(), 0, 2);
+            root.Controls.Add(BuildMailGroup(), 0, 3);
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            buttons.Controls.Add(save); buttons.Controls.Add(test); buttons.Controls.Add(clearHold); buttons.Controls.Add(status);
+            root.Controls.Add(buttons, 0, 4);
+
+            live.Columns.Add("Client", "Client"); live.Columns.Add("Weight", "Weight"); live.Columns.Add("Percent", "%"); live.Columns.Add("Verification", "State");
+            var liveHost = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+            liveHost.RowStyles.Add(new RowStyle(SizeType.AutoSize)); liveHost.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            liveHost.Controls.Add(new Label { AutoSize = true, Font = new Font("Segoe UI", 9F, FontStyle.Bold), Margin = new Padding(0, 10, 0, 4), Text = "Live verified weight" }, 0, 0);
+            liveHost.Controls.Add(live, 0, 1); root.Controls.Add(liveHost, 0, 5);
+            Controls.Add(root);
+        }
+
+        private Control BuildCartGroup()
+        {
+            var group = new GroupBox { Text = "Automatic Cart maintenance", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(10) };
+            var table = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, RowCount = 4 };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            table.Controls.Add(autoCart, 0, 0); table.SetColumnSpan(autoCart, 4);
+            Add(table, 1, 0, "Start at weight %", autoThreshold); Add(table, 1, 2, "Re-arm below %", autoRearm);
+            var categories = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+            categories.Controls.Add(transferUse); categories.Controls.Add(transferEquip); categories.Controls.Add(transferEtc);
+            table.Controls.Add(new Label { Text = "Move categories", AutoSize = true, Margin = new Padding(3, 8, 6, 0) }, 0, 2);
+            table.Controls.Add(categories, 1, 2);
+            var hint = new Label { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(500, 0), Text = "Equip is optional/off by default. Favorite is not processed because it can overlap the real Use/Equip/Etc categories." };
+            table.Controls.Add(hint, 2, 2); table.SetColumnSpan(hint, 2);
+            Add(table, 3, 0, "Inventory hotkey", inventoryHotkey); Add(table, 3, 2, "Cart hotkey", cartHotkey);
+            group.Controls.Add(table); return group;
+        }
+
+        private Control BuildMailGroup()
+        {
+            var group = new GroupBox { Text = "Optional e-mail alert", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(10) };
             var settings = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, RowCount = 8 };
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -68,31 +119,24 @@ namespace _4RTools.Model.Vanilla
             Add(settings, 3, 0, "SMTP host", smtpHost);
             settings.Controls.Add(new Label { Text = "SMTP port", AutoSize = true, Margin = new Padding(3, 8, 6, 0) }, 2, 3);
             var smtpTransport = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = Padding.Empty };
-            smtpTransport.Controls.Add(smtpPort); smtpTransport.Controls.Add(useSsl);
-            settings.Controls.Add(smtpTransport, 3, 3);
+            smtpTransport.Controls.Add(smtpPort); smtpTransport.Controls.Add(useSsl); settings.Controls.Add(smtpTransport, 3, 3);
             Add(settings, 4, 0, "SMTP username", smtpUser); Add(settings, 4, 2, "SMTP password", smtpPassword);
             Add(settings, 5, 0, "From e-mail", fromAddress); Add(settings, 5, 2, "Recipient e-mail", toAddress);
             Add(settings, 6, 0, "Subject prefix", subjectPrefix);
-            var hint = new Label { AutoSize = true, ForeColor = Color.DimGray, Text = "Leave password blank to keep the already saved protected password." };
-            settings.Controls.Add(hint, 2, 6); settings.SetColumnSpan(hint, 2);
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
-            buttons.Controls.Add(save); buttons.Controls.Add(test); buttons.Controls.Add(status);
-            settings.Controls.Add(buttons, 0, 7); settings.SetColumnSpan(buttons, 4);
-            root.Controls.Add(settings, 0, 2);
-
-            live.Columns.Add("Client", "Client"); live.Columns.Add("Weight", "Weight"); live.Columns.Add("Percent", "%"); live.Columns.Add("Verification", "State");
-            root.Controls.Add(new Label { AutoSize = true, Font = new Font("Segoe UI", 9F, FontStyle.Bold), Margin = new Padding(0, 10, 0, 4), Text = "Live weight memory" }, 0, 3);
-            root.Controls.Add(live, 0, 4); Controls.Add(root);
+            settings.Controls.Add(new Label { AutoSize = true, ForeColor = Color.DimGray, Text = "Leave password blank to keep the already saved protected password." }, 2, 6);
+            group.Controls.Add(settings); return group;
         }
 
         private void LoadSettings()
         {
             loaded = service.Settings;
-            enabled.Checked = loaded.Enabled;
-            threshold.Value = Clamp(threshold, loaded.ThresholdPercent);
-            rearm.Value = Clamp(rearm, loaded.RearmPercent);
-            pollSeconds.Value = Clamp(pollSeconds, loaded.PollSeconds);
-            cooldownMinutes.Value = Clamp(cooldownMinutes, loaded.CooldownMinutes);
+            autoCart.Checked = loaded.AutoCartEnabled;
+            autoThreshold.Value = Clamp(autoThreshold, loaded.AutoCartThresholdPercent); autoRearm.Value = Clamp(autoRearm, loaded.AutoCartRearmPercent);
+            transferUse.Checked = loaded.TransferUseItems; transferEquip.Checked = loaded.TransferEquipItems; transferEtc.Checked = loaded.TransferEtcItems;
+            inventoryKey = loaded.InventoryKey; inventoryCtrl = loaded.InventoryCtrl; inventoryAlt = loaded.InventoryAlt; inventoryShift = loaded.InventoryShift;
+            cartKey = loaded.CartKey; cartCtrl = loaded.CartCtrl; cartAlt = loaded.CartAlt; cartShift = loaded.CartShift; UpdateHotkeys();
+            enabled.Checked = loaded.Enabled; threshold.Value = Clamp(threshold, loaded.ThresholdPercent); rearm.Value = Clamp(rearm, loaded.RearmPercent);
+            pollSeconds.Value = Clamp(pollSeconds, loaded.PollSeconds); cooldownMinutes.Value = Clamp(cooldownMinutes, loaded.CooldownMinutes);
             smtpHost.Text = loaded.SmtpHost ?? ""; smtpPort.Value = Clamp(smtpPort, loaded.SmtpPort);
             useSsl.Checked = loaded.UseSsl; smtpUser.Text = loaded.SmtpUser ?? ""; smtpPassword.Clear();
             fromAddress.Text = loaded.FromAddress ?? ""; toAddress.Text = loaded.ToAddress ?? ""; subjectPrefix.Text = loaded.SubjectPrefix ?? "";
@@ -101,8 +145,11 @@ namespace _4RTools.Model.Vanilla
         private VanillaWeightAlertSettings ReadSettings()
         {
             var value = loaded == null ? new VanillaWeightAlertSettings() : loaded.Clone();
-            value.Enabled = enabled.Checked;
-            value.ThresholdPercent = threshold.Value; value.RearmPercent = rearm.Value;
+            value.AutoCartEnabled = autoCart.Checked; value.AutoCartThresholdPercent = autoThreshold.Value; value.AutoCartRearmPercent = autoRearm.Value;
+            value.TransferUseItems = transferUse.Checked; value.TransferEquipItems = transferEquip.Checked; value.TransferEtcItems = transferEtc.Checked;
+            value.InventoryKey = inventoryKey; value.InventoryCtrl = inventoryCtrl; value.InventoryAlt = inventoryAlt; value.InventoryShift = inventoryShift;
+            value.CartKey = cartKey; value.CartCtrl = cartCtrl; value.CartAlt = cartAlt; value.CartShift = cartShift;
+            value.Enabled = enabled.Checked; value.ThresholdPercent = threshold.Value; value.RearmPercent = rearm.Value;
             value.PollSeconds = (int)pollSeconds.Value; value.CooldownMinutes = (int)cooldownMinutes.Value;
             value.SmtpHost = smtpHost.Text.Trim(); value.SmtpPort = (int)smtpPort.Value; value.UseSsl = useSsl.Checked;
             value.SmtpUser = smtpUser.Text.Trim(); value.FromAddress = fromAddress.Text.Trim(); value.ToAddress = toAddress.Text.Trim();
@@ -113,31 +160,40 @@ namespace _4RTools.Model.Vanilla
 
         private void SaveSettings()
         {
-            VanillaWeightAlertSettings value = ReadSettings();
-            value.Validate(false); if (value.Enabled) value.Validate(true);
+            VanillaWeightAlertSettings value = ReadSettings(); value.Validate(false); if (value.Enabled) value.Validate(true);
             service.ApplySettings(value, true); loaded = service.Settings; smtpPassword.Clear();
-            status.Text = value.Enabled ? "Saved. Weight e-mail alert is active when verified weight mappings are available." : "Saved. Weight e-mail alert is disabled.";
+            status.Text = value.AutoCartEnabled ? "Saved. Automatic cart maintenance is armed at " + value.AutoCartThresholdPercent.ToString("0.#") + "%."
+                : value.Enabled ? "Saved. Weight e-mail alert is enabled." : "Saved. Automatic actions and e-mail alerts are disabled.";
+        }
+
+        private void CaptureHotkey(KeyEventArgs e, bool inventory)
+        {
+            if (e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.ShiftKey || e.KeyCode == Keys.Menu) return;
+            if (inventory) { inventoryKey = (int)e.KeyCode; inventoryCtrl = e.Control; inventoryAlt = e.Alt; inventoryShift = e.Shift; }
+            else { cartKey = (int)e.KeyCode; cartCtrl = e.Control; cartAlt = e.Alt; cartShift = e.Shift; }
+            UpdateHotkeys(); e.SuppressKeyPress = e.Handled = true;
+        }
+        private void UpdateHotkeys()
+        {
+            inventoryHotkey.Text = HotkeyText(inventoryCtrl, inventoryAlt, inventoryShift, inventoryKey);
+            cartHotkey.Text = HotkeyText(cartCtrl, cartAlt, cartShift, cartKey);
+        }
+        private static string HotkeyText(bool ctrl, bool alt, bool shift, int key)
+        {
+            var parts = new List<string>(); if (ctrl) parts.Add("Ctrl"); if (alt) parts.Add("Alt"); if (shift) parts.Add("Shift"); parts.Add(((Keys)key).ToString()); return string.Join("+", parts);
         }
 
         private async Task SendTestAsync()
         {
-            if (disposed) return;
-            test.Enabled = false; status.Text = "Sending SMTP test…";
-            try
-            {
-                VanillaWeightAlertSettings value = ReadSettings(); value.Validate(true);
-                await Task.Run(() => service.SendTest(value));
-                if (!disposed) status.Text = "Test e-mail sent successfully.";
-            }
+            if (disposed) return; test.Enabled = false; status.Text = "Sending SMTP test…";
+            try { VanillaWeightAlertSettings value = ReadSettings(); value.Validate(true); await Task.Run(() => service.SendTest(value)); if (!disposed) status.Text = "Test e-mail sent successfully."; }
             catch (Exception ex) { if (!disposed) status.Text = "Test e-mail failed: " + ex.Message; }
             finally { if (!disposed) test.Enabled = true; }
         }
 
         private void RefreshStatus()
         {
-            status.Text = service.Status;
-            var observations = service.Latest;
-            live.Rows.Clear();
+            status.Text = service.Status; var observations = service.Latest; live.Rows.Clear();
             foreach (VanillaWeightObservation item in observations.Take(2))
             {
                 string weight = item.CurrentWeight.HasValue && item.MaxWeight.HasValue ? item.CurrentWeight + " / " + item.MaxWeight : "Unavailable";
@@ -148,21 +204,11 @@ namespace _4RTools.Model.Vanilla
         }
 
         private static void Add(TableLayoutPanel panel, int row, int column, string caption, Control control)
-        {
-            panel.Controls.Add(new Label { Text = caption, AutoSize = true, Margin = new Padding(3, 8, 6, 0) }, column, row);
-            panel.Controls.Add(control, column + 1, row);
-        }
+        { panel.Controls.Add(new Label { Text = caption, AutoSize = true, Margin = new Padding(3, 8, 6, 0) }, column, row); panel.Controls.Add(control, column + 1, row); }
         private static NumericUpDown Number(decimal min, decimal max, decimal value, int decimals)
-        {
-            return new NumericUpDown { Minimum = min, Maximum = max, Value = value, DecimalPlaces = decimals, Width = 120 };
-        }
+        { return new NumericUpDown { Minimum = min, Maximum = max, Value = value, DecimalPlaces = decimals, Width = 120 }; }
         private static decimal Clamp(NumericUpDown control, decimal value) { return Math.Max(control.Minimum, Math.Min(control.Maximum, value)); }
         private void Guard(System.Action action) { try { action(); } catch (Exception ex) { status.Text = ex.Message; } }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) { disposed = true; timer.Stop(); timer.Dispose(); }
-            base.Dispose(disposing);
-        }
+        protected override void Dispose(bool disposing) { if (disposing) { disposed = true; timer.Stop(); timer.Dispose(); } base.Dispose(disposing); }
     }
 }

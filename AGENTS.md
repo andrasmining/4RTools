@@ -563,3 +563,7 @@ replace unsuitable approaches instead of handing development back to the user.
 State a genuine unavoidable external blocker accurately only after exhausting
 practical authorized alternatives. Never claim publication or VPS installation
 without evidence; testing update discovery is not installing on the user's VPS.
+
+## Weight / Cart maintenance
+
+Weight-triggered Cart maintenance must remain read-only-memory + ordinary UI input. Reuse the shared fleet reader for verified weight and movement; do not inspect/write inventory memory. Inventory/Cart/category interaction must be dynamically client-relative, never hard-coded desktop coordinates. `Enter` is authorized only after a freshly and positively detected quantity dialog; quantity-one transfers have no dialog and receive no Enter. Any ambiguous UI, failed transfer/progress, or apparently full Cart fails closed with Autobattle OFF and a manual hold for only that character until explicitly cleared. Successful maintenance resumes through the shared verified ResumeHotkey/X-Y path and then minimizes.

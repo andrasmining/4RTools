@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 [assembly: AssemblyTitle("4RTools Vanilla Companion")]
-[assembly: AssemblyDescription("Vanilla-first 4RTools companion with dual-client live memory state, sequential recovery, read-only memory discovery and weight e-mail alerts")]
+[assembly: AssemblyDescription("Vanilla-first 4RTools companion with dual-client live memory state, sequential recovery, read-only memory discovery and UI-only weight/cart management")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("4RTools Vanilla Companion")]
@@ -13,5 +13,5 @@ using System.Runtime.InteropServices;
 [assembly: InternalsVisibleTo("Vanilla.Diagnostics.Tests")]
 [assembly: ComVisible(false)]
 [assembly: Guid("a7d78b00-6CE1-4B4D-90A3-1D2E93C7F68A")]
-[assembly: AssemblyVersion("0.6.46.0")]
-[assembly: AssemblyFileVersion("0.6.46.0")]
+[assembly: AssemblyVersion("0.6.47.0")]
+[assembly: AssemblyFileVersion("0.6.47.0")]

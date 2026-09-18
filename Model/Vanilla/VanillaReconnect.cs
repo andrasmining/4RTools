@@ -609,7 +609,9 @@ namespace _4RTools.Model.Vanilla
                 Interlocked.Increment(ref resumeVerificationGeneration);
                 Interlocked.Increment(ref diagnosticGeneration);
                 Interlocked.Increment(ref hardenedStartupGeneration);
+                Interlocked.Increment(ref weightMaintenanceGeneration);
                 hardenedStartupRunning = false;
+                weightManualHolds.Clear();
                 foreach (var active in runtimes.Values.Where(r => r.ScriptRunning))
                 {
                     active.ScriptRunning = false;
@@ -648,6 +650,8 @@ namespace _4RTools.Model.Vanilla
                 RebuildRuntimes();
                 if (freshManualStart)
                 {
+                    Interlocked.Increment(ref weightMaintenanceGeneration);
+                    weightManualHolds.Clear();
                     foreach (Runtime runtime in runtimes.Values)
                     {
                         runtime.MovementRecoveryPending = false;
@@ -672,6 +676,7 @@ namespace _4RTools.Model.Vanilla
                 Interlocked.Increment(ref resumeVerificationGeneration);
                 Interlocked.Increment(ref diagnosticGeneration);
                 Interlocked.Increment(ref hardenedStartupGeneration);
+                Interlocked.Increment(ref weightMaintenanceGeneration);
                 hardenedStartupRunning = false;
                 running = false;
                 timer?.Change(Timeout.Infinite, Timeout.Infinite);
@@ -795,6 +800,11 @@ namespace _4RTools.Model.Vanilla
             var claimed = new HashSet<int>(runtimes.Values.Where(r => r.ProcessId.HasValue).Select(r => r.ProcessId.Value));
             foreach (var runtime in desired.Select(a => runtimes[a.Id]))
             {
+                if (weightManualHolds.Contains(runtime.Account.Id))
+                {
+                    SetStage(runtime, VanillaReconnectStage.Error, "Weight/cart maintenance needs manual emptying; automatic recovery is held for this character only");
+                    continue;
+                }
                 if (runtime.ProcessId.HasValue && CharacterOwnershipChanged(runtime, runtime.ProcessId.Value))
                 { ReleaseChangedCharacter(runtime); continue; }
                 if (runtime.ScriptRunning) continue;

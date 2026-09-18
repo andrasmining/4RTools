@@ -1,37 +1,42 @@
-# 4RTools Vanilla 0.6.46
+# 4RTools Vanilla 0.6.47
 
-## Immediate minimize after verified Autobattle movement
+## UI-only Weight / Cart management
 
-A recovery/restart client no longer waits through the 60-second visible/cursor-idle grace after
-the configured Autobattle hotkey has already been proven by fresh X/Y movement. Once movement
-verification succeeds, 4RTools immediately minimizes that same owned client, confirms it is
-minimized, completes the recovery, and releases the serialized gate for the next queued client.
+The former Alerts page is now **Weight**. It keeps the optional e-mail alert and adds automatic
+Cart maintenance driven by the existing verified read-only `CurrentWeight` / `MaxWeight` state.
+The default Cart trigger is 50% carried weight and the re-arm threshold is 40%; both are
+configurable. Use, Equip and Etc categories can be selected independently (Equip defaults off),
+and Inventory/Cart hotkeys are configurable.
 
-The 60-second user-presence grace is still retained for adopted/already-running clients and normal
-steady-state minimization where there is no fresh restart-owned movement handshake. Manual explicit
-minimize remains immediate. If you need to actively interact with a client while supervised recovery
-is running, pause or stop supervision first; recovery automation otherwise owns the restarted client
-through movement verification and minimization.
+Cart maintenance does **not** read or write inventory memory. It acquires the same globally
+serialized per-client input ownership used by recovery, toggles the character's configured
+Autobattle/slave hotkey OFF, opens Inventory and Cart through their configured UI hotkeys,
+detects the resulting panels and slot lattice from the current client image, and transfers items
+with ordinary drag-and-drop. Screen coordinates are derived from the detected client/panel/slot
+geometry rather than fixed desktop positions. The existing shared fleet reader supplies weight
+and post-action movement verification; no second gameplay memory reader is opened.
 
-This applies consistently to normal recovery login, sequential cold startup, and the shared
-restart-only ResumeHotkey recovery path. It does not add any new hotkey sends, process access, game
-memory writes, coordinate clicks, or parallel recovery behavior.
+Stack quantities are handled fail-closed. `Enter` is sent **only** when a short/wide quantity
+dialog with the focused numeric selection is positively detected after a drag. A quantity-one
+item produces no quantity dialog, so no Enter is sent. Missing or ambiguous dialog evidence never
+authorizes Enter. A late/uncleared quantity dialog, failed drag, missing safe UI geometry, lost
+ownership, or cart refusal stops further input.
+
+After all selected categories are processed, 4RTools closes the detected Inventory/Cart panels,
+resumes Autobattle using the exact shared three-attempt ResumeHotkey verifier, requires fresh X/Y
+movement, and then minimizes the client. If the Cart cannot accept another item or progress cannot
+be verified, Autobattle remains OFF and **only that character** enters a manual Cart hold so the
+user can empty/inspect it; recovery does not restart that held character. The Weight page provides
+a `CLEAR MANUAL CART HOLD` action after the user has corrected the Cart. Healthy sibling clients
+remain untouched.
 
 ## Validation limits
 
-Release validation covers the new immediate-after-movement policy and the retained 60-second grace
-for ordinary/adopted clients, full Debug/Release regressions, portable package/launch checks, native
-test-owned process recovery, and mock-data UI validation. Public assets, source identity, and updater
-discovery are verified after publication. The Windows runner cannot reproduce the user's live RDP
-session or run Vanilla/Gepard, so live in-game behavior remains limited to the user's supplied log
-showing successful X/Y movement followed by the unnecessary 60-second wait that this release removes.
-
-<!-- BEGIN GENERATED RELEASE CHECKSUMS -->
-
-Release version: 0.6.46. SHA256:
-
-- `4RTools-Vanilla-v0.6.46-portable.zip`: `7e1238f2869a503f695dd4d297c7eb49e33e5e164086bf993e1c8744d961957e`
-- `4RTools-Vanilla.exe`: `6121ac0ab03070fbf9ce34239511cdfcb6803c007ea4a955cbd805347d73d146`
-
-These generated hashes are excluded from the packaged notes to avoid a circular ZIP checksum.
-<!-- END GENERATED RELEASE CHECKSUMS -->
+Release validation covers settings persistence/validation, synthetic Inventory slot recognition,
+positive-only quantity-dialog recognition (including a regression that ordinary blue/white game
+UI cannot authorize Enter), Debug/Release regressions, native recovery checks, responsive mock UI,
+portable launch/package integrity, public release identity, and updater discovery. The engineering
+environment cannot run the user's live Vanilla/Gepard client or perform real Cart drag-and-drop, so
+the supplied screenshots establish the UI shapes but final live transfer behavior is not claimed
+as independently validated. Any uncertain live UI state fails closed and leaves the affected
+character for manual inspection rather than continuing blind input.

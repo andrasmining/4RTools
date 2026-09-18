@@ -19,15 +19,19 @@ namespace _4RTools.Model.Vanilla
         public uint? MaxHP { get; internal set; }
         public uint? CurrentSP { get; internal set; }
         public uint? MaxSP { get; internal set; }
+        public uint? CurrentWeight { get; internal set; }
+        public uint? MaxWeight { get; internal set; }
         public bool HpVerified { get; internal set; }
         public bool SpVerified { get; internal set; }
         public bool NameVerified { get; internal set; }
+        public bool WeightVerified { get; internal set; }
         public string Location { get; internal set; }
         public string Activity { get; internal set; }
         public string Build { get; internal set; }
         public string Error { get; internal set; }
         public bool Ready { get; internal set; }
         internal VanillaPositionSample Position { get; set; }
+        internal VanillaClientState Snapshot { get; set; }
         internal VanillaCharacterIdentity Identity { get; set; }
 
         public decimal? HpPercent { get { return Percent(CurrentHP, MaxHP); } }
@@ -278,9 +282,13 @@ namespace _4RTools.Model.Vanilla
                     MaxHP = state.MaxHP.IsAvailable ? (uint?)state.MaxHP.Value : null,
                     CurrentSP = state.CurrentSP.IsAvailable ? (uint?)state.CurrentSP.Value : null,
                     MaxSP = state.MaxSP.IsAvailable ? (uint?)state.MaxSP.Value : null,
+                    CurrentWeight = state.CurrentWeight.IsAvailable ? (uint?)state.CurrentWeight.Value : null,
+                    MaxWeight = state.MaxWeight.IsAvailable ? (uint?)state.MaxWeight.Value : null,
                     HpVerified = state.CurrentHP.Validation == StateValidation.Valid && state.MaxHP.Validation == StateValidation.Valid,
                     SpVerified = state.CurrentSP.Validation == StateValidation.Valid && state.MaxSP.Validation == StateValidation.Valid,
                     NameVerified = state.CharacterName.Validation == StateValidation.Valid,
+                    WeightVerified = state.CurrentWeight.Validation == StateValidation.Valid && state.MaxWeight.Validation == StateValidation.Valid,
+                    Snapshot = state,
                     Location = location,
                     Activity = activity,
                     Build = build,

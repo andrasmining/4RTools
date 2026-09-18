@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Mail;
 using System.Threading;
+using System.Windows.Forms;
 using Newtonsoft.Json;
 using _4RTools.Model.Vanilla.Automation;
 using _4RTools.Utils;
@@ -30,6 +31,25 @@ namespace _4RTools.Model.Vanilla
         public string ToAddress { get; set; } = "";
         public string SubjectPrefix { get; set; } = "[4RTools Vanilla]";
 
+        // UI-only cart maintenance. Memory remains read-only; these settings only drive ordinary window input.
+        public bool AutoCartEnabled { get; set; }
+        public decimal AutoCartThresholdPercent { get; set; } = 50m;
+        public decimal AutoCartRearmPercent { get; set; } = 40m;
+        public bool TransferUseItems { get; set; } = true;
+        public bool TransferEquipItems { get; set; }
+        public bool TransferEtcItems { get; set; } = true;
+        public int InventoryKey { get; set; } = (int)Keys.E;
+        public bool InventoryCtrl { get; set; }
+        public bool InventoryAlt { get; set; } = true;
+        public bool InventoryShift { get; set; }
+        public int CartKey { get; set; } = (int)Keys.W;
+        public bool CartCtrl { get; set; }
+        public bool CartAlt { get; set; } = true;
+        public bool CartShift { get; set; }
+
+        public string InventoryHotkeyText { get { return HotkeyText(InventoryCtrl, InventoryAlt, InventoryShift, InventoryKey); } }
+        public string CartHotkeyText { get { return HotkeyText(CartCtrl, CartAlt, CartShift, CartKey); } }
+
         public VanillaWeightAlertSettings Clone()
         {
             var value = JsonConvert.DeserializeObject<VanillaWeightAlertSettings>(JsonConvert.SerializeObject(this));
@@ -49,12 +69,27 @@ namespace _4RTools.Model.Vanilla
             if (SmtpUser != null && SmtpUser.Length > 320) throw new ArgumentException("SMTP username is too long.");
             if (ProtectedSmtpPassword != null && ProtectedSmtpPassword.Length > 8192) throw new ArgumentException("Protected SMTP password is too long.");
             if (SubjectPrefix != null && SubjectPrefix.Length > 120) throw new ArgumentException("Mail subject prefix is too long.");
+            if (AutoCartThresholdPercent <= 0 || AutoCartThresholdPercent > 100) throw new ArgumentException("Cart-maintenance threshold must be > 0 and <= 100 percent.");
+            if (AutoCartRearmPercent < 0 || AutoCartRearmPercent >= AutoCartThresholdPercent) throw new ArgumentException("Cart-maintenance re-arm percentage must be >= 0 and below its threshold.");
+            if (InventoryKey < 8 || InventoryKey > 254 || CartKey < 8 || CartKey > 254) throw new ArgumentException("Inventory/cart hotkeys are invalid.");
+            if (AutoCartEnabled && !TransferUseItems && !TransferEquipItems && !TransferEtcItems)
+                throw new ArgumentException("Enable at least one inventory category for automatic cart maintenance.");
             if (Enabled || requireMailTransport)
             {
                 if (string.IsNullOrWhiteSpace(SmtpHost)) throw new ArgumentException("SMTP host is required while weight e-mail alerts are enabled.");
                 ParseAddress(FromAddress, "From address");
                 ParseAddress(ToAddress, "Recipient address");
             }
+        }
+
+        private static string HotkeyText(bool ctrl, bool alt, bool shift, int key)
+        {
+            var parts = new List<string>();
+            if (ctrl) parts.Add("Ctrl");
+            if (alt) parts.Add("Alt");
+            if (shift) parts.Add("Shift");
+            parts.Add(((Keys)key).ToString());
+            return string.Join("+", parts);
         }
 
         private static void ParseAddress(string text, string caption)
@@ -117,129 +152,15 @@ namespace _4RTools.Model.Vanilla
         public string Error { get; internal set; }
     }
 
-    public sealed class VanillaWeightMonitor : IDisposable
-    {
-        private readonly string baseDirectory;
-        private readonly Dictionary<int, Reader> readers = new Dictionary<int, Reader>();
-        private readonly object gate = new object();
-        private bool disposed;
-
-        public VanillaWeightMonitor(string baseDirectory)
-        {
-            this.baseDirectory = Path.GetFullPath(baseDirectory ?? throw new ArgumentNullException(nameof(baseDirectory)));
-        }
-
-        public IReadOnlyList<VanillaWeightObservation> Poll()
-        {
-            lock (gate)
-            {
-                if (disposed) return new VanillaWeightObservation[0];
-                var live = new List<int>();
-                foreach (Process process in Process.GetProcessesByName("Vanilla MMO"))
-                {
-                    using (process)
-                    {
-                        try { if (!process.HasExited && process.MainWindowHandle != IntPtr.Zero) live.Add(process.Id); }
-                        catch (InvalidOperationException) { }
-                        catch (System.ComponentModel.Win32Exception) { }
-                    }
-                }
-                live = live.Distinct().OrderBy(value => value).Take(2).ToList();
-                foreach (int dead in readers.Keys.Where(pid => !live.Contains(pid)).ToArray()) { readers[dead].Dispose(); readers.Remove(dead); }
-                foreach (int pid in live)
-                {
-                    if (readers.ContainsKey(pid)) continue;
-                    try { readers.Add(pid, new Reader(baseDirectory, pid)); }
-                    catch (Exception ex) { readers.Add(pid, Reader.Failed(pid, ex.Message)); }
-                }
-                return live.Select(pid => readers[pid].Poll()).ToArray();
-            }
-        }
-
-        public void Dispose()
-        {
-            lock (gate)
-            {
-                if (disposed) return;
-                disposed = true;
-                foreach (Reader reader in readers.Values) reader.Dispose();
-                readers.Clear();
-            }
-        }
-
-        private sealed class Reader : IDisposable
-        {
-            private readonly int processId;
-            private readonly MemoryStateSource source;
-            private readonly VanillaStateAdapter adapter;
-            private readonly string fingerprint, build, startupError;
-            private bool disposed;
-
-            public static Reader Failed(int processId, string error) { return new Reader(processId, error); }
-            private Reader(int processId, string error) { this.processId = processId; startupError = error; }
-
-            public Reader(string baseDirectory, int processId)
-            {
-                this.processId = processId;
-                ReadOnlyProcessMemory memory = null;
-                try
-                {
-                    memory = new ReadOnlyProcessMemory(processId);
-                    if (!string.Equals(memory.ProcessName, "Vanilla MMO", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Selected process is not Vanilla MMO.");
-                    if (memory.PointerSize != 4) throw new InvalidOperationException("Only the 32-bit Vanilla client is supported by the current build profile.");
-                    var identity = VanillaExecutableIdentity.Read(memory.ExecutablePath);
-                    fingerprint = identity.Sha256;
-                    var profile = VanillaBuildProfile.Find(Path.Combine(baseDirectory, "VanillaBuilds"), identity, _ => { });
-                    if (profile == null) throw new InvalidOperationException("No verified Vanilla build profile matches this executable.");
-                    build = profile.Label;
-                    if (!profile.VerifiedFields.Contains(VanillaField.CurrentWeight) || !profile.VerifiedFields.Contains(VanillaField.MaxWeight))
-                        throw new InvalidOperationException("CurrentWeight/MaxWeight are not yet verified for this Vanilla build. Use Memory finder to discover and validate them first.");
-                    adapter = new VanillaStateAdapter(profile, identity);
-                    source = new MemoryStateSource(memory, profile.MemoryMap);
-                    memory = null;
-                }
-                finally { memory?.Dispose(); }
-            }
-
-            public VanillaWeightObservation Poll()
-            {
-                if (disposed) return Error("Observation closed.");
-                if (startupError != null) return Error(startupError);
-                try
-                {
-                    var state = source.Poll(DateTimeOffset.UtcNow);
-                    state.Fingerprint = fingerprint; state.BuildProfile = build;
-                    adapter.Observe(state, TimeSpan.Zero);
-                    if (source.IsStopped || state.Error != null) return Error(state.Error ?? source.Status);
-                    decimal percent;
-                    string error;
-                    if (!VanillaWeightValidation.TryGetPercent(state, out percent, out error)) return Error(error);
-                    uint current = state.CurrentWeight.Value, maximum = state.MaxWeight.Value;
-                    string name = state.CharacterName.Validation == StateValidation.Valid && state.CharacterName.IsAvailable ? state.CharacterName.Value : "PID " + processId;
-                    return new VanillaWeightObservation
-                    {
-                        ProcessId = processId, CharacterName = name, CurrentWeight = current, MaxWeight = maximum,
-                        Percent = percent, Verified = true, Build = build
-                    };
-                }
-                catch (Exception ex) { return Error(ex.Message); }
-            }
-
-            private VanillaWeightObservation Error(string error)
-            {
-                return new VanillaWeightObservation { ProcessId = processId, CharacterName = "PID " + processId, Verified = false, Build = build, Error = error };
-            }
-            public void Dispose() { if (disposed) return; disposed = true; source?.Dispose(); }
-        }
-    }
-
     public sealed class VanillaWeightAlertService : IDisposable
     {
         private readonly VanillaWeightAlertStore store;
-        private readonly VanillaWeightMonitor monitor;
+        private readonly VanillaFleetMonitor fleetMonitor;
+        private readonly VanillaReconnectSupervisor supervisor;
+        private readonly VanillaWeightCartAutomation cartAutomation;
         private readonly object gate = new object();
         private readonly Dictionary<string, AlertState> states = new Dictionary<string, AlertState>(StringComparer.OrdinalIgnoreCase);
-        private Timer timer;
+        private System.Threading.Timer timer;
         private VanillaWeightAlertSettings settings;
         private IReadOnlyList<VanillaWeightObservation> latest = new VanillaWeightObservation[0];
         private string status = "Weight alerts stopped.";
@@ -253,10 +174,14 @@ namespace _4RTools.Model.Vanilla
         public IReadOnlyList<VanillaWeightObservation> Latest { get { lock (gate) return latest.ToArray(); } }
         public VanillaWeightAlertSettings Settings { get { lock (gate) return settings.Clone(); } }
 
-        public VanillaWeightAlertService(string baseDirectory)
+        public VanillaWeightAlertService(string baseDirectory, VanillaFleetMonitor fleetMonitor, VanillaReconnectSupervisor supervisor)
         {
+            if (fleetMonitor == null) throw new ArgumentNullException(nameof(fleetMonitor));
+            if (supervisor == null) throw new ArgumentNullException(nameof(supervisor));
             store = new VanillaWeightAlertStore();
-            monitor = new VanillaWeightMonitor(baseDirectory);
+            this.fleetMonitor = fleetMonitor;
+            this.supervisor = supervisor;
+            cartAutomation = new VanillaWeightCartAutomation(fleetMonitor, supervisor);
             settings = store.Load();
         }
 
@@ -265,8 +190,10 @@ namespace _4RTools.Model.Vanilla
             lock (gate)
             {
                 if (disposed || timer != null) return;
-                timer = new Timer(_ => Poll(), null, TimeSpan.Zero, TimeSpan.FromSeconds(settings.PollSeconds));
-                SetStatusLocked(settings.Enabled ? "Weight alert monitor started." : "Weight alerts are disabled. Weight memory will still be visible on the Alerts page when mapped.");
+                timer = new System.Threading.Timer(_ => Poll(), null, TimeSpan.Zero, TimeSpan.FromSeconds(settings.PollSeconds));
+                SetStatusLocked(settings.AutoCartEnabled ? "Weight manager started; automatic cart maintenance is enabled."
+                    : settings.Enabled ? "Weight manager started; e-mail alerts are enabled."
+                    : "Weight manager started. Verified weight memory remains visible while actions are disabled.");
             }
         }
 
@@ -280,7 +207,8 @@ namespace _4RTools.Model.Vanilla
                 settings = value.Clone();
                 if (save) store.Save(settings);
                 if (timer != null) timer.Change(TimeSpan.Zero, TimeSpan.FromSeconds(settings.PollSeconds));
-                SetStatusLocked(settings.Enabled ? "Weight e-mail alerts enabled." : "Weight e-mail alerts disabled.");
+                SetStatusLocked(settings.AutoCartEnabled ? "Automatic cart maintenance enabled."
+                    : settings.Enabled ? "Weight e-mail alerts enabled." : "Weight actions disabled.");
             }
         }
 
@@ -298,26 +226,84 @@ namespace _4RTools.Model.Vanilla
             {
                 VanillaWeightAlertSettings current;
                 lock (gate) current = settings.Clone();
-                IReadOnlyList<VanillaWeightObservation> observations = monitor.Poll();
+                IReadOnlyList<VanillaWeightObservation> observations = fleetMonitor.Poll().Select(FromFleet).ToArray();
                 lock (gate) latest = observations.ToArray();
-                if (!current.Enabled)
-                {
-                    SetStatus("Weight alerts disabled. " + ObservationSummary(observations));
-                    return;
-                }
                 bool anyVerified = false;
                 foreach (VanillaWeightObservation observation in observations)
                 {
                     if (!observation.Verified || !observation.Percent.HasValue) continue;
                     anyVerified = true;
-                    ProcessObservation(current, observation);
+                    ProcessAutoCart(current, observation);
+                    if (current.Enabled) ProcessObservation(current, observation);
                 }
-                if (!anyVerified) SetStatus("Weight alert waiting for verified CurrentWeight/MaxWeight mappings. " + ObservationSummary(observations));
-                else if (!observations.Any(item => item.Verified && item.Percent >= current.ThresholdPercent))
-                    SetStatus("Weight OK. " + ObservationSummary(observations));
+                if (!anyVerified) SetStatus("Weight manager waiting for verified CurrentWeight/MaxWeight mappings. " + ObservationSummary(observations));
+                else if (!current.Enabled && !current.AutoCartEnabled) SetStatus("Weight actions disabled. " + ObservationSummary(observations));
+                else
+                {
+                    decimal activeThreshold = current.Enabled && current.AutoCartEnabled
+                        ? Math.Min(current.ThresholdPercent, current.AutoCartThresholdPercent)
+                        : current.AutoCartEnabled ? current.AutoCartThresholdPercent : current.ThresholdPercent;
+                    if (!observations.Any(item => item.Verified && item.Percent >= activeThreshold))
+                        SetStatus("Weight OK. " + ObservationSummary(observations));
+                }
             }
             catch (Exception ex) { SetStatus("Weight monitor error: " + ex.Message); }
             finally { Interlocked.Exchange(ref polling, 0); }
+        }
+
+        private static VanillaWeightObservation FromFleet(VanillaFleetClientInfo item)
+        {
+            decimal? percent = null;
+            if (item != null && item.WeightVerified && item.CurrentWeight.HasValue && item.MaxWeight.HasValue && item.MaxWeight.Value > 0)
+                percent = item.CurrentWeight.Value * 100m / item.MaxWeight.Value;
+            return new VanillaWeightObservation
+            {
+                ProcessId = item?.ProcessId ?? 0, CharacterName = item?.CharacterName ?? "Vanilla MMO",
+                CurrentWeight = item?.CurrentWeight, MaxWeight = item?.MaxWeight, Percent = percent,
+                Verified = item != null && item.WeightVerified && percent.HasValue, Build = item?.Build, Error = item?.Error
+            };
+        }
+
+        private void ProcessAutoCart(VanillaWeightAlertSettings current, VanillaWeightObservation observation)
+        {
+            string key = "CARTPID:" + observation.ProcessId.ToString(CultureInfo.InvariantCulture);
+            AlertState state;
+            lock (gate)
+            {
+                if (!states.TryGetValue(key, out state)) states[key] = state = new AlertState();
+                if (observation.Percent.Value <= current.AutoCartRearmPercent) state.CartArmed = true;
+                if (!current.AutoCartEnabled || observation.Percent.Value < current.AutoCartThresholdPercent
+                    || !state.CartArmed || state.CartRunning || state.ManualHold) return;
+                state.CartRunning = true;
+                state.CartArmed = false;
+            }
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    SetStatus("Weight threshold reached for " + observation.CharacterName + "; starting UI-only cart maintenance.");
+                    VanillaWeightCartResult result = cartAutomation.Run(observation.ProcessId, current, text => SetStatus(text));
+                    lock (gate)
+                    {
+                        state.ManualHold = result.RequiresManualIntervention;
+                        if (result.Deferred) state.CartArmed = true;
+                    }
+                    SetStatus(result.Message);
+                }
+                catch (Exception ex)
+                {
+                    lock (gate) state.CartArmed = true;
+                    SetStatus("Automatic cart maintenance failed for " + observation.CharacterName + ": " + ex.Message);
+                }
+                finally { lock (gate) state.CartRunning = false; }
+            });
+        }
+
+        public void ClearManualHolds()
+        {
+            lock (gate) foreach (AlertState state in states.Values) { state.ManualHold = false; state.CartArmed = true; }
+            supervisor.ClearWeightManualHolds();
+            SetStatus("Weight manual holds cleared. Automatic cart maintenance can run again after the threshold is reached.");
         }
 
         private void ProcessObservation(VanillaWeightAlertSettings current, VanillaWeightObservation observation)
@@ -402,13 +388,15 @@ namespace _4RTools.Model.Vanilla
                 disposed = true;
                 timer?.Dispose(); timer = null;
             }
-            monitor.Dispose();
         }
 
         private sealed class AlertState
         {
             public bool Armed = true;
             public bool Sending;
+            public bool CartArmed = true;
+            public bool CartRunning;
+            public bool ManualHold;
             public DateTimeOffset? LastSentAt;
             public DateTimeOffset NextAttemptAt = DateTimeOffset.MinValue;
         }

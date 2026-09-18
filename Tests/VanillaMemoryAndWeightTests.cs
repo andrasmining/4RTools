@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Drawing;
 using _4RTools.Model.Vanilla;
 using _4RTools.Utils;
 
@@ -18,6 +19,9 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Weight fields accept UInt32 memory mappings", WeightMappings);
             failed += Test("Weight alert thresholds enforce re-arm hysteresis", WeightThresholds);
             failed += Test("Enabled weight e-mail alerts require SMTP transport", WeightMailValidation);
+            failed += Test("Weight cart settings validate independent UI automation", WeightCartSettings);
+            failed += Test("Inventory vision finds toggled slot panel and occupied slot", InventoryVision);
+            failed += Test("Quantity Enter is armed only by positive quantity dialog structure", QuantityPromptGuard);
             failed += VanillaUtf8MemoryDiscoveryTests.Run();
             return failed;
         }
@@ -93,6 +97,90 @@ namespace Vanilla.Diagnostics.Tests
             Throws(() => settings.Validate(false));
             settings.RearmPercent = 80m; settings.ThresholdPercent = 0m;
             Throws(() => settings.Validate(false));
+        }
+
+        private static void WeightCartSettings()
+        {
+            var settings = new VanillaWeightAlertSettings
+            {
+                AutoCartEnabled = true, AutoCartThresholdPercent = 50m, AutoCartRearmPercent = 40m,
+                TransferUseItems = true, TransferEtcItems = true, TransferEquipItems = false
+            };
+            settings.Validate(false);
+            if (settings.InventoryHotkeyText != "Alt+E" || settings.CartHotkeyText != "Alt+W")
+                throw new Exception("Default Inventory/Cart hotkeys changed unexpectedly.");
+            settings.AutoCartRearmPercent = 50m;
+            Throws(() => settings.Validate(false));
+            settings.AutoCartRearmPercent = 40m; settings.TransferUseItems = settings.TransferEtcItems = settings.TransferEquipItems = false;
+            Throws(() => settings.Validate(false));
+        }
+
+        private static void InventoryVision()
+        {
+            using (var before = new Bitmap(800, 600))
+            using (var after = new Bitmap(800, 600))
+            {
+                using (Graphics g = Graphics.FromImage(before)) g.Clear(Color.FromArgb(80, 70, 55));
+                using (Graphics g = Graphics.FromImage(after))
+                {
+                    g.Clear(Color.FromArgb(80, 70, 55));
+                    Rectangle panel = new Rectangle(70, 90, 360, 300);
+                    g.FillRectangle(Brushes.White, panel);
+                    int[] xs = { 150, 191, 232, 273, 314, 355, 396 };
+                    int[] ys = { 175, 216, 257, 298, 339 };
+                    using (var pale = new SolidBrush(Color.FromArgb(205, 216, 232)))
+                    {
+                        foreach (int y in ys) foreach (int x in xs) g.FillEllipse(pale, x - 17, y - 9, 34, 18);
+                    }
+                    // One occupied source slot hides most of the empty-slot oval.
+                    g.FillRectangle(Brushes.OrangeRed, xs[0] - 11, ys[0] - 10, 22, 21);
+                }
+                Rectangle detected; bool opened;
+                if (!VanillaInventoryVision.TryFindToggledPanel(before, after, out detected, out opened) || !opened)
+                    throw new Exception("Opened inventory panel was not detected.");
+                VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(after, detected);
+                Point? occupied = VanillaInventoryVision.FirstOccupiedSlot(after, grid);
+                if (!occupied.HasValue || Math.Abs(occupied.Value.X - 150) > 8 || Math.Abs(occupied.Value.Y - 175) > 8)
+                    throw new Exception("Occupied inventory slot was not resolved from the detected lattice.");
+            }
+        }
+
+        private static void QuantityPromptGuard()
+        {
+            using (var noPrompt = new Bitmap(800, 600))
+            using (var prompt = new Bitmap(800, 600))
+            {
+                using (Graphics g = Graphics.FromImage(noPrompt)) g.Clear(Color.FromArgb(80, 70, 55));
+                using (Graphics g = Graphics.FromImage(prompt))
+                {
+                    g.Clear(Color.FromArgb(80, 70, 55));
+                    g.FillRectangle(Brushes.White, 290, 250, 220, 58);
+                    using (var selected = new SolidBrush(Color.FromArgb(111, 158, 242))) g.FillRectangle(selected, 306, 281, 70, 17);
+                    g.FillRectangle(Brushes.LightGray, 445, 278, 48, 22);
+                }
+                if (VanillaInventoryVision.HasQuantityPrompt(noPrompt))
+                    throw new Exception("A frame without a quantity dialog must never authorize Enter.");
+                if (!VanillaInventoryVision.HasQuantityPrompt(prompt))
+                    throw new Exception("Positive quantity-dialog structure was not detected.");
+
+                using (var ordinaryUi = new Bitmap(800, 600))
+                {
+                    using (Graphics g = Graphics.FromImage(ordinaryUi))
+                    {
+                        g.Clear(Color.FromArgb(80, 70, 55));
+                        // Basic Info-like panel with prominent blue bars must never be mistaken
+                        // for the short/wide quantity modal.
+                        g.FillRectangle(Brushes.White, 30, 35, 280, 120);
+                        using (var bar = new SolidBrush(Color.FromArgb(90, 145, 235)))
+                        {
+                            g.FillRectangle(bar, 70, 80, 180, 12);
+                            g.FillRectangle(bar, 70, 104, 160, 12);
+                        }
+                    }
+                    if (VanillaInventoryVision.HasQuantityPrompt(ordinaryUi))
+                        throw new Exception("Ordinary white/blue gameplay UI must never authorize Enter.");
+                }
+            }
         }
 
         private static void WeightMailValidation()

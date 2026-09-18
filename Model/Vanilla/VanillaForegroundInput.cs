@@ -345,6 +345,73 @@ namespace _4RTools.Model.Vanilla
             return diagnostics;
         }
 
+        public void DragNormalized(double fromX, double fromY, double toX, double toY)
+        {
+            lock (ForegroundGate)
+            {
+                ThrowIfCancelled();
+                ActivateCore();
+                VerifyForeground();
+                if (fromX < 0 || fromX > 1 || fromY < 0 || fromY > 1 || toX < 0 || toX > 1 || toY < 0 || toY > 1)
+                    throw new ArgumentOutOfRangeException("Normalized drag coordinates must be within 0..1.");
+
+                RECT rect;
+                if (!GetClientRect(window, out rect)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot read Vanilla client area.");
+                int width = Math.Max(1, rect.Right - rect.Left), height = Math.Max(1, rect.Bottom - rect.Top);
+                var origin = new POINT { X = 0, Y = 0 };
+                if (!ClientToScreen(window, ref origin)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot map Vanilla client origin.");
+                Func<double, double, POINT> point = (nx, ny) => new POINT
+                {
+                    X = origin.X + Math.Max(0, Math.Min(width - 1, (int)Math.Round(nx * width))),
+                    Y = origin.Y + Math.Max(0, Math.Min(height - 1, (int)Math.Round(ny * height)))
+                };
+                POINT from = point(fromX, fromY), to = point(toX, toY), previous;
+                bool restore = GetCursorPos(out previous);
+                try
+                {
+                    if (!SetCursorPos(from.X, from.Y)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected the drag start position.");
+                    Thread.Sleep(100);
+                    VerifyMouseOwner(from, "drag start");
+                    VerifyForeground();
+                    var down = new[] { new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTDOWN } } } };
+                    if (SendInput(1, down, Marshal.SizeOf(typeof(INPUT))) != 1)
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected the drag mouse-down.");
+                    try
+                    {
+                        for (int step = 1; step <= 6; step++)
+                        {
+                            ThrowIfCancelled(); VerifyForeground();
+                            int x = from.X + (to.X - from.X) * step / 6;
+                            int y = from.Y + (to.Y - from.Y) * step / 6;
+                            if (!SetCursorPos(x, y)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected drag movement.");
+                            Thread.Sleep(55);
+                        }
+                        VerifyMouseOwner(to, "drag destination");
+                    }
+                    finally
+                    {
+                        var up = new[] { new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } } } };
+                        if (SendInput(1, up, Marshal.SizeOf(typeof(INPUT))) != 1)
+                            VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " drag mouse-up was not fully accepted by Windows.");
+                    }
+                    Thread.Sleep(180);
+                    VanillaDebugLog.Write("INPUT", "PID=" + process.Id + " DRAG client normalized ("
+                        + fromX.ToString("0.0000") + "," + fromY.ToString("0.0000") + ") -> ("
+                        + toX.ToString("0.0000") + "," + toY.ToString("0.0000") + ").");
+                }
+                finally { if (restore) SetCursorPos(previous.X, previous.Y); }
+            }
+        }
+
+        private void VerifyMouseOwner(POINT point, string context)
+        {
+            IntPtr hit = WindowFromPoint(point);
+            uint pid;
+            GetWindowThreadProcessId(hit, out pid);
+            if (pid != (uint)process.Id)
+                throw new InvalidOperationException("Mouse " + context + " no longer belongs to the intended Vanilla client; no unsafe drag continued.");
+        }
+
         internal Bitmap CaptureClientBitmap()
         {
             Activate();

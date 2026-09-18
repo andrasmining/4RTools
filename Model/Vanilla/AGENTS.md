@@ -70,3 +70,12 @@ the reconnect session log.
 - Never treat `GDI+ Hook Window Class` / `GDI+ Window (...)`, IME helpers, Gepard splash windows, or other tiny bootstrap/helper surfaces as an interactive Vanilla game window. In particular, never call ShowWindow/restore/focus on the 1x1 GDI+ helper just because its title contains `Vanilla MMO`.
 - Launcher GAME START must be bound to a verified launcher HWND/PID. Foreground acquisition must be ownership-checked, bounded, and fail closed; never use taskbar/desktop coordinates to work around Windows foreground lock.
 - When GAME START has been detected twice at a stable launcher-client position, prefer one direct owned-window client message to that verified launcher HWND over a global cursor/SendInput click. No blind coordinate fallback is authorized.
+
+## Weight / Cart UI automation
+
+- Weight-triggered Cart maintenance is UI-only. Use the existing verified read-only weight state as a trigger and the existing shared fleet reader; never add inventory/cart memory reads or any game-memory writes.
+- Inventory and Cart hotkeys and the Use/Equip/Etc category selection are configuration, not hard-coded assumptions. Detect the actual opened panel and slot geometry from the current client image; derive any clicks/drags from detected client-relative structure, never desktop coordinates.
+- Toggle the configured character Autobattle/slave hotkey OFF only after the affected client owns the global serialized input lease. No healthy sibling input is authorized during that lease.
+- A stack quantity confirmation may use Enter only after a fresh, positive quantity-dialog recognition. Quantity-one transfers produce no dialog: no dialog means **no Enter**. Ambiguous/late modal evidence fails closed and must never fall through to chat input.
+- Verify transfer progress after every drag. If Cart acceptance/progress cannot be established, UI ownership is lost, or the Cart appears full, stop further input, leave Autobattle OFF, and place only that character in an explicit manual Cart hold. Automatic recovery must not restart a held character until the user clears that hold.
+- After successful transfers, resume through the same shared verified ResumeHotkey routine used by recovery diagnostics, require fresh X/Y movement, then minimize the owned client. STOP/settings/client/session/character replacement cancel outstanding Cart work.
