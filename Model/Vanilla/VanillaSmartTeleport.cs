@@ -16,7 +16,6 @@ namespace _4RTools.Model.Vanilla
         internal string AccountId;
         internal int ProcessId;
         internal int Generation;
-        internal bool RequirePolicyEnabled;
         internal VanillaReconnectAccount Account;
     }
 
@@ -26,11 +25,6 @@ namespace _4RTools.Model.Vanilla
 
         internal bool TryBeginSmartTeleport(int pid, out VanillaSmartTeleportToken token, out string reason)
         {
-            return TryBeginSmartTeleport(pid, true, out token, out reason);
-        }
-
-        internal bool TryBeginSmartTeleport(int pid, bool requirePolicyEnabled, out VanillaSmartTeleportToken token, out string reason)
-        {
             token = null;
             reason = null;
             lock (gate)
@@ -38,7 +32,7 @@ namespace _4RTools.Model.Vanilla
                 if (disposed || !running) { reason = "reconnect supervision is not running"; return false; }
                 Runtime runtime = runtimes.Values.FirstOrDefault(item => item.ProcessId == pid && item.Account.Enabled);
                 if (runtime == null) { reason = "the running process is not bound to an enabled character row"; return false; }
-                if (requirePolicyEnabled && !runtime.Account.SmartTeleportEnabled)
+                if (!runtime.Account.SmartTeleportEnabled)
                 { reason = "Smart Teleport is disabled for this character"; return false; }
                 if (runtime.Account.SmartTeleportKey < 8 || runtime.Account.SmartTeleportKey > 254)
                 { reason = "the character has no valid Smart Teleport hotkey"; return false; }
@@ -58,7 +52,6 @@ namespace _4RTools.Model.Vanilla
                     AccountId = runtime.Account.Id,
                     ProcessId = pid,
                     Generation = generation,
-                    RequirePolicyEnabled = requirePolicyEnabled,
                     Account = runtime.Account.Clone()
                 };
                 SetStage(runtime, VanillaReconnectStage.Online, "Smart Teleport owns the serialized background-input lease");
@@ -75,8 +68,7 @@ namespace _4RTools.Model.Vanilla
                 return disposed || !running || token.Generation != smartTeleportGeneration
                     || !runtimes.TryGetValue(token.AccountId, out runtime)
                     || runtime.ProcessId != token.ProcessId || !runtime.Account.Enabled
-                    || (token.RequirePolicyEnabled && !runtime.Account.SmartTeleportEnabled)
-                    || runtime.Stage != VanillaReconnectStage.Online
+                    || !runtime.Account.SmartTeleportEnabled || runtime.Stage != VanillaReconnectStage.Online
                     || CharacterOwnershipChanged(runtime, token.ProcessId);
             }
         }
@@ -273,7 +265,7 @@ namespace _4RTools.Model.Vanilla
             string mode = manual ? "manual-test" : "automatic-idle";
             try
             {
-                if (!supervisor.TryBeginSmartTeleport(pid, !manual, out token, out reason))
+                if (!supervisor.TryBeginSmartTeleport(pid, out token, out reason))
                 {
                     VanillaDebugLog.Write("TELEPORT", "event=teleport-deferred mode=" + mode + " accountId=" + accountId
                         + " pid=" + pid + " reason='" + reason + "'.");
