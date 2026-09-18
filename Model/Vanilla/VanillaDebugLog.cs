@@ -141,7 +141,7 @@ namespace _4RTools.Model.Vanilla
                 int firstSpace = line.IndexOf(' ');
                 DateTimeOffset timestamp;
                 if (firstSpace <= 0 || !DateTimeOffset.TryParse(line.Substring(0, firstSpace),
-                    CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out timestamp) || timestamp < cutoff)
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out timestamp) || timestamp < cutoff)
                     continue;
 
                 if (line.Contains("event=teleport-start")) teleportAttempts++;
