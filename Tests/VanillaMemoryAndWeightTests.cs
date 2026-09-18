@@ -20,6 +20,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Weight alert thresholds enforce re-arm hysteresis", WeightThresholds);
             failed += Test("Enabled weight e-mail alerts require SMTP transport", WeightMailValidation);
             failed += Test("Weight cart settings validate independent UI automation", WeightCartSettings);
+            failed += Test("Weight policy is independently switchable per character", WeightPolicyPerCharacter);
             failed += Test("Inventory vision finds toggled slot panel and occupied slot", InventoryVision);
             failed += Test("Quantity Enter is armed only by positive quantity dialog structure", QuantityPromptGuard);
             failed += VanillaUtf8MemoryDiscoveryTests.Run();
@@ -113,6 +114,24 @@ namespace Vanilla.Diagnostics.Tests
             Throws(() => settings.Validate(false));
             settings.AutoCartRearmPercent = 40m; settings.TransferUseItems = settings.TransferEtcItems = settings.TransferEquipItems = false;
             Throws(() => settings.Validate(false));
+        }
+
+        private static void WeightPolicyPerCharacter()
+        {
+            var first = new VanillaReconnectAccount { Label = "A", UserName = "user", CharacterName = "char", WeightEnabled = true };
+            var second = first.Clone();
+            second.Id = Guid.NewGuid().ToString("N");
+            second.CharacterName = "char2";
+            second.WeightEnabled = false;
+            if (!first.WeightEnabled || second.WeightEnabled)
+                throw new Exception("Weight policy must be independent for each character row.");
+            VanillaReconnectAccount roundTrip = second.Clone();
+            if (roundTrip.WeightEnabled)
+                throw new Exception("Disabled per-character Weight policy was not preserved by serialization/clone.");
+            var identity = new VanillaCharacterIdentity(123, Guid.NewGuid(), DateTimeOffset.UtcNow, "char2", "user");
+            VanillaCharacterRoster.FillMissing(roundTrip, identity);
+            if (roundTrip.WeightEnabled)
+                throw new Exception("Identity enrichment must not re-enable Weight for a character.");
         }
 
         private static void InventoryVision()
