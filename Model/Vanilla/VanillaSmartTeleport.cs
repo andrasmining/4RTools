@@ -270,7 +270,16 @@ namespace _4RTools.Model.Vanilla
                         return;
                     }
 
-                    VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": warp-selection popup positively detected with the first choice selected; sending background Enter.");
+                    using (Bitmap confirmation = input.CaptureClientBitmap())
+                    {
+                        if (!VanillaTeleportVision.HasWarpDialog(null, confirmation))
+                        {
+                            VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": warp popup disappeared before confirmation; Enter was NOT sent.");
+                            supervisor.CompleteSmartTeleport(token, "Smart Teleport popup was no longer present; no Enter sent");
+                            return;
+                        }
+                    }
+                    VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": warp-selection popup positively re-confirmed with the first choice selected; sending background Enter.");
                     input.Press(Keys.Enter);
                     if (!WaitForWarpDialogGone(input, cancelled, 2500))
                     {
