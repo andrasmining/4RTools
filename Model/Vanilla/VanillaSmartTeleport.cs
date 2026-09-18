@@ -186,15 +186,17 @@ namespace _4RTools.Model.Vanilla
                 }
 
                 VanillaReconnectSettings settings = supervisor.Settings;
+                VanillaReconnectAccount[] enabled = settings.Accounts.Where(a => a.Enabled && a.SmartTeleportEnabled).ToArray();
+                var activeIds = new HashSet<string>(enabled.Select(a => a.Id), StringComparer.OrdinalIgnoreCase);
+                lock (gate)
+                    foreach (string stale in states.Keys.Where(id => !activeIds.Contains(id)).ToArray()) states.Remove(stale);
+                if (enabled.Length == 0) return;
+
                 IReadOnlyList<VanillaReconnectStatus> statuses = supervisor.Statuses();
                 IReadOnlyList<VanillaFleetClientInfo> clients = fleet.Poll();
                 DateTimeOffset utc = DateTimeOffset.UtcNow;
-                var activeIds = new HashSet<string>(settings.Accounts.Where(a => a.Enabled && a.SmartTeleportEnabled).Select(a => a.Id),
-                    StringComparer.OrdinalIgnoreCase);
-                lock (gate)
-                    foreach (string stale in states.Keys.Where(id => !activeIds.Contains(id)).ToArray()) states.Remove(stale);
 
-                foreach (VanillaReconnectAccount account in settings.Accounts.Where(a => a.Enabled && a.SmartTeleportEnabled))
+                foreach (VanillaReconnectAccount account in enabled)
                 {
                     VanillaReconnectStatus status = statuses.FirstOrDefault(s => string.Equals(s.AccountId, account.Id, StringComparison.OrdinalIgnoreCase));
                     if (status == null || !status.ProcessId.HasValue || status.Stage != VanillaReconnectStage.Online) continue;
