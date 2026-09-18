@@ -106,15 +106,43 @@ namespace _4RTools.Model.Vanilla
         internal bool IsWeightManualHold(string accountId)
         { lock (gate) return !string.IsNullOrWhiteSpace(accountId) && weightManualHolds.Contains(accountId); }
 
+        internal void MarkWeightMaintenanceCancelled(VanillaWeightMaintenanceToken token, bool autobattleMayBePaused, string detail)
+        {
+            if (token == null) return;
+            lock (gate)
+            {
+                Runtime runtime;
+                if (!runtimes.TryGetValue(token.AccountId, out runtime) || runtime.ProcessId != token.ProcessId) return;
+                runtime.ScriptRunning = false;
+                runtime.MovementWatchdog.Reset();
+                runtime.MovementRecoveryPending = false;
+                runtime.NonMinimizedSince = null;
+                if (autobattleMayBePaused)
+                {
+                    weightManualHolds.Add(token.AccountId);
+                    if (running)
+                        SetStage(runtime, VanillaReconnectStage.Error, detail ?? "Weight/cart maintenance was cancelled after Autobattle may have been paused");
+                    else
+                        SetStage(runtime, VanillaReconnectStage.Stopped, "Supervisor stopped; manual Weight/Cart hold retained");
+                }
+                else if (running && token.Generation == weightMaintenanceGeneration)
+                    SetStage(runtime, VanillaReconnectStage.Online, detail ?? "Weight/cart maintenance cancelled before pausing Autobattle");
+            }
+            RaiseUpdated();
+        }
+
         public void ClearWeightManualHolds()
         {
             lock (gate)
             {
+                var held = new HashSet<string>(weightManualHolds, StringComparer.OrdinalIgnoreCase);
                 weightManualHolds.Clear();
                 foreach (Runtime runtime in runtimes.Values)
-                    if (runtime.ProcessId.HasValue && runtime.Account.Enabled && runtime.Stage == VanillaReconnectStage.Error)
-                        SetStage(runtime, VanillaReconnectStage.Online, "Manual weight/cart hold cleared");
+                    if (held.Contains(runtime.Account.Id) && runtime.ProcessId.HasValue && runtime.Account.Enabled
+                        && runtime.Stage == VanillaReconnectStage.Error)
+                        SetStage(runtime, VanillaReconnectStage.Online, "Manual Weight/Cart hold explicitly cleared");
             }
+            VanillaDebugLog.Write("WEIGHT", "event=cart-holds-cleared source=explicit-user-action.");
             RaiseUpdated();
         }
 
@@ -140,13 +168,25 @@ namespace _4RTools.Model.Vanilla
             this.supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
         }
 
-        internal VanillaWeightCartResult Run(int pid, VanillaWeightAlertSettings settings, System.Action<string> report)
+        internal VanillaWeightCartResult Run(int pid, VanillaWeightAlertSettings settings, System.Action<string> report,
+            string trigger = "automatic-threshold")
         {
+            report = report ?? (_ => { });
+            System.Action<string> activity = message =>
+            {
+                report(message);
+                VanillaDebugLog.Write("WEIGHT", message);
+            };
             VanillaWeightMaintenanceToken token;
             string reason;
             if (!supervisor.TryBeginWeightMaintenance(pid, out token, out reason))
-                return new VanillaWeightCartResult { Deferred = true, Message = "Automatic cart maintenance deferred: " + reason + "." };
+            {
+                VanillaDebugLog.Write("WEIGHT", "event=cart-deferred trigger=" + trigger + " pid=" + pid + " reason='" + reason + "'.");
+                return new VanillaWeightCartResult { Deferred = true, Message = "Cart maintenance deferred: " + reason + "." };
+            }
 
+            VanillaDebugLog.Write("WEIGHT", "event=cart-start trigger=" + trigger + " account='" + token.Account.Label
+                + "' accountId=" + token.AccountId + " pid=" + pid + ".");
             bool paused = false, manualHold = false, completed = false;
             Rectangle inventory = Rectangle.Empty, cart = Rectangle.Empty;
             int moved = 0;
@@ -155,15 +195,17 @@ namespace _4RTools.Model.Vanilla
             try { openedInput = new VanillaForegroundInput(pid); }
             catch (Exception ex)
             {
+                VanillaDebugLog.Write("WEIGHT", "event=cart-deferred trigger=" + trigger + " account='" + token.Account.Label
+                    + "' pid=" + pid + " stage=window reason='" + ex.Message + "'.");
                 supervisor.CompleteWeightMaintenance(token, false, "Weight/cart maintenance could not acquire the verified client window: " + ex.Message);
-                return new VanillaWeightCartResult { Deferred = true, Message = token.Account.Label + ": automatic cart maintenance deferred: " + ex.Message };
+                return new VanillaWeightCartResult { Deferred = true, Message = token.Account.Label + ": cart maintenance deferred: " + ex.Message };
             }
             using (var input = openedInput)
             {
                 input.CancellationRequested = cancelled;
                 try
                 {
-                    report(token.Account.Label + ": weight maintenance: pausing autobattle with " + token.Account.HotkeyText + ".");
+                    activity(token.Account.Label + ": weight maintenance: pausing Autobattle with " + token.Account.HotkeyText + ".");
                     input.Chord(token.Account.ResumeCtrl, token.Account.ResumeAlt, token.Account.ResumeShift, (Keys)token.Account.ResumeKey);
                     paused = true;
                     Thread.Sleep(700);
@@ -186,7 +228,7 @@ namespace _4RTools.Model.Vanilla
                         SelectCategory(input, inventory, category);
                         Thread.Sleep(CategorySettleMs);
                         string categoryName = category == 0 ? "Use" : category == 1 ? "Equip" : "Etc";
-                        report(token.Account.Label + ": weight maintenance: processing " + categoryName + " inventory items.");
+                        activity(token.Account.Label + ": weight maintenance: processing " + categoryName + " inventory items.");
                         int noProgress = 0;
                         while (moved < MaxTransfers)
                         {
@@ -213,7 +255,7 @@ namespace _4RTools.Model.Vanilla
                             bool quantity = WaitForQuantityPrompt(input, cancelled, 1200);
                             if (quantity)
                             {
-                                report(token.Account.Label + ": weight maintenance: quantity dialog positively detected; pressing Enter for the full stack.");
+                                activity(token.Account.Label + ": weight maintenance: quantity dialog positively detected; pressing Enter for the full stack.");
                                 input.Press(Keys.Enter);
                                 Thread.Sleep(TransferSettleMs);
                             }
@@ -247,7 +289,7 @@ namespace _4RTools.Model.Vanilla
                             {
                                 noProgress = 0;
                                 moved++;
-                                report(token.Account.Label + ": weight maintenance: moved inventory item " + moved + " to Cart.");
+                                activity(token.Account.Label + ": weight maintenance: moved inventory item " + moved + " to Cart.");
                             }
                         }
                         if (moved >= MaxTransfers)
@@ -259,25 +301,41 @@ namespace _4RTools.Model.Vanilla
 
                     ClosePanelIfOpen(input, settings.CartCtrl, settings.CartAlt, settings.CartShift, (Keys)settings.CartKey, cart, "Cart", cancelled);
                     ClosePanelIfOpen(input, settings.InventoryCtrl, settings.InventoryAlt, settings.InventoryShift, (Keys)settings.InventoryKey, inventory, "Inventory", cancelled);
-                    report(token.Account.Label + ": weight maintenance: transfer complete; resuming autobattle with the shared verified ResumeHotkey routine.");
-                    VerifyResume(token, input, cancelled, report);
+                    activity(token.Account.Label + ": weight maintenance: transfer complete; resuming Autobattle with the shared verified ResumeHotkey routine.");
+                    VerifyResume(token, input, cancelled, activity);
                     paused = false;
                     if (!supervisor.MinimizeWeightMaintenanceClient(token))
                         throw new InvalidOperationException("Autobattle movement was verified but the client could not be minimized.");
                     completed = true;
                     string message = token.Account.Label + ": automatic cart maintenance completed; moved " + moved
                         + " item(s), autobattle movement verified, client minimized.";
+                    VanillaDebugLog.Write("WEIGHT", "event=cart-complete trigger=" + trigger + " account='" + token.Account.Label
+                        + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved + ".");
                     supervisor.CompleteWeightMaintenance(token, false, message);
                     return new VanillaWeightCartResult { ItemsMoved = moved, Message = message };
                 }
                 catch (OperationCanceledException ex)
                 {
-                    supervisor.CompleteWeightMaintenance(token, false, "Weight/cart maintenance cancelled by supervisor/client ownership change: " + ex.Message);
-                    return new VanillaWeightCartResult { ItemsMoved = moved, Deferred = true, Message = token.Account.Label + ": automatic cart maintenance cancelled safely; it may retry when supervision is stable." };
+                    string detail = "Weight/cart maintenance cancelled by supervisor/settings/client ownership change: " + ex.Message;
+                    supervisor.MarkWeightMaintenanceCancelled(token, paused, detail);
+                    VanillaDebugLog.Write("WEIGHT", "event=cart-cancelled trigger=" + trigger + " account='" + token.Account.Label
+                        + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved
+                        + " autobattleMayBePaused=" + paused + " manualHold=" + paused + ".");
+                    return new VanillaWeightCartResult
+                    {
+                        ItemsMoved = moved,
+                        Deferred = !paused,
+                        RequiresManualIntervention = paused,
+                        Message = paused
+                            ? token.Account.Label + ": cart maintenance was cancelled after Autobattle may have been paused; manual hold retained."
+                            : token.Account.Label + ": cart maintenance cancelled before Autobattle was paused; it may retry when supervision is stable."
+                    };
                 }
                 catch (VanillaCartManualException ex)
                 {
                     manualHold = true;
+                    VanillaDebugLog.Write("WEIGHT", "event=cart-manual-hold trigger=" + trigger + " account='" + token.Account.Label
+                        + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved + " reason='" + ex.Message + "'.");
                     supervisor.CompleteWeightMaintenance(token, true, ex.Message);
                     return new VanillaWeightCartResult { ItemsMoved = moved, RequiresManualIntervention = true, Message = token.Account.Label + ": " + ex.Message };
                 }
@@ -287,6 +345,9 @@ namespace _4RTools.Model.Vanilla
                     // fail-closed. Do not send a resume hotkey through an unknown modal/dialog. The
                     // operator can inspect the visible client and clear the hold explicitly.
                     if (paused && !cancelled()) manualHold = true;
+                    VanillaDebugLog.Write("WEIGHT", "event=cart-failed trigger=" + trigger + " account='" + token.Account.Label
+                        + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved
+                        + " manualHold=" + manualHold + " reason='" + ex.Message + "'.");
                     supervisor.CompleteWeightMaintenance(token, manualHold, manualHold
                         ? "Weight/cart maintenance stopped in an uncertain UI state; Autobattle remains OFF for manual inspection: " + ex.Message
                         : "Weight/cart maintenance aborted safely: " + ex.Message);
