@@ -711,11 +711,11 @@ namespace _4RTools.Model.Vanilla
                 if (freshManualStart)
                 {
                     Interlocked.Increment(ref weightMaintenanceGeneration);
-                Interlocked.Increment(ref smartTeleportGeneration);
+                    Interlocked.Increment(ref smartTeleportGeneration);
                     foreach (Runtime runtime in runtimes.Values)
                     {
                         runtime.MovementRecoveryPending = false;
-                                    runtime.ResumeVerificationFailed = false;
+                        runtime.ResumeVerificationFailed = false;
                         runtime.ResumeFailureDetail = null;
                         runtime.NextRecoveryAt = null;
                         runtime.NonMinimizedSince = null;
