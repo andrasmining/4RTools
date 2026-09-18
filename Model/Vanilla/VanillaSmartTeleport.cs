@@ -356,6 +356,7 @@ namespace _4RTools.Model.Vanilla
     internal sealed class VanillaBackgroundWindowInput : IDisposable
     {
         private const uint WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101;
+        private const uint WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
         private const uint PW_CLIENTONLY = 0x00000001, PW_RENDERFULLCONTENT = 0x00000002;
         private readonly int pid;
         private readonly Func<bool> cancelled;
@@ -393,16 +394,21 @@ namespace _4RTools.Model.Vanilla
             var held = new Stack<Keys>();
             try
             {
-                if (ctrl) { Key(Keys.ControlKey, false); held.Push(Keys.ControlKey); }
-                if (alt) { Key(Keys.Menu, false); held.Push(Keys.Menu); }
-                if (shift) { Key(Keys.ShiftKey, false); held.Push(Keys.ShiftKey); }
+                if (ctrl) { Key(Keys.ControlKey, false, false); held.Push(Keys.ControlKey); }
+                if (alt) { Key(Keys.Menu, false, true); held.Push(Keys.Menu); }
+                if (shift) { Key(Keys.ShiftKey, false, alt); held.Push(Keys.ShiftKey); }
                 Thread.Sleep(55);
-                Key(key, false); Thread.Sleep(70); Key(key, true);
+                Key(key, false, alt); Thread.Sleep(70); Key(key, true, alt);
             }
             finally
             {
                 while (held.Count > 0)
-                    try { Key(held.Pop(), true); } catch { }
+                    try
+                    {
+                        Keys release = held.Pop();
+                        Key(release, true, release == Keys.Menu || (alt && release != Keys.ControlKey));
+                    }
+                    catch { }
             }
             Thread.Sleep(90);
         }
@@ -410,7 +416,7 @@ namespace _4RTools.Model.Vanilla
         internal void Press(Keys key)
         {
             EnsureAllowed();
-            Key(key, false); Thread.Sleep(70); Key(key, true); Thread.Sleep(90);
+            Key(key, false, false); Thread.Sleep(70); Key(key, true, false); Thread.Sleep(90);
         }
 
         internal Bitmap CaptureClientBitmap()
@@ -442,7 +448,7 @@ namespace _4RTools.Model.Vanilla
             return bitmap;
         }
 
-        private void Key(Keys key, bool up)
+        private void Key(Keys key, bool up, bool system)
         {
             EnsureAllowed();
             int value = (int)key;
@@ -450,8 +456,10 @@ namespace _4RTools.Model.Vanilla
             uint scan = MapVirtualKey((uint)value, 4);
             uint flags = 1U | ((scan & 0xFF) << 16);
             if ((scan & 0xFF00) != 0) flags |= 1U << 24;
+            if (system) flags |= 1U << 29; // Alt/context bit for WM_SYSKEY*.
             if (up) flags |= 0xC0000000U;
-            if (!PostMessage(window, up ? WM_KEYUP : WM_KEYDOWN, new IntPtr(value), new IntPtr(unchecked((int)flags))))
+            uint message = system ? (up ? WM_SYSKEYUP : WM_SYSKEYDOWN) : (up ? WM_KEYUP : WM_KEYDOWN);
+            if (!PostMessage(window, message, new IntPtr(value), new IntPtr(unchecked((int)flags))))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected background key input.");
         }
 
