@@ -25,15 +25,17 @@ namespace _4RTools.Forms
         private VanillaFleetDashboardPanel integratedFleetDashboard;
         private VanillaAutomationSession integratedAutomationSession;
         private VanillaTemporaryActionsPanel integratedTemporaryActions;
+        private VanillaSmartTeleportService integratedSmartTeleport;
         internal bool FleetPollingEnabled { get { return integratedFleetDashboard?.IsPolling == true; } }
         internal int FleetPollCount { get { return integratedFleetMonitor?.PollCount ?? 0; } }
         internal bool RecoveryRunning { get { return integratedReconnectSupervisor?.IsRunning == true; } }
         internal bool UpdateCheckRunning { get { return updateCheckRunning; } }
+        internal bool SmartTeleportPollingEnabled { get { return integratedSmartTeleport?.IsRunning == true; } }
 
         internal void AssertSmokeBackgroundServicesInactive()
         {
             if (!smokeTest || VanillaPollingEnabled || FleetPollingEnabled || FleetPollCount != 0
-                || RecoveryRunning || WeightAlertsRunning || UpdateCheckRunning || AutomationEnabled)
+                || RecoveryRunning || WeightAlertsRunning || SmartTeleportPollingEnabled || UpdateCheckRunning || AutomationEnabled)
                 throw new InvalidOperationException("Smoke startup must keep live polling, recovery, alerts, updates, and automation inactive.");
         }
 
@@ -100,6 +102,8 @@ namespace _4RTools.Forms
             integratedFleetMonitor = new VanillaFleetMonitor(AppDomain.CurrentDomain.BaseDirectory);
             integratedReconnectSupervisor.SetPositionSource(integratedFleetMonitor.LatestPosition, integratedFleetMonitor.ConfirmClientExited);
             integratedReconnectSupervisor.SetCharacterSource(integratedFleetMonitor.LatestCharacters);
+            integratedSmartTeleport = new VanillaSmartTeleportService(integratedFleetMonitor, integratedReconnectSupervisor);
+            if (!smokeTest) integratedSmartTeleport.Start();
 
             var root = new TableLayoutPanel
             {
@@ -360,6 +364,8 @@ namespace _4RTools.Forms
         {
             try { integratedTemporaryActions?.Dispose(); } catch { }
             integratedTemporaryActions = null;
+            try { integratedSmartTeleport?.Dispose(); } catch { }
+            integratedSmartTeleport = null;
             try { integratedFleetDashboard?.Dispose(); } catch { }
             integratedFleetDashboard = null;
             try { integratedFleetMonitor?.Dispose(); } catch { }
