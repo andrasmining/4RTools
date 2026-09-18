@@ -53,6 +53,7 @@ internal static class UiLayoutHarness
                 ((Control)Field(main, "vanillaWorkspace")).Enabled = true;
                 object recovery = Field(main, "integratedReconnectView");
                 Check(recovery != null, "Production Recovery form was not embedded by Container startup.");
+                CheckWorkspacePolicy(main, recovery);
                 SeedFleet(main);
                 RunCase(main, recovery, 1920, 1020, 2, 1F, false);
                 RunCase(main, recovery, 1920, 1020, 4, 1F, false);
@@ -91,6 +92,22 @@ internal static class UiLayoutHarness
         File.WriteAllText(Path.Combine(output, "layout-report.txt"), report.ToString());
         Console.WriteLine(report.ToString());
         return failures.Count == 0 ? 0 : 1;
+    }
+
+    private static void CheckWorkspacePolicy(Form main, object recovery)
+    {
+        caseNumber++;
+        TabControl workspace = (TabControl)Field(main, "vanillaWorkspace");
+        string[] tabs = workspace.TabPages.Cast<TabPage>().Select(page => page.Text).ToArray();
+        Check(tabs.Length > 0 && tabs[0] == "Recovery & relog", "Recovery & relog is not the first Vanilla workspace tab.");
+        Check(!tabs.Contains("Automation"), "Redundant Vanilla Automation tab is still present.");
+        NumericUpDown restart = (NumericUpDown)Field(recovery, "movementRestartSeconds");
+        Check(restart.Value == 180, "No-movement restart threshold does not default to 180 seconds.");
+        ContextMenuStrip tests = (ContextMenuStrip)Field(recovery, "responsiveTestsMenu");
+        string[] items = tests.Items.Cast<ToolStripItem>().Select(item => item.Text).ToArray();
+        Check(items.Contains("Smart Teleport now (selected)"), "TESTS menu is missing manual Smart Teleport.");
+        Check(items.Contains("Weight/Cart clean now (selected)"), "TESTS menu is missing manual Weight/Cart cleaning.");
+        report.AppendLine("CASE workspace policy: Automation tab removed; 180s restart default; manual Smart Teleport and Weight/Cart TESTS actions present.");
     }
 
     private static void CheckCharacterDiscovery(Form main, object recovery)
@@ -309,7 +326,8 @@ internal static class UiLayoutHarness
             int gap = BoundsIn(box, main).Top - lastBottom;
             report.AppendLine("  HEADER gap=" + gap + " totalColumnWidth=" + totalWidth + " displayedRows=" + grid.DisplayedRowCount(false));
             Check(gap >= 0 && gap <= 16, name + ": dead space below launcher/actions: " + gap + "px.");
-            foreach (Control control in Descendants(strip).Where(c => c.Visible && (c is Button || c is CheckBox || c is TextBox)))
+            foreach (Control control in Descendants(strip).Where(c => c.Visible
+                && (c is Button || c is CheckBox || c is TextBox || c is NumericUpDown)))
                 Check(FullyVisible(control, main), name + ": action clipped: " + control.Text);
             foreach (string caption in new[] { "Add", "Edit", "Remove" })
             {
