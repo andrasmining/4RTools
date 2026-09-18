@@ -95,7 +95,7 @@ therefore enter recovery by design.
 
 ### Weight / Cart management
 
-The **Weight** tab uses the verified read-only carried/max-weight fields. It can keep the existing
+The **Weight** tab uses the verified read-only carried/max-weight fields. Each character row has its own **Weight** switch in Recovery & relog; the shared Weight-tab policy applies only to rows whose Weight switch is enabled. It can keep the existing
 optional e-mail warning and can also trigger UI-only Cart maintenance at a configurable weight
 percentage (50% by default). Use, Equip and Etc categories are independently selectable; Inventory
 and Cart hotkeys are configurable. The automation pauses the configured character Autobattle
