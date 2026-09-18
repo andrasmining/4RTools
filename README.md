@@ -93,6 +93,14 @@ therefore enter recovery by design.
 
 
 
+### Smart Teleport
+
+Smart Teleport is configured on each **username + character** row in Recovery & relog; no PID/process selection is required. Each character has its own enable switch, live-captured teleport hotkey and stationary timeout (**60 seconds by default**). The supervisor resolves the current PID from fresh verified character identity automatically.
+
+The trigger is only fresh verified read-only X/Y movement. Target, combat and casting state are not required. Any verified coordinate change (including intermediate movement observed by the shared fleet reader) resets the idle timer; stale, missing or unverified coordinates never count as stationary.
+
+When the timeout expires, Smart Teleport acquires the same serialized per-client input lease used by recovery/UI automation and sends the configured hotkey directly to the owned Vanilla window with ordinary Windows background messages, without restoring or foregrounding the game. It then captures that same window and requires two fresh positive detections of the **Select an Area to Warp** dialog with its first choice selected before sending Enter. No recognized dialog means **no Enter**. The popup must then disappear before the action is considered complete. STOP/settings/PID/session/character replacement cancel stale work.
+
 ### Weight / Cart management
 
 The **Weight** tab uses the verified read-only carried/max-weight fields. Each character row has its own **Weight** switch in Recovery & relog; the shared Weight-tab policy applies only to rows whose Weight switch is enabled. It can keep the existing
