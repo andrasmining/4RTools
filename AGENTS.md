@@ -184,31 +184,40 @@ enduring policy here without deleting unrelated valid rules. This automation
 repository is `andrasmining/4RTools`; the archived `andrasmining/cinder-index`
 market dashboard is a different project and must not receive autobattle changes.
 
-## Restart-only autobattle verification and steady-state recovery
+## Post-login Autobattle verification and steady-state recovery
 
 Automatic Autobattle/slave hotkeys are authorized only for a client that 4RTools
 itself has freshly launched/restarted/relogged. Adopting, restoring, maximizing,
-focusing or observing an already-running client must NEVER arm or send an automatic
-resume hotkey. Manual TESTS -> Resume hotkey remains an explicit diagnostic action.
+focusing or observing an already-running healthy client must NEVER arm or send an
+automatic resume hotkey. Manual TESTS -> Resume hotkey remains an explicit diagnostic.
 
-After the restarted client reaches the expected username/character with fresh verified
-X/Y/map/living HP, wait a full 10 seconds, then call the exact same shared ResumeHotkey
-verifier used by the diagnostic. It may send at most three configured hotkeys, each
-followed by its own 10-second fresh X/Y observation window; stop immediately on X or Y
-movement. Missing/unverified/stale state is not zero or movement.
+After a restarted/relogged client reaches the expected username + character with
+fresh verified X/Y/map/living HP, wait the configured post-login settle (currently
+10 seconds), then call the exact same shared ResumeHotkey verifier used by diagnostics.
+It may send at most three configured hotkeys, each followed by its own 10-second fresh
+X/Y observation window; stop immediately when X or Y movement is verified.
+Missing/unverified/stale state is not zero and is not movement.
 
-During normal online supervision, do not send wakeup hotkeys. Track verified X/Y only.
-After five minutes without verified movement, an exact freshly confirmed `Now Logging
-Out.` or `Disconnected from Server.` dialog may trigger an early client restart. Without
-one of those exact dialogs, keep waiting. At ten minutes without verified X/Y movement,
-restart the affected client regardless of visual classification. A healthy sibling stays
-untouched and dual recovery remains globally serialized.
+During normal Online supervision, Smart Teleport is the first stationary self-heal.
+Do not send steady-state Autobattle wakeup hotkeys. Track fresh verified X/Y only.
+The persisted no-movement restart threshold defaults to 180 seconds and is configurable
+from 60 to 3600 seconds. Smart Teleport defaults to 60 seconds per character, so the
+default restart threshold leaves room for repeated teleport attempts before escalation.
+If fresh verified movement still has not occurred by the restart threshold, restart
+only that affected client regardless of generic visual classification. A healthy
+sibling remains untouched and dual recovery remains globally serialized.
 
-Failed launch/login/restart cycles retry with exponential backoff using configured base
-delay, doubling to a maximum one-hour interval. Do not impose a finite three-client-
-restart terminal budget; retries continue until verified recovery or explicit STOP/
-configuration/client replacement. Every replacement again uses the 10-second settle and
-shared three-hotkey verifier.
+Exact freshly confirmed `Now Logging Out.` or `Disconnected from Server.` dialogs
+are stronger evidence than a generic X/Y stall and may trigger replacement immediately
+after two fresh matching captures. Likewise, a stable return to the login/service shell
+after confirmed gameplay is a recovery event rather than a reason to wait for the
+movement threshold. Unknown popups and ambiguous captures authorize no close/input.
+
+Failed close/launch/login/restart cycles retry indefinitely with exponential backoff
+using the configured base delay, doubling to a maximum one-hour interval. Do not impose
+a finite client-restart terminal budget. Retries continue until verified recovery or
+explicit STOP/configuration/client replacement. Every replacement again uses the
+post-login settle and shared three-hotkey movement verifier.
 
 ## Terminal dialogs and sequential replacement
 
@@ -476,37 +485,47 @@ completed work.
 
 ## Primary autofarming movement watchdog
 
-For enabled supervised autofarming clients, verified X/Y movement is the primary
-health signal. After successful startup/recovery, 30 seconds without fresh verified
-movement starts bounded hotkey recovery; it does NOT restart the client immediately.
-Missing, unreadable, unverified and stale coordinates remain invalid, not zero, and
-do not reset the deadline. Use monotonic elapsed time, existing fingerprinted
-read-only observations and per-client/session baselines. Credit intermediate movement
-even when the latest coordinates return to the previous values. Do not accrue this
-deadline during login/recovery.
+For enabled supervised autofarming clients, fresh verified X/Y movement is the primary
+steady-state health signal. Missing, unreadable, unverified and stale coordinates remain
+invalid, not zero, and do not reset the elapsed stall. Use monotonic elapsed time,
+fingerprinted read-only observations and per-client/session baselines. Credit verified
+intermediate movement even when the latest coordinates return to the previous values.
+Do not accrue the watchdog during startup/recovery ownership.
 
-After gameplay is visually confirmed following a login/relog, wait approximately
-5-10 seconds (currently 7 seconds), then ALWAYS send that row's configured Autobattle/
-slave hotkey. Observe fresh verified X/Y for 10 seconds. If no movement is verified,
-refocus/recheck ownership and send the hotkey again, for at most three hotkey attempts
-total. Log the settle period, every hotkey attempt and every X/Y verification window.
+Smart Teleport is the first-line stationary recovery for characters that enable it.
+Its default per-character timeout is 60 seconds. Steady-state supervision itself sends
+no Autobattle hotkey. When the persisted no-movement restart threshold is reached
+(default 180 seconds; allowed 60-3600), restart only the affected client under the
+global recovery lease. The restart timer must not be reset merely because Smart
+Teleport briefly owned its serialized background-input lease; only verified movement,
+session/map replacement, STOP/configuration/client replacement, or actual recovery
+lifecycle resets/re-baselines it.
 
-If all three hotkey attempts fail, restart only that client under the global recovery
-lease. A replacement client repeats the full login -> settle -> hotkey -> movement
-verification sequence. Permit at most three client restarts for the same movement
-failure incident. If verified movement still cannot be established after the third
-replacement cycle, stop the supervisor completely, mark a terminal failure and send
-no further automatic hotkeys/restarts until a manual Start resets the bounded budget.
-Any verified movement resets the restart budget to zero.
+After a real launch/relog/replacement reaches verified gameplay, wait 10 seconds and
+send that row's configured Autobattle/slave hotkey through the shared ResumeHotkey
+verifier. Observe fresh verified X/Y for 10 seconds and retry at most three total
+hotkey attempts. If movement still cannot be established, the affected recovery cycle
+fails into exponential retry/backoff; do not stop permanently after three client
+restarts. Backoff continues indefinitely and caps at one hour between attempts.
 
-Recognized terminal logout/disconnect dialogs may trigger replacement sooner after
-confirmation. Unknown popups receive no blind input. Keep one global recovery lease
-from close through verified exit, relaunch, login, Autobattle movement verification
-and minimization; simultaneous failures remain sequential and healthy siblings stay
-untouched. Verify process/session/character ownership before input/close. STOP,
-configuration or client replacement cancels stale work. Never reopen a failed reader
-to evade a blocked memory read.
+Recognized terminal logout/disconnect dialogs may trigger replacement immediately after
+two fresh matching observations, without waiting for the X/Y threshold. Unknown popups
+receive no blind input. Keep one global recovery lease from close through verified
+exit, relaunch, login, post-login Autobattle movement verification and minimization;
+simultaneous failures remain sequential and healthy siblings stay untouched. Verify
+process/session/character ownership before input/close. STOP, configuration or client
+replacement cancels stale work. Never reopen a failed reader to evade a blocked memory
+read.
 
+Manual TESTS must expose safe actions for the selected character to run Smart Teleport
+now and Weight/Cart cleaning now through the exact production paths. These tests may
+bypass only the automatic trigger condition (idle/weight threshold); they must not
+bypass identity, input-lease, popup, quantity-dialog, cancellation or ownership guards.
+
+Global debug logging must record structured start/result events for every automatic or
+manual Smart Teleport and Weight/Cart maintenance action. COPY DEBUG LOG must include a
+last-24-hours action summary with teleport attempts/completions and Cart attempts/
+completions/items moved, plus the detailed timestamped events.
 
 ## Character roster and identity discovery
 
