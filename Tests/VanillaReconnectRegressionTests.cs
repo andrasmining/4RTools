@@ -15,6 +15,7 @@ namespace Vanilla.Diagnostics.Tests
         internal static int Run()
         {
             Test("Fresh reconnect settings contain exactly two defaults", FreshDefaults);
+            Test("No-movement restart threshold defaults to three minutes and validates", MovementRestartSetting);
             Test("Reconnect settings clone never appends defaults", CloneDoesNotDuplicate);
             Test("Legacy duplicated settings keep the two configured accounts", LegacyDuplicateMigration);
             Test("Runtime status contains only current configured accounts", StatusTracksCurrentSettings);
@@ -75,6 +76,22 @@ namespace Vanilla.Diagnostics.Tests
                 Assert(value.Accounts.Count == 2, "Fresh settings need two rows.");
             }
             finally { Delete(root); }
+        }
+
+        private static void MovementRestartSetting()
+        {
+            var value = VanillaReconnectSettings.CreateDefault();
+            Assert(value.MovementRestartSeconds == 180, "Default no-movement restart threshold must be 180 seconds.");
+            value.MovementRestartSeconds = 60; value.Validate();
+            value.MovementRestartSeconds = 3600; value.Validate();
+            value.MovementRestartSeconds = 59;
+            bool lowRejected = false;
+            try { value.Validate(); } catch (ArgumentException) { lowRejected = true; }
+            Assert(lowRejected, "Restart threshold below 60 seconds was accepted.");
+            value.MovementRestartSeconds = 3601;
+            bool highRejected = false;
+            try { value.Validate(); } catch (ArgumentException) { highRejected = true; }
+            Assert(highRejected, "Restart threshold above one hour was accepted.");
         }
 
         private static void CloneDoesNotDuplicate()
