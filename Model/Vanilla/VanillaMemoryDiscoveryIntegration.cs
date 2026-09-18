@@ -47,6 +47,8 @@ namespace _4RTools.Forms
             if (weightAlertsIntegrated || vanillaWorkspace == null) return;
             weightAlertsIntegrated = true;
             integratedWeightAlertService = new VanillaWeightAlertService(AppDomain.CurrentDomain.BaseDirectory, integratedFleetMonitor, integratedReconnectSupervisor);
+            if (integratedReconnectView != null)
+                integratedReconnectView.WeightCartTestRequested = accountId => integratedWeightAlertService.RunCartNow(accountId);
             if (!smokeTest) integratedWeightAlertService.Start();
             vanillaWeightAlertsPage = new TabPage("Weight") { Padding = new Padding(6), UseVisualStyleBackColor = true };
             int insertAt = vanillaMemoryDiscoveryPage == null ? vanillaWorkspace.TabPages.IndexOf(vanillaDiagnosticsPage)
