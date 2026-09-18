@@ -55,7 +55,7 @@ Vanilla's own Autobattle remains responsible for movement and combat.
 Weight / Cart management
 ------------------------
 The Weight tab can trigger ordinary UI-only Cart maintenance from verified read-only
-CurrentWeight/MaxWeight. The default trigger is 50% and is configurable. Use, Equip
+CurrentWeight/MaxWeight. Each character row has its own Weight switch; shared Weight-tab settings apply only to rows whose Weight switch is enabled. The default trigger is 50% and is configurable. Use, Equip
 and Etc inventory categories are selectable, as are the Inventory and Cart hotkeys.
 4RTools pauses the configured Autobattle toggle, detects the opened panels/slots,
 drags items to Cart, then resumes through verified X/Y movement and minimizes.
