@@ -24,7 +24,7 @@ namespace _4RTools.Forms
         private readonly Label vanillaStatus = new Label { AutoSize = true, MaximumSize = new Size(520, 0) };
         private bool refreshingClients, profilesReady, closed, validatingClient;
         private string reportedFailure;
-        internal bool AutomationEnabled { get { return toggleForm?.IsOn == true || vanillaSession.IsEnabled || integratedAutomationSession?.IsEnabled == true; } }
+        internal bool AutomationEnabled { get { return toggleForm?.IsOn == true || vanillaSession.IsEnabled; } }
         internal bool GameplayAttached { get { return ClientSingleton.GetClient() != null; } }
         internal bool VanillaPollingEnabled { get { return vanillaTimer.Enabled; } }
         internal VanillaClientState VanillaSnapshot { get { return vanillaSession.Snapshot; } }
