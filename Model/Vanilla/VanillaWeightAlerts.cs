@@ -267,7 +267,9 @@ namespace _4RTools.Model.Vanilla
 
         private void ProcessAutoCart(VanillaWeightAlertSettings current, VanillaWeightObservation observation)
         {
-            string key = "CARTPID:" + observation.ProcessId.ToString(CultureInfo.InvariantCulture);
+            string accountId = supervisor.ManagedAccountIdForProcess(observation.ProcessId);
+            if (string.IsNullOrWhiteSpace(accountId)) return;
+            string key = "CART:" + accountId;
             AlertState state;
             lock (gate)
             {
@@ -278,12 +280,15 @@ namespace _4RTools.Model.Vanilla
                 state.CartRunning = true;
                 state.CartArmed = false;
             }
+            VanillaDebugLog.Write("WEIGHT", "event=cart-request trigger=automatic-threshold accountId=" + accountId
+                + " pid=" + observation.ProcessId + " character='" + observation.CharacterName
+                + "' percent=" + observation.Percent.Value.ToString("0.0", CultureInfo.InvariantCulture) + ".");
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
                 {
                     SetStatus("Weight threshold reached for " + observation.CharacterName + "; starting UI-only cart maintenance.");
-                    VanillaWeightCartResult result = cartAutomation.Run(observation.ProcessId, current, text => SetStatus(text));
+                    VanillaWeightCartResult result = cartAutomation.Run(observation.ProcessId, current, text => SetStatus(text), "automatic-threshold");
                     lock (gate)
                     {
                         state.ManualHold = result.RequiresManualIntervention;
@@ -294,10 +299,70 @@ namespace _4RTools.Model.Vanilla
                 catch (Exception ex)
                 {
                     lock (gate) state.CartArmed = true;
+                    VanillaDebugLog.Write("WEIGHT", "event=cart-failed trigger=automatic-threshold accountId=" + accountId
+                        + " pid=" + observation.ProcessId + " reason='" + ex.Message + "'.");
                     SetStatus("Automatic cart maintenance failed for " + observation.CharacterName + ": " + ex.Message);
                 }
                 finally { lock (gate) state.CartRunning = false; }
             });
+        }
+
+        internal string RunCartNow(string accountId)
+        {
+            int pid;
+            VanillaReconnectAccount account;
+            string reason;
+            if (!supervisor.TryResolveOnlineManagedCharacter(accountId, out pid, out account, out reason))
+                throw new InvalidOperationException(reason);
+            if (!account.WeightEnabled)
+                throw new InvalidOperationException("Weight/Cart is disabled for this character.");
+
+            VanillaWeightAlertSettings current;
+            lock (gate)
+            {
+                if (disposed) throw new ObjectDisposedException(nameof(VanillaWeightAlertService));
+                current = settings.Clone();
+            }
+            if (!current.TransferUseItems && !current.TransferEquipItems && !current.TransferEtcItems)
+                throw new InvalidOperationException("Select at least one inventory category in the Weight tab first.");
+
+            string key = "CART:" + account.Id;
+            AlertState state;
+            lock (gate)
+            {
+                if (!states.TryGetValue(key, out state)) states[key] = state = new AlertState();
+                if (state.CartRunning) throw new InvalidOperationException("Cart maintenance is already running for this character.");
+                if (state.ManualHold || supervisor.IsWeightManualHold(account.Id))
+                    throw new InvalidOperationException("This character is on manual Cart hold; clear it after inspecting/emptying the Cart.");
+                state.CartRunning = true;
+                state.CartArmed = false;
+            }
+
+            VanillaDebugLog.Write("WEIGHT", "event=cart-manual-request account='" + account.Label + "' accountId="
+                + account.Id + " pid=" + pid + ".");
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    SetStatus("Manual TESTS request: starting UI-only Cart maintenance for " + account.Label + ".");
+                    VanillaWeightCartResult result = cartAutomation.Run(pid, current, text => SetStatus(text), "manual-test");
+                    lock (gate)
+                    {
+                        state.ManualHold = result.RequiresManualIntervention;
+                        if (result.Deferred) state.CartArmed = true;
+                    }
+                    SetStatus(result.Message);
+                }
+                catch (Exception ex)
+                {
+                    lock (gate) state.CartArmed = true;
+                    VanillaDebugLog.Write("WEIGHT", "event=cart-failed trigger=manual-test accountId=" + account.Id
+                        + " pid=" + pid + " reason='" + ex.Message + "'.");
+                    SetStatus("Manual Cart maintenance failed for " + account.Label + ": " + ex.Message);
+                }
+                finally { lock (gate) state.CartRunning = false; }
+            });
+            return "Weight/Cart clean test queued for " + account.Label + " (PID " + pid + ").";
         }
 
         public void ClearManualHolds()
@@ -309,7 +374,10 @@ namespace _4RTools.Model.Vanilla
 
         private void ProcessObservation(VanillaWeightAlertSettings current, VanillaWeightObservation observation)
         {
-            string key = string.IsNullOrWhiteSpace(observation.CharacterName) ? "PID:" + observation.ProcessId : "CHAR:" + observation.CharacterName;
+            string accountId = supervisor.ManagedAccountIdForProcess(observation.ProcessId);
+            string key = string.IsNullOrWhiteSpace(accountId)
+                ? "PID:" + observation.ProcessId.ToString(CultureInfo.InvariantCulture)
+                : "MAIL:" + accountId;
             AlertState state;
             lock (gate)
             {
@@ -335,11 +403,15 @@ namespace _4RTools.Model.Vanilla
                     + "Build: " + observation.Build;
                 SendMail(current, subject, body);
                 lock (gate) { state.Armed = false; state.LastSentAt = now; state.NextAttemptAt = DateTimeOffset.MinValue; }
+                VanillaDebugLog.Write("WEIGHT", "event=weight-email-sent accountId=" + (accountId ?? "unknown")
+                    + " pid=" + observation.ProcessId + " character='" + observation.CharacterName + "' percent=" + percent + ".");
                 SetStatus("Weight warning e-mail sent for " + observation.CharacterName + " at " + percent + "%.");
             }
             catch (Exception ex)
             {
                 lock (gate) state.NextAttemptAt = now + TimeSpan.FromMinutes(Math.Min(5, current.CooldownMinutes));
+                VanillaDebugLog.Write("WEIGHT", "event=weight-email-failed accountId=" + (accountId ?? "unknown")
+                    + " pid=" + observation.ProcessId + " character='" + observation.CharacterName + "' reason='" + ex.Message + "'.");
                 SetStatus("Weight warning e-mail failed for " + observation.CharacterName + ": " + ex.Message);
             }
             finally { lock (gate) state.Sending = false; }
