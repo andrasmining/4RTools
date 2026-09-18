@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -84,6 +85,13 @@ namespace _4RTools.Model.Vanilla
             text.AppendLine("Debug enabled: " + Enabled);
             text.AppendLine("Data root: " + VanillaAppData.RootDirectory);
             text.AppendLine();
+            try
+            {
+                IEnumerable<string> recentLines = File.Exists(LogPath) ? File.ReadLines(LogPath) : Enumerable.Empty<string>();
+                text.AppendLine(BuildRecentActionSummary(recentLines, DateTimeOffset.Now.AddHours(-24)));
+            }
+            catch (Exception ex) { text.AppendLine("24h action summary unavailable: " + ex.Message); }
+            text.AppendLine();
             try { text.Append(VanillaHostDiagnostics.Build()); }
             catch (Exception ex) { text.AppendLine("HOST DIAGNOSTICS FAILED: " + ex); }
             text.AppendLine();
@@ -121,6 +129,57 @@ namespace _4RTools.Model.Vanilla
 
             text.AppendLine("=== END GLOBAL DEBUG BUNDLE ===");
             return text.ToString();
+        }
+
+        internal static string BuildRecentActionSummary(IEnumerable<string> lines, DateTimeOffset cutoff)
+        {
+            int teleportAttempts = 0, teleportComplete = 0, teleportFailed = 0, teleportCancelled = 0;
+            int cartAttempts = 0, cartComplete = 0, cartFailed = 0, cartCancelled = 0, cartHolds = 0, cartItems = 0;
+            foreach (string line in lines ?? Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                int firstSpace = line.IndexOf(' ');
+                DateTimeOffset timestamp;
+                if (firstSpace <= 0 || !DateTimeOffset.TryParse(line.Substring(0, firstSpace),
+                    CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out timestamp) || timestamp < cutoff)
+                    continue;
+
+                if (line.Contains("event=teleport-start")) teleportAttempts++;
+                if (line.Contains("event=teleport-complete")) teleportComplete++;
+                if (line.Contains("event=teleport-failed")) teleportFailed++;
+                if (line.Contains("event=teleport-cancelled")) teleportCancelled++;
+                if (line.Contains("event=cart-start")) cartAttempts++;
+                if (line.Contains("event=cart-complete"))
+                {
+                    cartComplete++;
+                    cartItems += ExtractIntField(line, "items=");
+                }
+                if (line.Contains("event=cart-failed")) cartFailed++;
+                if (line.Contains("event=cart-cancelled")) cartCancelled++;
+                if (line.Contains("event=cart-manual-hold")) cartHolds++;
+            }
+
+            var summary = new StringBuilder();
+            summary.AppendLine("=== LAST 24 HOURS AUTOMATION ACTION SUMMARY ===");
+            summary.AppendLine("Since: " + cutoff.ToString("O"));
+            summary.AppendLine("Smart Teleport: attempts=" + teleportAttempts + ", completed=" + teleportComplete
+                + ", failed=" + teleportFailed + ", cancelled=" + teleportCancelled + ".");
+            summary.AppendLine("Weight/Cart: attempts=" + cartAttempts + ", completed=" + cartComplete
+                + ", itemsMoved=" + cartItems + ", failed=" + cartFailed + ", cancelled=" + cartCancelled
+                + ", manualHolds=" + cartHolds + ".");
+            return summary.ToString().TrimEnd();
+        }
+
+        private static int ExtractIntField(string line, string marker)
+        {
+            int start = line == null ? -1 : line.IndexOf(marker, StringComparison.Ordinal);
+            if (start < 0) return 0;
+            start += marker.Length;
+            int end = start;
+            while (end < line.Length && char.IsDigit(line[end])) end++;
+            int value;
+            return end > start && int.TryParse(line.Substring(start, end - start), NumberStyles.None,
+                CultureInfo.InvariantCulture, out value) ? value : 0;
         }
 
         private static void AppendFile(StringBuilder text, string path)
