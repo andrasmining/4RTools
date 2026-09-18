@@ -211,7 +211,10 @@ namespace Vanilla.Diagnostics.Tests
             if (first.SmartTeleportEnabled || first.SmartTeleportIdleSeconds != 60 || first.SmartTeleportKey != 0)
                 throw new Exception("Smart Teleport defaults changed unexpectedly.");
             first.SmartTeleportEnabled = true;
-            Throws(() => VanillaCharacterRoster.Validate(new[] { first }));
+            bool rejected = false;
+            try { VanillaCharacterRoster.Validate(new[] { first }); }
+            catch (InvalidOperationException) { rejected = true; }
+            if (!rejected) throw new Exception("Enabled Smart Teleport without a hotkey must be rejected.");
             first.SmartTeleportKey = (int)System.Windows.Forms.Keys.F5;
             first.SmartTeleportCtrl = true;
             VanillaCharacterRoster.Validate(new[] { first });
