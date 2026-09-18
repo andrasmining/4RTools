@@ -111,6 +111,10 @@ namespace _4RTools.Model.Vanilla
             if (token == null) return;
             lock (gate)
             {
+                // Once Autobattle may have been toggled OFF, retain the hold by stable
+                // character-row ID even if a settings edit removed/rebuilt its runtime.
+                if (autobattleMayBePaused) weightManualHolds.Add(token.AccountId);
+
                 Runtime runtime;
                 if (!runtimes.TryGetValue(token.AccountId, out runtime) || runtime.ProcessId != token.ProcessId) return;
                 runtime.ScriptRunning = false;
@@ -119,7 +123,6 @@ namespace _4RTools.Model.Vanilla
                 runtime.NonMinimizedSince = null;
                 if (autobattleMayBePaused)
                 {
-                    weightManualHolds.Add(token.AccountId);
                     if (running)
                         SetStage(runtime, VanillaReconnectStage.Error, detail ?? "Weight/cart maintenance was cancelled after Autobattle may have been paused");
                     else
