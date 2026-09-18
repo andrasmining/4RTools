@@ -121,6 +121,16 @@ namespace _4RTools.Model.Vanilla
                     FillWeight = 70
                 });
             }
+            if (!accounts.Columns.Contains("WeightEnabled"))
+            {
+                accounts.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    Name = "WeightEnabled",
+                    HeaderText = "Weight",
+                    ReadOnly = true,
+                    FillWeight = 55
+                });
+            }
             if (!accounts.Columns.Contains("RuntimePid"))
             {
                 accounts.Columns.Add(new DataGridViewTextBoxColumn
@@ -142,7 +152,7 @@ namespace _4RTools.Model.Vanilla
                 });
             }
             help.SetToolTip(accounts,
-                "One row per character, including multiple characters on one username. At most two enabled rows. Running characters are discovered from verified memory. Unknown username/slot stay blank until verified or configured. Double-click to edit; passwords and proxies are never guessed.");
+                "One row per character, including multiple characters on one username. At most two enabled rows. Running characters are discovered from verified memory. Unknown username/slot stay blank until verified or configured. Double-click to edit; Weight/Cart is independently switchable per character; passwords and proxies are never guessed.");
         }
 
         private void AccountRuntimeUpdated()
@@ -218,9 +228,14 @@ namespace _4RTools.Model.Vanilla
             {
                 string id = row.Tag as string;
                 if (string.IsNullOrWhiteSpace(id)) continue;
+                var profile = accountCatalog.FirstOrDefault(a => a.Id == id);
+                if (accounts.Columns.Contains("WeightEnabled"))
+                {
+                    row.Cells["WeightEnabled"].Value = profile != null && profile.WeightEnabled ? "Yes" : "No";
+                    row.Cells["WeightEnabled"].ToolTipText = "Per-character Weight policy. No e-mail alert or automatic Cart maintenance runs for this character when set to No.";
+                }
                 if (accounts.Columns.Contains("AccountProxy"))
                 {
-                    var profile = accountCatalog.FirstOrDefault(a => a.Id == id);
                     row.Cells["AccountProxy"].Value = profile != null && profile.ProxyNeedsConfiguration ? "Not set"
                         : VanillaAccountProxyPreferences.Ensure(id, settings.Proxy).ToString();
                 }
