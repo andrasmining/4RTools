@@ -24,7 +24,6 @@ namespace _4RTools.Model
         public bool keySpammerWithClick { get; set; } = true;
         public Dictionary<string,Key> defKeys { get; set; } = new Dictionary<string,Key>();
         public Dictionary<string,Key> atkKeys { get; set; } = new Dictionary<string, Key>();
-        private int PX_MOV = Constants.MOUSE_DIAGONAL_MOVIMENTATION_PIXELS_AHK;
 
         public string GetActionName()
         {
