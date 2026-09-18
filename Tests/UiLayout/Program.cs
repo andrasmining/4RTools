@@ -263,9 +263,11 @@ internal static class UiLayoutHarness
             Pump();
             Call(main, "AssertSmokeBackgroundServicesInactive");
             DataGridView grid = (DataGridView)Field(recovery, "accounts");
-            string[] expectedColumns = { "Enabled", "Label", "User", "Slot", "CharacterName", "Hotkey", "Secret", "AccountProxy", "RuntimePid", "RuntimeStatus" };
+            string[] expectedColumns = { "Enabled", "Label", "User", "Slot", "CharacterName", "Hotkey", "Secret", "AccountProxy", "WeightEnabled", "RuntimePid", "RuntimeStatus" };
             Check(grid.Columns.Cast<DataGridViewColumn>().OrderBy(c => c.DisplayIndex).Select(c => c.Name).SequenceEqual(expectedColumns), name + ": character column order is wrong.");
             Check(grid.Columns["Label"].HeaderText == "Description" && grid.Columns["CharacterName"].HeaderText == "Character name", name + ": character headers missing.");
+            Check(grid.Columns["WeightEnabled"].HeaderText == "Weight", name + ": per-character Weight column missing.");
+            Check(grid.Rows.Cast<DataGridViewRow>().All(r => Convert.ToString(r.Cells["WeightEnabled"].Value) == "Yes"), name + ": default per-character Weight policy was not rendered.");
             Check(grid.Rows.Cast<DataGridViewRow>().All(r => !string.IsNullOrWhiteSpace(Convert.ToString(r.Cells["CharacterName"].Value))), name + ": saved character names missing from table.");
             Check(Field(recovery, "characterDiscoveryTimer") == null, name + ": smoke mode started character discovery.");
             Control launcher = (Control)Field(recovery, "launchPath");
