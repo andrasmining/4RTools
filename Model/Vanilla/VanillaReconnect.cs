@@ -1637,7 +1637,7 @@ namespace _4RTools.Model.Vanilla
     public static class VanillaReconnectBootstrap
     {
         private static readonly object Gate = new object();
-        private static bool initialized, started;
+        private static bool started;
         private static VanillaReconnectSupervisor supervisor;
         private static NotifyIcon tray;
         private static VanillaReconnectForm form;
