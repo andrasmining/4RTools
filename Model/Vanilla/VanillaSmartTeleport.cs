@@ -16,6 +16,7 @@ namespace _4RTools.Model.Vanilla
         internal string AccountId;
         internal int ProcessId;
         internal int Generation;
+        internal bool RequirePolicyEnabled;
         internal VanillaReconnectAccount Account;
     }
 
@@ -25,6 +26,11 @@ namespace _4RTools.Model.Vanilla
 
         internal bool TryBeginSmartTeleport(int pid, out VanillaSmartTeleportToken token, out string reason)
         {
+            return TryBeginSmartTeleport(pid, true, out token, out reason);
+        }
+
+        internal bool TryBeginSmartTeleport(int pid, bool requirePolicyEnabled, out VanillaSmartTeleportToken token, out string reason)
+        {
             token = null;
             reason = null;
             lock (gate)
@@ -32,7 +38,10 @@ namespace _4RTools.Model.Vanilla
                 if (disposed || !running) { reason = "reconnect supervision is not running"; return false; }
                 Runtime runtime = runtimes.Values.FirstOrDefault(item => item.ProcessId == pid && item.Account.Enabled);
                 if (runtime == null) { reason = "the running process is not bound to an enabled character row"; return false; }
-                if (!runtime.Account.SmartTeleportEnabled) { reason = "Smart Teleport is disabled for this character"; return false; }
+                if (requirePolicyEnabled && !runtime.Account.SmartTeleportEnabled)
+                { reason = "Smart Teleport is disabled for this character"; return false; }
+                if (runtime.Account.SmartTeleportKey < 8 || runtime.Account.SmartTeleportKey > 254)
+                { reason = "the character has no valid Smart Teleport hotkey"; return false; }
                 if (runtime.Stage != VanillaReconnectStage.Online)
                 { reason = "the character is not in the stable Online stage"; return false; }
                 if (weightManualHolds.Contains(runtime.Account.Id))
@@ -49,6 +58,7 @@ namespace _4RTools.Model.Vanilla
                     AccountId = runtime.Account.Id,
                     ProcessId = pid,
                     Generation = generation,
+                    RequirePolicyEnabled = requirePolicyEnabled,
                     Account = runtime.Account.Clone()
                 };
                 SetStage(runtime, VanillaReconnectStage.Online, "Smart Teleport owns the serialized background-input lease");
@@ -65,7 +75,8 @@ namespace _4RTools.Model.Vanilla
                 return disposed || !running || token.Generation != smartTeleportGeneration
                     || !runtimes.TryGetValue(token.AccountId, out runtime)
                     || runtime.ProcessId != token.ProcessId || !runtime.Account.Enabled
-                    || !runtime.Account.SmartTeleportEnabled || runtime.Stage != VanillaReconnectStage.Online
+                    || (token.RequirePolicyEnabled && !runtime.Account.SmartTeleportEnabled)
+                    || runtime.Stage != VanillaReconnectStage.Online
                     || CharacterOwnershipChanged(runtime, token.ProcessId);
             }
         }
@@ -174,6 +185,29 @@ namespace _4RTools.Model.Vanilla
             VanillaDebugLog.Write("TELEPORT", "Per-character Smart Teleport service started. It uses verified X/Y only and never requires target/combat state.");
         }
 
+        internal string RunNow(string accountId)
+        {
+            int pid;
+            VanillaReconnectAccount account;
+            string reason;
+            if (!supervisor.TryResolveOnlineManagedCharacter(accountId, out pid, out account, out reason))
+                throw new InvalidOperationException(reason);
+            if (account.SmartTeleportKey < 8 || account.SmartTeleportKey > 254)
+                throw new InvalidOperationException("Configure this character's Smart Teleport hotkey first.");
+
+            CharacterState state = State(accountId);
+            lock (gate)
+            {
+                if (disposed) throw new ObjectDisposedException(nameof(VanillaSmartTeleportService));
+                if (state.Running) throw new InvalidOperationException("Smart Teleport is already running for this character.");
+                state.Running = true;
+            }
+            VanillaDebugLog.Write("TELEPORT", "event=teleport-manual-request account='" + account.Label
+                + "' accountId=" + account.Id + " pid=" + pid + ".");
+            ThreadPool.QueueUserWorkItem(_ => Execute(accountId, pid, state, true));
+            return "Smart Teleport test queued for " + account.Label + " (PID " + pid + ").";
+        }
+
         private void Poll()
         {
             if (disposed || Interlocked.Exchange(ref polling, 1) != 0) return;
@@ -212,7 +246,7 @@ namespace _4RTools.Model.Vanilla
                     bool due = state.Tracker.Observe(client.Position, clock.Elapsed, utc, account.SmartTeleportIdleSeconds);
                     if (!due || state.Running) continue;
                     state.Running = true;
-                    ThreadPool.QueueUserWorkItem(_ => Execute(account.Id, status.ProcessId.Value, state));
+                    ThreadPool.QueueUserWorkItem(_ => Execute(account.Id, status.ProcessId.Value, state, false));
                 }
             }
             catch (Exception ex)
@@ -232,18 +266,22 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        private void Execute(string accountId, int pid, CharacterState state)
+        private void Execute(string accountId, int pid, CharacterState state, bool manual)
         {
             VanillaSmartTeleportToken token = null;
             string reason;
+            string mode = manual ? "manual-test" : "automatic-idle";
             try
             {
-                if (!supervisor.TryBeginSmartTeleport(pid, out token, out reason))
+                if (!supervisor.TryBeginSmartTeleport(pid, !manual, out token, out reason))
                 {
-                    VanillaDebugLog.Write("TELEPORT", "PID=" + pid + " Smart Teleport deferred: " + reason + ".");
+                    VanillaDebugLog.Write("TELEPORT", "event=teleport-deferred mode=" + mode + " accountId=" + accountId
+                        + " pid=" + pid + " reason='" + reason + "'.");
                     return;
                 }
 
+                VanillaDebugLog.Write("TELEPORT", "event=teleport-start mode=" + mode + " account='" + token.Account.Label
+                    + "' accountId=" + token.AccountId + " pid=" + pid + " hotkey='" + token.Account.SmartTeleportHotkeyText + "'.");
                 state.Tracker.Reset(clock.Elapsed);
                 Func<bool> cancelled = () => supervisor.SmartTeleportCancelled(token);
                 using (var input = new VanillaBackgroundWindowInput(pid, cancelled))
@@ -251,21 +289,23 @@ namespace _4RTools.Model.Vanilla
                 {
                     if (VanillaTeleportVision.HasWarpDialog(null, before))
                     {
-                        VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": a warp-selection dialog was already present before the configured hotkey; no input sent.");
+                        VanillaDebugLog.Write("TELEPORT", "event=teleport-deferred mode=" + mode + " account='" + token.Account.Label
+                            + "' pid=" + pid + " reason='warp dialog already open before hotkey'; no input sent.");
                         supervisor.CompleteSmartTeleport(token, "Smart Teleport deferred because a warp dialog was already open");
                         return;
                     }
 
-                    VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": X/Y unchanged for "
-                        + token.Account.SmartTeleportIdleSeconds + "s; sending background Smart Teleport hotkey "
-                        + token.Account.SmartTeleportHotkeyText + " to PID " + pid + ".");
+                    VanillaDebugLog.Write("TELEPORT", "event=teleport-hotkey mode=" + mode + " account='" + token.Account.Label
+                        + "' pid=" + pid + " idleSeconds=" + token.Account.SmartTeleportIdleSeconds
+                        + " hotkey='" + token.Account.SmartTeleportHotkeyText + "'.");
                     input.Chord(token.Account.SmartTeleportCtrl, token.Account.SmartTeleportAlt,
                         token.Account.SmartTeleportShift, (Keys)token.Account.SmartTeleportKey);
 
                     bool popup = WaitForWarpDialog(input, before, cancelled, 3000);
                     if (!popup)
                     {
-                        VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": teleport hotkey sent but the expected warp-selection popup was not positively detected. Enter was NOT sent.");
+                        VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='" + token.Account.Label
+                            + "' pid=" + pid + " stage=popup reason='expected warp popup not positively detected'; enterSent=false.");
                         supervisor.CompleteSmartTeleport(token, "Smart Teleport popup not verified; no Enter sent");
                         return;
                     }
@@ -274,31 +314,39 @@ namespace _4RTools.Model.Vanilla
                     {
                         if (!VanillaTeleportVision.HasWarpDialog(null, confirmation))
                         {
-                            VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": warp popup disappeared before confirmation; Enter was NOT sent.");
+                            VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='" + token.Account.Label
+                                + "' pid=" + pid + " stage=confirmation reason='warp popup disappeared'; enterSent=false.");
                             supervisor.CompleteSmartTeleport(token, "Smart Teleport popup was no longer present; no Enter sent");
                             return;
                         }
                     }
-                    VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": warp-selection popup positively re-confirmed with the first choice selected; sending background Enter.");
+                    VanillaDebugLog.Write("TELEPORT", "event=teleport-enter mode=" + mode + " account='" + token.Account.Label
+                        + "' pid=" + pid + " popupConfirmed=true firstChoiceSelected=true.");
                     input.Press(Keys.Enter);
                     if (!WaitForWarpDialogGone(input, cancelled, 2500))
                     {
-                        VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": warp popup remained visible after Enter; no further input sent.");
+                        VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='" + token.Account.Label
+                            + "' pid=" + pid + " stage=post-enter reason='warp popup remained visible'; no further input sent.");
                         supervisor.CompleteSmartTeleport(token, "Smart Teleport confirmation did not clear; no further input sent");
                         return;
                     }
 
-                    VanillaDebugLog.Write("TELEPORT", token.Account.Label + ": Smart Teleport confirmed; popup cleared. X/Y idle timer restarted.");
+                    VanillaDebugLog.Write("TELEPORT", "event=teleport-complete mode=" + mode + " account='" + token.Account.Label
+                        + "' accountId=" + token.AccountId + " pid=" + pid + " popupCleared=true.");
                     supervisor.CompleteSmartTeleport(token, "Smart Teleport completed in background");
                 }
             }
             catch (OperationCanceledException)
             {
-                VanillaDebugLog.Write("TELEPORT", (token?.Account?.Label ?? ("PID " + pid)) + ": Smart Teleport cancelled by STOP/settings/client ownership change.");
+                VanillaDebugLog.Write("TELEPORT", "event=teleport-cancelled mode=" + mode + " account='"
+                    + (token?.Account?.Label ?? accountId) + "' pid=" + pid
+                    + " reason='STOP/settings/client ownership change'.");
             }
             catch (Exception ex)
             {
-                VanillaDebugLog.Write("TELEPORT", (token?.Account?.Label ?? ("PID " + pid)) + ": Smart Teleport failed safely: " + ex.Message + ". No blind Enter was sent.");
+                VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='"
+                    + (token?.Account?.Label ?? accountId) + "' pid=" + pid + " stage=exception reason='" + ex.Message
+                    + "'; no blind Enter was sent.");
                 if (token != null) supervisor.CompleteSmartTeleport(token, "Smart Teleport failed safely: " + ex.Message);
             }
             finally
