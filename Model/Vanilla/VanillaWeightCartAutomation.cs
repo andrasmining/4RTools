@@ -337,23 +337,33 @@ namespace _4RTools.Model.Vanilla
                 catch (VanillaCartManualException ex)
                 {
                     manualHold = true;
+                    bool cancelledNow = cancelled();
                     VanillaDebugLog.Write("WEIGHT", "event=cart-manual-hold trigger=" + trigger + " account='" + token.Account.Label
-                        + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved + " reason='" + ex.Message + "'.");
-                    supervisor.CompleteWeightMaintenance(token, true, ex.Message);
+                        + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved + " reason='" + ex.Message
+                        + "' cancellationRace=" + cancelledNow + ".");
+                    if (cancelledNow)
+                        supervisor.MarkWeightMaintenanceCancelled(token, true, ex.Message);
+                    else
+                        supervisor.CompleteWeightMaintenance(token, true, ex.Message);
                     return new VanillaWeightCartResult { ItemsMoved = moved, RequiresManualIntervention = true, Message = token.Account.Label + ": " + ex.Message };
                 }
                 catch (Exception ex)
                 {
-                    // After Autobattle has been toggled OFF, an unexpected UI state is deliberately
-                    // fail-closed. Do not send a resume hotkey through an unknown modal/dialog. The
-                    // operator can inspect the visible client and clear the hold explicitly.
-                    if (paused && !cancelled()) manualHold = true;
+                    // After Autobattle has been toggled OFF, any unexpected UI state is deliberately
+                    // fail-closed, including a cancellation racing with this exception. Never let a
+                    // stale generation erase the manual hold merely because another failure won first.
+                    bool cancelledNow = cancelled();
+                    if (paused) manualHold = true;
                     VanillaDebugLog.Write("WEIGHT", "event=cart-failed trigger=" + trigger + " account='" + token.Account.Label
                         + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved
-                        + " manualHold=" + manualHold + " reason='" + ex.Message + "'.");
-                    supervisor.CompleteWeightMaintenance(token, manualHold, manualHold
+                        + " manualHold=" + manualHold + " cancellationRace=" + cancelledNow + " reason='" + ex.Message + "'.");
+                    string detail = manualHold
                         ? "Weight/cart maintenance stopped in an uncertain UI state; Autobattle remains OFF for manual inspection: " + ex.Message
-                        : "Weight/cart maintenance aborted safely: " + ex.Message);
+                        : "Weight/cart maintenance aborted safely: " + ex.Message;
+                    if (cancelledNow)
+                        supervisor.MarkWeightMaintenanceCancelled(token, manualHold, detail);
+                    else
+                        supervisor.CompleteWeightMaintenance(token, manualHold, detail);
                     return new VanillaWeightCartResult
                     {
                         ItemsMoved = moved, RequiresManualIntervention = manualHold,
