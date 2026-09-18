@@ -46,6 +46,12 @@ jobs:
           target = evidence / 'reviewed-weight-cart.patch'; target.write_bytes(patch)
           subprocess.run(['git','apply','--check','--binary',str(target)], check=True)
           subprocess.run(['git','apply','--binary',str(target)], check=True)
+          source = Path('Model/Vanilla/VanillaWeightAlerts.cs')
+          text = source.read_text()
+          assert 'private Timer timer;' in text and 'timer = new Timer(_ => Poll()' in text
+          text = text.replace('private Timer timer;', 'private System.Threading.Timer timer;')
+          text = text.replace('timer = new Timer(_ => Poll()', 'timer = new System.Threading.Timer(_ => Poll()')
+          source.write_text(text)
           subprocess.run(['git','add','--',*paths], check=True)
           subprocess.run(['git','-c','core.whitespace=cr-at-eol','diff','--cached','--check'], check=True)
           subprocess.run(['git','diff','--cached','--stat'], check=True)
