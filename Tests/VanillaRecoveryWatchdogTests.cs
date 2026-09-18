@@ -61,6 +61,7 @@ namespace Vanilla.Diagnostics.Tests
             Test("Manual Cart hold survives unrelated recovery settings apply", WeightHoldSurvivesApply);
             Test("Cancelled Cart retains its hold after the active runtime is removed", WeightHoldSurvivesRuntimeRemoval);
             Test("Clearing Cart holds leaves unrelated error states untouched", WeightHoldClearIsolation);
+            Test("Manual character actions require a fresh exact username + character identity", ManualActionIdentityGate);
             Test("One terminal observation does not close a client", OneTerminal);
             Test("Unknown modal is never dismissed or closed as a disconnect", UnknownModal);
             Test("Changing terminal messages need new confirmation", ChangedTerminal);
@@ -518,6 +519,37 @@ namespace Vanilla.Diagnostics.Tests
                 Assert((VanillaReconnectStage)Get(h.B, "Stage") == VanillaReconnectStage.Error
                     && (string)Get(h.B, "Detail") == "Unrelated recovery error",
                     "Clearing a Cart hold erased an unrelated client error.");
+            }
+        }
+
+        private static void ManualActionIdentityGate()
+        {
+            using (var h = new H())
+            {
+                var row = (VanillaReconnectAccount)Get(h.A, "Account");
+                row.UserName = "user-a";
+                row.CharacterName = "char-a";
+
+                int pid;
+                VanillaReconnectAccount resolved;
+                string reason;
+                Assert(!h.Supervisor.TryResolveOnlineManagedCharacter(row.Id, out pid, out resolved, out reason),
+                    "Manual action was authorized without fresh positive identity evidence.");
+
+                h.Supervisor.SetCharacterSource(() => new[]
+                {
+                    new VanillaCharacterIdentity(101, Guid.NewGuid(), DateTimeOffset.UtcNow, "char-a", "user-a")
+                });
+                Assert(h.Supervisor.TryResolveOnlineManagedCharacter(row.Id, out pid, out resolved, out reason)
+                    && pid == 101 && resolved.CharacterName == "char-a",
+                    "Fresh exact username + character identity did not authorize the selected manual action.");
+
+                h.Supervisor.SetCharacterSource(() => new[]
+                {
+                    new VanillaCharacterIdentity(101, Guid.NewGuid(), DateTimeOffset.UtcNow, "other-char", "user-a")
+                });
+                Assert(!h.Supervisor.TryResolveOnlineManagedCharacter(row.Id, out pid, out resolved, out reason),
+                    "Mismatched fresh character identity authorized a manual action.");
             }
         }
 
