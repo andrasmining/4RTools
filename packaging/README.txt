@@ -52,6 +52,20 @@ healthy clients untouched. Proxy/login/startup/recovery input is serialized.
 Vanilla's own Autobattle remains responsible for movement and combat.
 
 
+Smart Teleport
+--------------
+Configure Smart Teleport in each character row. It is keyed by username + character
+name and automatically follows the verified running PID; no process selector is used.
+Each character stores its own enable flag, live-captured teleport hotkey and idle X/Y
+timeout (60 seconds by default). Fresh verified X/Y movement resets the timer; target,
+combat and casting state are not required.
+
+At timeout, 4RTools sends the configured hotkey to that owned Vanilla window using
+ordinary background Windows messages, then positively detects the Select an Area to
+Warp popup before sending Enter to the selected first option. If the popup is not
+recognized, Enter is never sent. Unknown/stale coordinates and ownership changes fail
+closed.
+
 Weight / Cart management
 ------------------------
 The Weight tab can trigger ordinary UI-only Cart maintenance from verified read-only
