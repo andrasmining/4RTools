@@ -28,6 +28,13 @@ namespace _4RTools.Model.Vanilla
         public bool Enabled { get; set; } = true;
         // Per-character opt-in for Weight alerts and UI-only Cart maintenance. Missing legacy JSON defaults to true.
         public bool WeightEnabled { get; set; } = true;
+        // Per-character, process-agnostic Smart Teleport. It is off until explicitly configured.
+        public bool SmartTeleportEnabled { get; set; }
+        public int SmartTeleportIdleSeconds { get; set; } = 60;
+        public int SmartTeleportKey { get; set; }
+        public bool SmartTeleportCtrl { get; set; }
+        public bool SmartTeleportAlt { get; set; }
+        public bool SmartTeleportShift { get; set; }
         public string Label { get; set; } = "Client";
         public string UserName { get; set; } = "";
         public string ProtectedPassword { get; set; } = "";
@@ -62,6 +69,19 @@ namespace _4RTools.Model.Vanilla
                 if (ResumeAlt) parts.Add("Alt");
                 if (ResumeShift) parts.Add("Shift");
                 parts.Add(((Keys)ResumeKey).ToString());
+                return string.Join("+", parts);
+            }
+        }
+        public string SmartTeleportHotkeyText
+        {
+            get
+            {
+                if (SmartTeleportKey < 8 || SmartTeleportKey > 254) return "Not set";
+                var parts = new List<string>();
+                if (SmartTeleportCtrl) parts.Add("Ctrl");
+                if (SmartTeleportAlt) parts.Add("Alt");
+                if (SmartTeleportShift) parts.Add("Shift");
+                parts.Add(((Keys)SmartTeleportKey).ToString());
                 return string.Join("+", parts);
             }
         }
@@ -194,6 +214,10 @@ namespace _4RTools.Model.Vanilla
                     throw new ArgumentException("Character slot must be between 1 and 15.");
                 if (account.ResumeKey < 8 || account.ResumeKey > 254)
                     throw new ArgumentException("Resume hotkey is invalid.");
+                if (account.SmartTeleportIdleSeconds < 5 || account.SmartTeleportIdleSeconds > 3600)
+                    throw new ArgumentException("Smart Teleport idle time must be between 5 and 3600 seconds.");
+                if (account.SmartTeleportEnabled && (account.SmartTeleportKey < 8 || account.SmartTeleportKey > 254))
+                    throw new ArgumentException("Choose a Smart Teleport hotkey for every character that has Smart Teleport enabled.");
             }
         }
 
@@ -612,6 +636,7 @@ namespace _4RTools.Model.Vanilla
                 Interlocked.Increment(ref diagnosticGeneration);
                 Interlocked.Increment(ref hardenedStartupGeneration);
                 Interlocked.Increment(ref weightMaintenanceGeneration);
+                Interlocked.Increment(ref smartTeleportGeneration);
                 hardenedStartupRunning = false;
                 weightManualHolds.Clear();
                 foreach (var active in runtimes.Values.Where(r => r.ScriptRunning))
@@ -653,6 +678,7 @@ namespace _4RTools.Model.Vanilla
                 if (freshManualStart)
                 {
                     Interlocked.Increment(ref weightMaintenanceGeneration);
+                Interlocked.Increment(ref smartTeleportGeneration);
                     weightManualHolds.Clear();
                     foreach (Runtime runtime in runtimes.Values)
                     {
@@ -679,6 +705,7 @@ namespace _4RTools.Model.Vanilla
                 Interlocked.Increment(ref diagnosticGeneration);
                 Interlocked.Increment(ref hardenedStartupGeneration);
                 Interlocked.Increment(ref weightMaintenanceGeneration);
+                Interlocked.Increment(ref smartTeleportGeneration);
                 hardenedStartupRunning = false;
                 running = false;
                 timer?.Change(Timeout.Infinite, Timeout.Infinite);
