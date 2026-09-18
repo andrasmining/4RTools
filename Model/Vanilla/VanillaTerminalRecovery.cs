@@ -113,14 +113,9 @@ namespace _4RTools.Model.Vanilla
                 if (running && !disposed) SetStage(runtime, VanillaReconnectStage.Error, reason + " Automatic recovery is disabled.");
                 return true;
             }
-            bool activeRecovery = runtime.RecoveryOwned || runtime.ScriptRunning;
-            double stalled = runtime.MovementWatchdog.StalledSeconds(restartEnvironment.MonotonicNow);
-            if (!activeRecovery && stalled < VanillaMovementWatchdog.TerminalCheckSeconds)
-            {
-                ResetTerminalEvidence(runtime);
-                SetStage(runtime, VanillaReconnectStage.Online, reason + " observed, but steady-state recovery waits for 5m without verified X/Y movement");
-                return true;
-            }
+            // An exact known terminal dialog is stronger evidence than a generic X/Y stall.
+            // Two fresh matching captures may therefore recover immediately; unknown modals
+            // still receive no dismissal, close or blind input.
             double gap = runtime.TerminalObservedAt.HasValue ? (now - runtime.TerminalObservedAt.Value).TotalMilliseconds : double.MaxValue;
             runtime.TerminalSamples = runtime.TerminalVisual == visual && gap > 0 && gap <= Math.Max(5000, settings.PollMs * 2)
                 ? Math.Min(2, runtime.TerminalSamples + 1) : 1;
