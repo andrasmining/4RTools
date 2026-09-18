@@ -217,14 +217,18 @@ internal static class UiLayoutHarness
             new object[] { Field(recovery, "supervisor"), row, Enum.ToObject(proxyType, 0) }, null))
         {
             dialog.Show(main); Pump();
-            foreach (string name in new[] { "enabled", "label", "user", "slot", "character", "password", "proxy", "hotkey" })
+            foreach (string name in new[] { "enabled", "label", "user", "slot", "character", "password", "proxy", "hotkey",
+                "smartTeleport", "teleportIdle", "teleportHotkey" })
                 Check(FullyVisible((Control)Field(dialog, name), dialog), "Character editor clipped field: " + name);
             Check(((TextBox)Field(dialog, "slot")).Text == "", "Character editor invented slot 1.");
             Check(((ComboBox)Field(dialog, "proxy")).SelectedIndex == -1, "Character editor invented proxy.");
+            Check(!((CheckBox)Field(dialog, "smartTeleport")).Checked, "Smart Teleport must default OFF for a newly discovered character.");
+            Check(((NumericUpDown)Field(dialog, "teleportIdle")).Value == 60, "Smart Teleport default idle time must be 60 seconds.");
+            Check(((TextBox)Field(dialog, "teleportHotkey")).Text.Contains("press hotkey"), "Smart Teleport live hotkey capture field is missing its unset state.");
             SaveScreenshot(dialog, Path.Combine(output, "20-character-editor.png"));
             dialog.Close();
         }
-        report.AppendLine("CASE 20 character editor: all identity/credential fields visible; unavailable slot/proxy preserved.");
+        report.AppendLine("CASE 20 character editor: identity/credential + per-character Smart Teleport controls visible; 60s default; unavailable slot/proxy preserved.");
     }
 
     private static void ResizeNativeViewport(Form main, int width, int height)
