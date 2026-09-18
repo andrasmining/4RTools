@@ -122,6 +122,8 @@ namespace _4RTools.Model.Vanilla
         public int RetryBackoffMs { get; set; } = 30000;
         public int MaxRetryBackoffMs { get; set; } = 3600000;
         public int PopupCooldownMs { get; set; } = 5000;
+        // Smart Teleport is the first steady-state self-heal. Restart only after a longer X/Y stall.
+        public int MovementRestartSeconds { get; set; } = 180;
         public VanillaUiAnchors Anchors { get; set; } = new VanillaUiAnchors();
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
         public List<VanillaReconnectAccount> Accounts { get; set; } = new List<VanillaReconnectAccount>();
@@ -189,6 +191,8 @@ namespace _4RTools.Model.Vanilla
             if (MaxRetryBackoffMs < RetryBackoffMs || MaxRetryBackoffMs > 3600000)
                 throw new ArgumentException("Maximum reconnect backoff must be at least the base backoff and at most 60 minutes.");
             if (PopupCooldownMs < 1000 || PopupCooldownMs > 60000) throw new ArgumentException("Popup cooldown must be between 1 and 60 seconds.");
+            if (MovementRestartSeconds < 60 || MovementRestartSeconds > 3600)
+                throw new ArgumentException("No-movement restart threshold must be between 60 and 3600 seconds.");
             if (Anchors == null) throw new ArgumentException("UI anchors are missing.");
             Check01(Anchors.ServiceListX); Check01(Anchors.ServiceListY);
             Check01(Anchors.UserNameX); Check01(Anchors.UserNameY);
@@ -607,6 +611,36 @@ namespace _4RTools.Model.Vanilla
         public string SettingsPath { get { return store.FilePath; } }
         public string LogPath { get { return sessionLog.CurrentPath; } }
 
+        internal bool TryResolveOnlineManagedCharacter(string accountId, out int pid, out VanillaReconnectAccount account, out string reason)
+        {
+            pid = 0; account = null; reason = null;
+            lock (gate)
+            {
+                Runtime runtime;
+                if (disposed || !running) { reason = "reconnect supervision is not running"; return false; }
+                if (string.IsNullOrWhiteSpace(accountId) || !runtimes.TryGetValue(accountId, out runtime))
+                { reason = "the selected character is not part of the active supervisor"; return false; }
+                if (!runtime.Account.Enabled) { reason = "the selected character is disabled"; return false; }
+                if (!runtime.ProcessId.HasValue) { reason = "the selected character has no verified running client"; return false; }
+                if (runtime.Stage != VanillaReconnectStage.Online)
+                { reason = "the selected character is not in the stable Online stage"; return false; }
+                if (CharacterOwnershipChanged(runtime, runtime.ProcessId.Value))
+                { reason = "the selected client identity/session changed"; return false; }
+                pid = runtime.ProcessId.Value;
+                account = runtime.Account.Clone();
+                return true;
+            }
+        }
+
+        internal string ManagedAccountIdForProcess(int pid)
+        {
+            lock (gate)
+            {
+                Runtime runtime = runtimes.Values.FirstOrDefault(item => item.ProcessId == pid && item.Account.Enabled);
+                return runtime == null ? null : runtime.Account.Id;
+            }
+        }
+
         public IReadOnlyList<VanillaReconnectStatus> Statuses()
         {
             lock (gate)
@@ -638,7 +672,6 @@ namespace _4RTools.Model.Vanilla
                 Interlocked.Increment(ref weightMaintenanceGeneration);
                 Interlocked.Increment(ref smartTeleportGeneration);
                 hardenedStartupRunning = false;
-                weightManualHolds.Clear();
                 foreach (var active in runtimes.Values.Where(r => r.ScriptRunning))
                 {
                     active.ScriptRunning = false;
@@ -679,7 +712,6 @@ namespace _4RTools.Model.Vanilla
                 {
                     Interlocked.Increment(ref weightMaintenanceGeneration);
                 Interlocked.Increment(ref smartTeleportGeneration);
-                    weightManualHolds.Clear();
                     foreach (Runtime runtime in runtimes.Values)
                     {
                         runtime.MovementRecoveryPending = false;
@@ -917,6 +949,12 @@ namespace _4RTools.Model.Vanilla
                 if (visual == VanillaVisualState.LoginShell)
                 {
                     if (!runtime.LoginLikeSince.HasValue) runtime.LoginLikeSince = now;
+                    if (runtime.HasBeenOnline && !runtime.RecoveryOwned && settings.AutoRecover
+                        && (now - runtime.LoginLikeSince.Value).TotalMilliseconds >= settings.LoginStableMs)
+                    {
+                        CloseForRecovery(runtime, p, now, "Login/service screen detected after confirmed gameplay", false);
+                        return;
+                    }
                     if (runtime.RecoveryOwned && settings.AutoRecover
                         && (now - runtime.LoginLikeSince.Value).TotalMilliseconds >= settings.LoginStableMs)
                     {
@@ -926,7 +964,7 @@ namespace _4RTools.Model.Vanilla
                         SetStage(runtime, VanillaReconnectStage.WaitingForGameplay, "Replacement login/service screen detected; waiting before login input");
                     else
                         SetStage(runtime, VanillaReconnectStage.WaitingForGameplay,
-                            "Login/service screen detected on existing client; no login or hotkey input sent. X/Y watchdog will restart it if the stall persists.");
+                            "Login/service screen detected after gameplay; confirming before sequential replacement");
                     return;
                 }
 
@@ -1676,6 +1714,7 @@ namespace _4RTools.Model.Vanilla
         private readonly CheckBox startWithApp = new CheckBox { Text = "Start supervisor with 4RTools", AutoSize = true };
         private readonly CheckBox autoRecover = new CheckBox { Text = "Auto relaunch/relogin", AutoSize = true };
         private readonly CheckBox visualWatchdog = new CheckBox { Text = "Detect login screens/popups visually", AutoSize = true };
+        private readonly NumericUpDown movementRestartSeconds = new NumericUpDown { Minimum = 60, Maximum = 3600, Value = 180, Increment = 30, Width = 70 };
         private readonly DataGridView accounts = new DataGridView
         {
             Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
@@ -1740,6 +1779,8 @@ namespace _4RTools.Model.Vanilla
 
             var switches = Flow();
             switches.Controls.Add(startWithApp); switches.Controls.Add(autoRecover); switches.Controls.Add(visualWatchdog);
+            switches.Controls.Add(new Label { Text = "Restart after no movement (sec)", AutoSize = true, Margin = new Padding(12, 8, 4, 0) });
+            switches.Controls.Add(movementRestartSeconds);
             top.Controls.Add(switches);
 
             var commands = Flow();
@@ -1830,6 +1871,7 @@ namespace _4RTools.Model.Vanilla
             help.SetToolTip(startWithApp, "If checked, opening 4RTools automatically starts recovery monitoring. If unchecked, 4RTools can be open while the supervisor remains stopped.");
             help.SetToolTip(autoRecover, "Automatically relaunch and relog clients that close or return to a login screen.");
             help.SetToolTip(visualWatchdog, "Classifies Vanilla screenshots as gameplay/login/modal states. This does not modify the game or Gepard.");
+            help.SetToolTip(movementRestartSeconds, "Restart only this character after this many seconds without fresh verified X/Y movement. Default 180 seconds gives Smart Teleport time to self-heal first. Recovery retries indefinitely with exponential backoff capped at one hour.");
             help.SetToolTip(accounts, "Your one or two configured account profiles. Select a row before using selected-account actions.");
             help.SetToolTip(status, "Runtime state only: account -> assigned PID -> recovery stage -> detected screen -> detail. These are not additional accounts.");
             help.SetToolTip(log, "Reconnect/test log. Secret contents are never written here.");
@@ -1886,6 +1928,7 @@ namespace _4RTools.Model.Vanilla
             startWithApp.Checked = settings.StartWith4RTools;
             autoRecover.Checked = settings.AutoRecover;
             visualWatchdog.Checked = settings.VisualWatchdog;
+            movementRestartSeconds.Value = Math.Max(movementRestartSeconds.Minimum, Math.Min(movementRestartSeconds.Maximum, settings.MovementRestartSeconds));
             RefreshAccounts();
         }
 
@@ -1898,6 +1941,7 @@ namespace _4RTools.Model.Vanilla
             settings.StartWith4RTools = startWithApp.Checked;
             settings.AutoRecover = autoRecover.Checked;
             settings.VisualWatchdog = visualWatchdog.Checked;
+            settings.MovementRestartSeconds = (int)movementRestartSeconds.Value;
         }
 
         private void Save()
