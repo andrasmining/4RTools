@@ -26,6 +26,8 @@ namespace _4RTools.Model.Vanilla
     {
         public string Id { get; set; } = Guid.NewGuid().ToString("N");
         public bool Enabled { get; set; } = true;
+        // Per-character opt-in for Weight alerts and UI-only Cart maintenance. Missing legacy JSON defaults to true.
+        public bool WeightEnabled { get; set; } = true;
         public string Label { get; set; } = "Client";
         public string UserName { get; set; } = "";
         public string ProtectedPassword { get; set; } = "";
