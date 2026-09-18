@@ -13,44 +13,46 @@ Windows and requests administrator privileges to match elevated game clients.
 No Visual Studio, Git, NuGet, SDK or source tree is needed to run the package.
 
 Vanilla is the primary workspace. Original 4RTools remains a compatibility tab.
+The redundant Vanilla Automation tab has been removed; Smart Teleport is configured
+directly on each character in Recovery & relog.
 Minimizing keeps the main window on the Windows taskbar; it does not hide it
 exclusively in the system tray. Closing the main window exits the application.
 
 Recovery and Autobattle
 -----------------------
-Set the Launcher path, then add account profiles with credentials, character
-slot, per-account proxy and the resume hotkey configured for Vanilla Autobattle.
+Set the Launcher path, then add character profiles with credentials, character
+slot, per-character proxy and the resume hotkey configured for Vanilla Autobattle.
 Settings auto-save; there is no separate Save button. Any number of profiles may
-be stored, but at most two accounts may be enabled and managed simultaneously.
+be stored, but at most two characters may be enabled and managed simultaneously.
 
-START completes one client's startup before advancing to the next. After the
-resume hotkey, fresh verified X/Y readings are checked for movement for 10
-seconds. Movement on either axis succeeds. Otherwise the client is focused and
-checked again before retrying. The limit is THREE TOTAL hotkey attempts: the
-initial press and two retries, each with its own 10-second observation window.
+START completes one client's startup before advancing to the next. After a real
+login/relog/replacement reaches verified gameplay, the client settles for 10 seconds,
+then the configured resume hotkey is sent. Fresh verified X/Y is checked for movement
+for 10 seconds. Without movement, ownership/focus is revalidated and the hotkey is
+retried, for THREE TOTAL hotkey attempts.
 
-After the final unsuccessful window, the account reports failure rather than
-retrying forever. Later accounts do not start after a failed cold startup. A
-failed or interrupted client is not silently treated as healthy. The explicit
-Resume hotkey diagnostic performs a new bounded verification; success clears
-the failed state. Healthy already-running clients are adopted without toggling.
+The three-hotkey sequence belongs to startup/recovery only. Healthy already-running
+clients are adopted without toggling, and steady-state stillness does not send an
+Autobattle wakeup hotkey. Smart Teleport is the first stationary self-heal. Recovery &
+relog also has a no-movement restart threshold, default 180 seconds and configurable
+from 60 to 3600 seconds. If no verified X/Y movement occurs by that threshold, only
+the affected client is restarted.
 
-STOP and changes to the active configuration cancel pending input.
+Known Now Logging Out. / Disconnected from Server. dialogs may recover sooner after
+two fresh matching captures. A stable return to the login shell after confirmed
+gameplay also triggers recovery. Unknown popups receive no blind input.
 
-Automatic minimization is user-presence aware. A restored/maximized managed client
-is left alone until it has remained visible for at least 60 seconds AND the machine
-cursor has not moved for at least 60 seconds. Cursor movement restarts the grace.
- Unknown or
-stale coordinates, failed reads, loss of input ownership, client/session changes,
-map transitions and dead characters stop the verification safely. Detailed
-reasons and attempt progress are available in status and logs. A character that
-fights without moving can fail this movement-only test; motion is not proof of
-combat or proof of what caused it.
+Failed close/launch/login/restart cycles retry indefinitely with exponential backoff.
+The delay starts from the configured base, doubles after failures and is capped at one
+hour between attempts. There is no finite three-client-restart shutdown budget.
+Healthy siblings remain untouched and recovery input stays globally serialized.
 
-Normal recovery minimizes a successfully verified client and leaves other
-healthy clients untouched. Proxy/login/startup/recovery input is serialized.
-Vanilla's own Autobattle remains responsible for movement and combat.
+STOP and active configuration/client-ownership changes cancel stale input.
 
+Automatic minimization is user-presence aware for ordinary/adopted clients: they are
+left visible until at least 60 seconds visible and 60 seconds without cursor movement.
+A client freshly launched/relogged by 4RTools is minimized immediately after verified
+Autobattle movement.
 
 Smart Teleport
 --------------
@@ -78,8 +80,9 @@ For stack transfers Enter is pressed only after a quantity dialog is positively
 detected. A quantity-one item has no dialog and receives no Enter. If the UI cannot
 be identified safely, the Cart rejects a transfer, or progress cannot be verified,
 input stops and only that character is held for manual Cart emptying with Autobattle
-left OFF. Memory access remains read-only; inventory state is never read/written from
-game memory.
+left OFF. That hold survives unrelated settings and supervisor STOP/START changes and
+is removed only by the explicit hold-clear action. Memory access remains read-only;
+inventory state is never read/written from game memory.
 
 Persistent configuration and updates
 ------------------------------------
@@ -108,29 +111,33 @@ Vanilla observation remains read-only. No game-memory writes, injections,
 packet manipulation, game-file changes or Gepard bypasses are performed.
 Unknown observations are never reinterpreted as valid gameplay state.
 
-Autofarming health watchdog (0.6.41)
-----------------------------------
-With automatic recovery enabled, 30 seconds without fresh verified X/Y movement
-starts hotkey recovery. Unchanged, unreadable, missing, unverified and stale
-coordinates never count as movement and are never treated as (0,0).
+Autofarming health watchdog
+------------------------------
+Fresh verified X/Y is the primary steady-state health signal. Smart Teleport defaults
+to 60 seconds per enabled character and gets the first chance to recover ordinary
+stationary gameplay. The longer restart threshold defaults to 180 seconds. Unchanged,
+missing, unreadable, unverified and stale coordinates never count as movement.
 
-After every login/relog, stable gameplay is followed by a 10-second settle, then
-the configured Autobattle/slave hotkey is sent. X/Y is checked for 10 seconds.
-Without movement the hotkey is tried again, for three total attempts. The same
-three-attempt hotkey sequence is used when the 30-second online watchdog fires.
+Smart Teleport attempts do not reset the restart deadline unless verified movement
+actually occurs. At the restart threshold only the affected client is replaced.
+Replacement startup again uses the 10-second settle + up to three verified resume
+hotkey attempts. Failed cycles continue through exponential backoff capped at one hour.
 
-Only after all three hotkeys fail is the affected client restarted. A replacement
-repeats the full login/settle/hotkey/movement sequence. At most three client
-restarts are allowed for one movement failure incident. If the third replacement
-still cannot establish verified movement, the supervisor stops and records a
-terminal failure. Manual Start begins a new bounded budget. Any verified movement
-resets the restart count.
+Both known disconnect/logout messages can trigger replacement sooner after fresh
+two-sample confirmation. If both clients fail, recovery stays sequential through close,
+exit confirmation, relaunch, login, movement verification and minimization. A healthy
+sibling remains untouched. STOP/configuration/client replacement cancels delayed work.
 
-Both known disconnect/logout messages can trigger replacement sooner. If both
-clients fail, recovery stays sequential through close, exit confirmation, relaunch,
-login, movement verification and minimization. A healthy sibling remains untouched.
-STOP/configuration/client replacement cancels delayed work.
+Manual diagnostics and debug history
+------------------------------------
+The Recovery TESTS menu contains Smart Teleport now (selected) and Weight/Cart clean
+now (selected). These run the production identity/ownership/visual/input paths and
+bypass only the automatic idle/weight trigger.
 
+Every automatic/manual Smart Teleport and Cart-maintenance action is timestamped in the
+global debug log. COPY DEBUG LOG starts with a last-24-hours action summary showing
+teleport attempts/completions and Cart attempts/completions/items moved, followed by the
+detailed event trail.
 
 Character roster
 ----------------
