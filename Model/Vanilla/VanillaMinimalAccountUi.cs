@@ -106,9 +106,12 @@ namespace _4RTools.Model.Vanilla
         private readonly TextBox password = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
         private readonly ComboBox proxy = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
         private readonly TextBox hotkey = new TextBox { Width = 160, ReadOnly = true };
+        private readonly CheckBox smartTeleport = new CheckBox { Text = "Smart Teleport", AutoSize = true };
+        private readonly NumericUpDown teleportIdle = new NumericUpDown { Minimum = 5, Maximum = 3600, Value = 60, Width = 90 };
+        private readonly TextBox teleportHotkey = new TextBox { Width = 160, ReadOnly = true };
         private readonly ToolTip help = new ToolTip { ShowAlways = true, AutoPopDelay = 30000 };
-        private int key;
-        private bool ctrl, alt, shift, passwordEdited, passwordUnavailable;
+        private int key, teleportKey;
+        private bool ctrl, alt, shift, teleportCtrl, teleportAlt, teleportShift, passwordEdited, passwordUnavailable;
         public VanillaReconnectAccount Account { get; private set; }
         public VanillaProxyRoute ProxyRoute { get; private set; }
 
@@ -122,7 +125,7 @@ namespace _4RTools.Model.Vanilla
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = MinimizeBox = false;
-            ClientSize = new Size(490, 375);
+            ClientSize = new Size(520, 455);
             KeyPreview = true;
             Build();
             enabled.Checked = account.Enabled;
@@ -137,11 +140,15 @@ namespace _4RTools.Model.Vanilla
             proxy.DataSource = Enum.GetValues(typeof(VanillaProxyRoute));
             if (account.ProxyNeedsConfiguration) proxy.SelectedIndex = -1; else proxy.SelectedItem = proxyRoute;
             key = account.ResumeKey; ctrl = account.ResumeCtrl; alt = account.ResumeAlt; shift = account.ResumeShift;
-            UpdateHotkey();
+            smartTeleport.Checked = account.SmartTeleportEnabled;
+            teleportIdle.Value = Math.Max(teleportIdle.Minimum, Math.Min(teleportIdle.Maximum, account.SmartTeleportIdleSeconds));
+            teleportKey = account.SmartTeleportKey; teleportCtrl = account.SmartTeleportCtrl; teleportAlt = account.SmartTeleportAlt; teleportShift = account.SmartTeleportShift;
+            UpdateHotkey(); UpdateTeleportHotkey();
             try { password.Text = supervisor.GetPassword(account); }
             catch { passwordUnavailable = true; }
             password.TextChanged += (s, e) => passwordEdited = true;
             hotkey.KeyDown += CaptureHotkey;
+            teleportHotkey.KeyDown += CaptureTeleportHotkey;
         }
 
         private void FillSelectedIdentity()
@@ -156,10 +163,10 @@ namespace _4RTools.Model.Vanilla
 
         private void Build()
         {
-            var table = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 2, RowCount = 9 };
+            var table = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 2, RowCount = 12 };
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 125));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 8; i++) table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            for (int i = 0; i < 11; i++) table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             var toggles = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
             toggles.Controls.Add(enabled); toggles.Controls.Add(weightEnabled);
@@ -171,11 +178,20 @@ namespace _4RTools.Model.Vanilla
             AddRow(table, 5, "Password", password);
             AddRow(table, 6, "Proxy", proxy);
             AddRow(table, 7, "Resume hotkey", hotkey);
+            var teleportOptions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+            teleportOptions.Controls.Add(smartTeleport);
+            teleportOptions.Controls.Add(new Label { Text = "after", AutoSize = true, Margin = new Padding(10, 8, 3, 0) });
+            teleportOptions.Controls.Add(teleportIdle);
+            teleportOptions.Controls.Add(new Label { Text = "sec still", AutoSize = true, Margin = new Padding(3, 8, 0, 0) });
+            AddRow(table, 8, "Smart Teleport", teleportOptions);
+            AddRow(table, 9, "Teleport hotkey", teleportHotkey);
+            table.Controls.Add(new Label { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(340, 0),
+                Text = "Uses verified X/Y only. It is bound to this username + character automatically; no process selection." }, 1, 10);
             var buttons = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.Right };
             var save = new Button { Text = "Save", AutoSize = true };
             var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
             save.Click += Save; buttons.Controls.Add(save); buttons.Controls.Add(cancel);
-            table.Controls.Add(buttons, 1, 8); Controls.Add(table); AcceptButton = save; CancelButton = cancel;
+            table.Controls.Add(buttons, 1, 11); Controls.Add(table); AcceptButton = save; CancelButton = cancel;
             help.SetToolTip(enabled, "Enable at most two character profiles. Multiple rows may use the same login account.");
             help.SetToolTip(weightEnabled, "Allow Weight alerts and automatic Cart maintenance for this character. Shared Weight-tab thresholds/hotkeys apply only when this is enabled.");
             help.SetToolTip(label, "Your description; it is not used to identify the running character.");
@@ -184,6 +200,9 @@ namespace _4RTools.Model.Vanilla
             help.SetToolTip(slot, "1-based slot from 1 to 15; blank means unknown, not slot 1. Auto-filled only when verified memory provides it.");
             help.SetToolTip(proxy, "Choose this character's proxy. Discovery never guesses this setting.");
             help.SetToolTip(hotkey, "Press the key combination used to resume Vanilla Autobattle after login.");
+            help.SetToolTip(smartTeleport, "When enabled, this character teleports after verified X/Y has not changed for the configured number of seconds.");
+            help.SetToolTip(teleportIdle, "Default 60 seconds. Any verified X/Y movement resets the timer.");
+            help.SetToolTip(teleportHotkey, "Click here and press the exact teleport skill/hotkey combination you use in Vanilla. It is stored on this character row.");
             help.SetToolTip(password, "Stored with Windows DPAPI for this Windows user. Discovery never reads or replaces passwords.");
         }
 
@@ -200,6 +219,18 @@ namespace _4RTools.Model.Vanilla
         }
         private void UpdateHotkey()
         { hotkey.Text = (ctrl ? "Ctrl+" : "") + (alt ? "Alt+" : "") + (shift ? "Shift+" : "") + ((Keys)key); }
+
+        private void CaptureTeleportHotkey(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.ShiftKey || e.KeyCode == Keys.Menu) return;
+            teleportKey = (int)e.KeyCode; teleportCtrl = e.Control; teleportAlt = e.Alt; teleportShift = e.Shift;
+            UpdateTeleportHotkey(); e.SuppressKeyPress = e.Handled = true;
+        }
+        private void UpdateTeleportHotkey()
+        {
+            teleportHotkey.Text = teleportKey < 8 || teleportKey > 254 ? "Click and press hotkey"
+                : (teleportCtrl ? "Ctrl+" : "") + (teleportAlt ? "Alt+" : "") + (teleportShift ? "Shift+" : "") + ((Keys)teleportKey);
+        }
 
         private void Save(object sender, EventArgs e)
         {
@@ -220,7 +251,13 @@ namespace _4RTools.Model.Vanilla
                     && !string.IsNullOrWhiteSpace(Account.ProtectedPassword))
                     throw new ArgumentException("Enter the password for the changed username; the old password will not be reused.");
                 candidate.ResumeKey = key; candidate.ResumeCtrl = ctrl; candidate.ResumeAlt = alt; candidate.ResumeShift = shift;
+                candidate.SmartTeleportEnabled = smartTeleport.Checked;
+                candidate.SmartTeleportIdleSeconds = (int)teleportIdle.Value;
+                candidate.SmartTeleportKey = teleportKey; candidate.SmartTeleportCtrl = teleportCtrl;
+                candidate.SmartTeleportAlt = teleportAlt; candidate.SmartTeleportShift = teleportShift;
                 if (key < 8 || key > 254) throw new ArgumentException("Choose a valid resume hotkey.");
+                if (candidate.SmartTeleportEnabled && (candidate.SmartTeleportKey < 8 || candidate.SmartTeleportKey > 254))
+                    throw new ArgumentException("Click Teleport hotkey and press the exact key combination before enabling Smart Teleport.");
                 VanillaCharacterRoster.Validate(new[] { candidate });
                 if (candidate.Enabled)
                 {
