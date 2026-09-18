@@ -332,6 +332,7 @@ namespace _4RTools.Model.Vanilla
             startWithApp.CheckedChanged += (s, e) => QueueAutoSave("Startup saved");
             autoRecover.CheckedChanged += (s, e) => QueueAutoSave("Auto relog saved");
             visualWatchdog.CheckedChanged += (s, e) => QueueAutoSave("Visual watchdog saved");
+            movementRestartSeconds.ValueChanged += (s, e) => QueueAutoSave("No-movement restart threshold saved");
             accounts.CellDoubleClick += (s, e) =>
             {
                 if (e.RowIndex >= 0) EditAccountMinimal();
@@ -368,7 +369,8 @@ namespace _4RTools.Model.Vanilla
                 VanillaDebugLog.Write("SETTINGS", "Auto-saved recovery UI. profiles=" + (accountCatalog == null ? 0 : accountCatalog.Count)
                     + ", enabledAccounts=" + (accountCatalog == null ? 0 : accountCatalog.Count(a => a.Enabled))
                     + ", launcher='" + settings.LaunchExecutable + "', autoRecover=" + settings.AutoRecover
-                    + ", visualWatchdog=" + settings.VisualWatchdog + ".");
+                    + ", visualWatchdog=" + settings.VisualWatchdog
+                    + ", movementRestartSeconds=" + settings.MovementRestartSeconds + ".");
                 RefreshAccountSupplementalColumns();
                 ShowSaveToast(pendingSaveMessage, false);
             }
