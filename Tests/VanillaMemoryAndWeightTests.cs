@@ -26,6 +26,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Smart Teleport settings are per character with 60s default", SmartTeleportSettings);
             failed += Test("Smart Teleport idle trigger uses only fresh verified X/Y", SmartTeleportTracker);
             failed += Test("Smart Teleport Enter requires a positive warp-selection popup", SmartTeleportPopupGuard);
+            failed += Test("Debug bundle summarizes recent teleport and cart actions", DebugActionSummary);
             failed += VanillaUtf8MemoryDiscoveryTests.Run();
             return failed;
         }
@@ -288,6 +289,25 @@ namespace Vanilla.Diagnostics.Tests
                 if (VanillaTeleportVision.HasWarpDialog(null, before))
                     throw new Exception("Ordinary gameplay background must not be mistaken for the warp popup.");
             }
+        }
+
+        private static void DebugActionSummary()
+        {
+            DateTimeOffset now = new DateTimeOffset(2026, 9, 18, 8, 0, 0, TimeSpan.Zero);
+            string t = now.ToString("O");
+            string old = now.AddDays(-2).ToString("O");
+            string summary = VanillaDebugLog.BuildRecentActionSummary(new[]
+            {
+                old + " [TELEPORT] event=teleport-start mode=automatic-idle.",
+                t + " [TELEPORT] event=teleport-start mode=automatic-idle.",
+                t + " [TELEPORT] event=teleport-complete mode=automatic-idle.",
+                t + " [WEIGHT] event=cart-start trigger=automatic-threshold.",
+                t + " [WEIGHT] event=cart-complete trigger=automatic-threshold items=7.",
+                t + " [WEIGHT] event=cart-manual-hold trigger=manual-test."
+            }, now.AddHours(-24));
+            Contains(summary, "Smart Teleport: attempts=1, completed=1", "teleport summary");
+            Contains(summary, "Weight/Cart: attempts=1, completed=1, itemsMoved=7", "cart summary");
+            Contains(summary, "manualHolds=1", "cart hold summary");
         }
 
         private static void WeightMailValidation()
