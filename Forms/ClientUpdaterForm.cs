@@ -38,7 +38,7 @@ namespace _4RTools.Forms
                 clients.AddRange(JsonConvert.DeserializeObject<List<ClientDTO>>(remoteServersRaw));
 
             }
-            catch(Exception ex)
+            catch(Exception)
             {
                 //If catch some exception while Fetch, load resource file.
                 MessageBox.Show("Cannot load supported_servers file. Loading resource instead....");
