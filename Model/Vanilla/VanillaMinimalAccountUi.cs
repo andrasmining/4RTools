@@ -98,6 +98,7 @@ namespace _4RTools.Model.Vanilla
     {
         private readonly VanillaReconnectSupervisor supervisor;
         private readonly CheckBox enabled = new CheckBox { Text = "Enabled", AutoSize = true };
+        private readonly CheckBox weightEnabled = new CheckBox { Text = "Weight / Cart", AutoSize = true };
         private readonly TextBox label = new TextBox { Dock = DockStyle.Fill, MaxLength = 80 };
         private readonly TextBox user = new TextBox { Dock = DockStyle.Fill, MaxLength = 128 };
         private readonly TextBox slot = new TextBox { Width = 80, MaxLength = 2 };
@@ -125,6 +126,7 @@ namespace _4RTools.Model.Vanilla
             KeyPreview = true;
             Build();
             enabled.Checked = account.Enabled;
+            weightEnabled.Checked = account.WeightEnabled;
             label.Text = account.Label;
             user.Text = account.UserName;
             slot.Text = account.CharacterSlot?.ToString() ?? string.Empty;
@@ -159,7 +161,9 @@ namespace _4RTools.Model.Vanilla
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             for (int i = 0; i < 8; i++) table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            AddRow(table, 0, string.Empty, enabled);
+            var toggles = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+            toggles.Controls.Add(enabled); toggles.Controls.Add(weightEnabled);
+            AddRow(table, 0, string.Empty, toggles);
             AddRow(table, 1, "Description", label);
             AddRow(table, 2, "Username", user);
             AddRow(table, 3, "Slot", slot);
@@ -173,6 +177,7 @@ namespace _4RTools.Model.Vanilla
             save.Click += Save; buttons.Controls.Add(save); buttons.Controls.Add(cancel);
             table.Controls.Add(buttons, 1, 8); Controls.Add(table); AcceptButton = save; CancelButton = cancel;
             help.SetToolTip(enabled, "Enable at most two character profiles. Multiple rows may use the same login account.");
+            help.SetToolTip(weightEnabled, "Allow Weight alerts and automatic Cart maintenance for this character. Shared Weight-tab thresholds/hotkeys apply only when this is enabled.");
             help.SetToolTip(label, "Your description; it is not used to identify the running character.");
             help.SetToolTip(character, "Saved expected character. The list contains freshly verified running character names.");
             help.SetToolTip(user, "Filled automatically only from verified memory. Without a verified username mapping, the saved username remains editable.");
@@ -204,7 +209,7 @@ namespace _4RTools.Model.Vanilla
                 if (!string.IsNullOrWhiteSpace(slot.Text) && (!int.TryParse(slot.Text, out parsed) || parsed < 1 || parsed > 15))
                     throw new ArgumentException("Slot must be 1 to 15, or blank if unknown.");
                 var candidate = Account.Clone();
-                candidate.Enabled = enabled.Checked; candidate.Label = label.Text.Trim();
+                candidate.Enabled = enabled.Checked; candidate.WeightEnabled = weightEnabled.Checked; candidate.Label = label.Text.Trim();
                 candidate.UserName = user.Text.Trim(); candidate.CharacterName = character.Text.Trim();
                 candidate.CharacterSlot = string.IsNullOrWhiteSpace(slot.Text) ? (int?)null : int.Parse(slot.Text);
                 candidate.ProxyNeedsConfiguration = !(proxy.SelectedItem is VanillaProxyRoute);
