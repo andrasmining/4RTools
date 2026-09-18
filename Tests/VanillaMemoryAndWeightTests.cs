@@ -23,6 +23,9 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Weight policy is independently switchable per character", WeightPolicyPerCharacter);
             failed += Test("Inventory vision finds toggled slot panel and occupied slot", InventoryVision);
             failed += Test("Quantity Enter is armed only by positive quantity dialog structure", QuantityPromptGuard);
+            failed += Test("Smart Teleport settings are per character with 60s default", SmartTeleportSettings);
+            failed += Test("Smart Teleport idle trigger uses only fresh verified X/Y", SmartTeleportTracker);
+            failed += Test("Smart Teleport Enter requires a positive warp-selection popup", SmartTeleportPopupGuard);
             failed += VanillaUtf8MemoryDiscoveryTests.Run();
             return failed;
         }
@@ -199,6 +202,88 @@ namespace Vanilla.Diagnostics.Tests
                     if (VanillaInventoryVision.HasQuantityPrompt(ordinaryUi))
                         throw new Exception("Ordinary white/blue gameplay UI must never authorize Enter.");
                 }
+            }
+        }
+
+        private static void SmartTeleportSettings()
+        {
+            var first = new VanillaReconnectAccount { Label = "A", UserName = "user", CharacterName = "char" };
+            if (first.SmartTeleportEnabled || first.SmartTeleportIdleSeconds != 60 || first.SmartTeleportKey != 0)
+                throw new Exception("Smart Teleport defaults changed unexpectedly.");
+            first.SmartTeleportEnabled = true;
+            Throws(() => VanillaCharacterRoster.Validate(new[] { first }));
+            first.SmartTeleportKey = (int)System.Windows.Forms.Keys.F5;
+            first.SmartTeleportCtrl = true;
+            VanillaCharacterRoster.Validate(new[] { first });
+            var second = first.Clone();
+            second.Id = Guid.NewGuid().ToString("N");
+            second.CharacterName = "char2";
+            second.SmartTeleportEnabled = false;
+            second.SmartTeleportIdleSeconds = 135;
+            if (!first.SmartTeleportEnabled || second.SmartTeleportEnabled || second.SmartTeleportIdleSeconds != 135
+                || first.SmartTeleportHotkeyText != "Ctrl+F5")
+                throw new Exception("Smart Teleport policy is not independent per character.");
+            VanillaReconnectAccount roundTrip = second.Clone();
+            if (roundTrip.SmartTeleportEnabled || roundTrip.SmartTeleportIdleSeconds != 135
+                || roundTrip.SmartTeleportKey != (int)System.Windows.Forms.Keys.F5)
+                throw new Exception("Smart Teleport settings were not preserved by character serialization.");
+        }
+
+        private static void SmartTeleportTracker()
+        {
+            var tracker = new VanillaSmartTeleportTracker();
+            DateTimeOffset utc = new DateTimeOffset(2026, 9, 18, 12, 0, 0, TimeSpan.Zero);
+            Guid session = Guid.NewGuid();
+            Func<int, int, int, bool, VanillaPositionSample> sample = (seconds, x, y, verified) =>
+                new VanillaPositionSample(42, session, utc.AddSeconds(seconds), x, y, "map", verified, null);
+            if (tracker.Observe(sample(0, 10, 20, true), TimeSpan.Zero, utc, 60))
+                throw new Exception("First X/Y sample cannot be stationary timeout.");
+            if (tracker.Observe(sample(30, 10, 20, true), TimeSpan.FromSeconds(30), utc.AddSeconds(30), 60))
+                throw new Exception("Stationary timeout fired early.");
+            if (!tracker.Observe(sample(60, 10, 20, true), TimeSpan.FromSeconds(60), utc.AddSeconds(60), 60))
+                throw new Exception("Unchanged verified X/Y did not fire at 60 seconds.");
+            if (tracker.Observe(sample(61, 11, 20, true), TimeSpan.FromSeconds(61), utc.AddSeconds(61), 60))
+                throw new Exception("Movement must reset the Smart Teleport timer.");
+            if (tracker.Observe(sample(121, 11, 20, false), TimeSpan.FromSeconds(121), utc.AddSeconds(121), 60))
+                throw new Exception("Unverified coordinates must never authorize Smart Teleport.");
+            if (tracker.Observe(sample(122, 11, 20, true), TimeSpan.FromSeconds(122), utc.AddSeconds(122), 60))
+                throw new Exception("Fresh coordinates after an unknown gap require a new baseline.");
+            if (!tracker.Observe(sample(182, 11, 20, true), TimeSpan.FromSeconds(182), utc.AddSeconds(182), 60))
+                throw new Exception("New verified stationary baseline did not fire after 60 seconds.");
+        }
+
+        private static void SmartTeleportPopupGuard()
+        {
+            using (var before = new Bitmap(800, 600))
+            using (var after = new Bitmap(800, 600))
+            using (var quantity = new Bitmap(800, 600))
+            {
+                using (Graphics g = Graphics.FromImage(before)) g.Clear(Color.FromArgb(95, 80, 55));
+                using (Graphics g = Graphics.FromImage(after))
+                {
+                    g.DrawImageUnscaled(before, 0, 0);
+                    Rectangle dialog = new Rectangle(270, 300, 300, 125);
+                    using (var light = new SolidBrush(Color.FromArgb(245, 245, 245))) g.FillRectangle(light, dialog);
+                    using (var selected = new SolidBrush(Color.FromArgb(185, 205, 245))) g.FillRectangle(selected, 282, 329, 275, 19);
+                    using (var button = new SolidBrush(Color.FromArgb(225, 225, 225)))
+                    {
+                        g.FillRectangle(button, 465, 390, 42, 22);
+                        g.FillRectangle(button, 515, 390, 42, 22);
+                    }
+                }
+                if (!VanillaTeleportVision.HasWarpDialog(before, after) || !VanillaTeleportVision.HasWarpDialog(null, after))
+                    throw new Exception("Positive warp-selection popup structure was not recognized.");
+
+                using (Graphics g = Graphics.FromImage(quantity))
+                {
+                    g.Clear(Color.FromArgb(95, 80, 55));
+                    using (var light = new SolidBrush(Color.FromArgb(245, 245, 245))) g.FillRectangle(light, 290, 300, 220, 58);
+                    using (var selected = new SolidBrush(Color.FromArgb(185, 205, 245))) g.FillRectangle(selected, 305, 328, 70, 17);
+                }
+                if (VanillaTeleportVision.HasWarpDialog(before, quantity))
+                    throw new Exception("Short quantity dialog must never authorize Smart Teleport Enter.");
+                if (VanillaTeleportVision.HasWarpDialog(null, before))
+                    throw new Exception("Ordinary gameplay background must not be mistaken for the warp popup.");
             }
         }
 
