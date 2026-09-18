@@ -567,3 +567,9 @@ without evidence; testing update discovery is not installing on the user's VPS.
 ## Weight / Cart maintenance
 
 Weight-triggered Cart maintenance must remain read-only-memory + ordinary UI input. Reuse the shared fleet reader for verified weight and movement; do not inspect/write inventory memory. Inventory/Cart/category interaction must be dynamically client-relative, never hard-coded desktop coordinates. `Enter` is authorized only after a freshly and positively detected quantity dialog; quantity-one transfers have no dialog and receive no Enter. Any ambiguous UI, failed transfer/progress, or apparently full Cart fails closed with Autobattle OFF and a manual hold for only that character until explicitly cleared. Successful maintenance resumes through the shared verified ResumeHotkey/X-Y path and then minimizes.
+
+## Smart Teleport character policy
+
+Integrated Smart Teleport is configured per saved username + character row, never by manually selecting a process. Store an independent enable flag, live-captured hotkey and stationary timeout (default 60 seconds) on the character profile and automatically bind it to the fresh verified running identity/PID. Trigger only from fresh verified read-only X/Y remaining unchanged; do not require target/combat/casting evidence. Unknown/stale/unverified coordinates, movement, map/session replacement or ownership changes reset/defer the timer.
+
+Teleport input may use ordinary targeted Windows background messages to the verified owned Vanilla window; do not foreground/restore it as a fallback. After the configured hotkey, send Enter only after positively recognizing the expected Select an Area to Warp popup with the first option selected, and verify the modal clears. No popup means no Enter. Keep this work serialized with recovery and Weight/Cart input and cancellable on STOP/settings/client/character replacement.
