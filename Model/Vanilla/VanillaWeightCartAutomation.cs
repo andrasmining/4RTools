@@ -32,6 +32,15 @@ namespace _4RTools.Model.Vanilla
         private readonly HashSet<string> weightManualHolds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private int weightMaintenanceGeneration;
 
+        internal bool IsWeightEnabledForProcess(int pid)
+        {
+            lock (gate)
+            {
+                Runtime runtime = runtimes.Values.FirstOrDefault(item => item.ProcessId == pid && item.Account.Enabled);
+                return runtime != null && runtime.Account.WeightEnabled;
+            }
+        }
+
         internal bool TryBeginWeightMaintenance(int pid, out VanillaWeightMaintenanceToken token, out string reason)
         {
             token = null; reason = null;
@@ -40,6 +49,7 @@ namespace _4RTools.Model.Vanilla
                 if (disposed || !running) { reason = "reconnect supervision is not running"; return false; }
                 Runtime runtime = runtimes.Values.FirstOrDefault(item => item.ProcessId == pid && item.Account.Enabled);
                 if (runtime == null) { reason = "the client is not assigned to an enabled character row"; return false; }
+                if (!runtime.Account.WeightEnabled) { reason = "Weight/Cart is disabled for this character"; return false; }
                 if (weightManualHolds.Contains(runtime.Account.Id)) { reason = "the character is waiting for manual cart emptying"; return false; }
                 if (runtime.ScriptRunning || runtime.RecoveryOwned || runtime.ClosingForRecovery
                     || runtimes.Values.Any(item => !ReferenceEquals(item, runtime) && (item.ScriptRunning || item.RecoveryOwned || item.ClosingForRecovery)))
