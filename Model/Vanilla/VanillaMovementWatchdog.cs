@@ -22,12 +22,10 @@ namespace _4RTools.Model.Vanilla
 
     internal sealed class VanillaMovementWatchdog
     {
-        // Observe() retains the 30-second diagnostic signal, but automatic recovery
-        // is deliberately much slower: exact terminal dialogs may restart after five
-        // minutes without verified movement, otherwise the client restarts at ten.
+        // Observe() exposes a 30-second diagnostic signal, but the supervisor owns
+        // the configurable restart threshold. Smart Teleport gets the first chance
+        // to self-heal ordinary stationary gameplay before restart escalation.
         internal const int TimeoutSeconds = 30;
-        internal const int TerminalCheckSeconds = 300;
-        internal const int RestartSeconds = 600;
         private bool armed, baseline;
         private int pid, x, y;
         private Guid session;
@@ -168,9 +166,11 @@ namespace _4RTools.Model.Vanilla
             catch (Exception ex) { Log(runtime.Account.Label + ": coordinate source unavailable: " + ex.Message); }
             string reason = runtime.MovementWatchdog.Observe(runtime.ProcessId.Value, sample, restartEnvironment.MonotonicNow, now);
             double stalled = runtime.MovementWatchdog.StalledSeconds(restartEnvironment.MonotonicNow);
-            if (stalled < VanillaMovementWatchdog.RestartSeconds) return false;
+            int restartAfter = Math.Max(60, settings.MovementRestartSeconds);
+            if (stalled < restartAfter) return false;
             string detail = (reason ?? ("No verified X/Y movement for " + (int)stalled + "s"))
-                + ". Ten-minute steady-state limit reached; restarting the affected client. No autobattle hotkey is sent before restart.";
+                + ". Configured no-movement restart threshold " + restartAfter
+                + "s reached after Smart Teleport had time to self-heal; restarting only this client. No steady-state Autobattle hotkey is sent.";
             Log(runtime.Account.Label + ": " + detail);
             QueueClientRestart(runtime, now, detail, false, startTimeUtc);
             return true;
