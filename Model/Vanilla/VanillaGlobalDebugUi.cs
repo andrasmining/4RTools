@@ -12,6 +12,7 @@ namespace _4RTools.Forms
         private Button globalCopyDebug;
         private System.Windows.Forms.Timer globalDebugSnapshotTimer;
         private string lastDebugSnapshot;
+        private string lastRecoveryDebugSnapshot;
 
         private void InstallGlobalDebugUi()
         {
@@ -101,6 +102,8 @@ namespace _4RTools.Forms
                 string snapshot = string.Join(" | ", integratedReconnectSupervisor.Statuses().Select(s =>
                     s.Label + ":pid=" + (s.ProcessId.HasValue ? s.ProcessId.Value.ToString() : "none")
                     + ",stage=" + s.Stage + ",screen=" + s.VisualState + ",detail=" + (s.Detail ?? "")));
+                if (string.Equals(snapshot, lastRecoveryDebugSnapshot, StringComparison.Ordinal)) return;
+                lastRecoveryDebugSnapshot = snapshot;
                 _4RTools.Model.Vanilla.VanillaDebugLog.Write("RECOVERY-STATE", snapshot);
             }
             catch (Exception ex) { _4RTools.Model.Vanilla.VanillaDebugLog.Write("RECOVERY-STATE", "snapshot failed: " + ex.Message); }
