@@ -233,6 +233,11 @@ namespace _4RTools.Model.Vanilla
                 {
                     if (!observation.Verified || !observation.Percent.HasValue) continue;
                     anyVerified = true;
+                    if (!supervisor.IsWeightEnabledForProcess(observation.ProcessId))
+                    {
+                        VanillaDebugLog.Write("WEIGHT", observation.CharacterName + " (PID " + observation.ProcessId + "): per-character Weight policy is OFF; no alert or Cart action will run.");
+                        continue;
+                    }
                     ProcessAutoCart(current, observation);
                     if (current.Enabled) ProcessObservation(current, observation);
                 }
