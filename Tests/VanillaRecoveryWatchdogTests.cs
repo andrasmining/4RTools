@@ -58,6 +58,8 @@ namespace Vanilla.Diagnostics.Tests
             Test("Steady-state stillness waits for the restart threshold and sends no autobattle hotkey", WatchdogHotkeyFirst);
             Test("Recovery backoff continues beyond three failures and caps at one hour", RestartBudget);
             Test("Verified restart recovery resets exponential backoff", RestartBudgetReset);
+            Test("Manual Cart hold survives unrelated recovery settings apply", WeightHoldSurvivesApply);
+            Test("Clearing Cart holds leaves unrelated error states untouched", WeightHoldClearIsolation);
             Test("One terminal observation does not close a client", OneTerminal);
             Test("Unknown modal is never dismissed or closed as a disconnect", UnknownModal);
             Test("Changing terminal messages need new confirmation", ChangedTerminal);
@@ -459,6 +461,44 @@ namespace Vanilla.Diagnostics.Tests
                 Call(h.Supervisor, "CompleteAutobattleRecoverySuccessLocked", h.A);
                 Assert((int)Get(h.A, "RecoveryFailures") == 0 && Get(h.A, "NextRecoveryAt") == null
                     && !(bool)Get(h.A, "RecoveryOwned"));
+            }
+        }
+
+        private static void WeightHoldSurvivesApply()
+        {
+            using (var h = new H())
+            {
+                var token = new VanillaWeightMaintenanceToken
+                {
+                    AccountId = ((VanillaReconnectAccount)Get(h.A, "Account")).Id,
+                    ProcessId = 101,
+                    Generation = 1,
+                    Account = ((VanillaReconnectAccount)Get(h.A, "Account")).Clone()
+                };
+                h.Supervisor.MarkWeightMaintenanceCancelled(token, true, "synthetic cancelled cart test");
+                Assert(h.Supervisor.IsWeightManualHold(token.AccountId), "Manual Cart hold was not established.");
+                h.Supervisor.Apply(h.Supervisor.Settings, false);
+                Assert(h.Supervisor.IsWeightManualHold(token.AccountId), "Unrelated settings Apply erased the manual Cart hold.");
+            }
+        }
+
+        private static void WeightHoldClearIsolation()
+        {
+            using (var h = new H())
+            {
+                var accountA = (VanillaReconnectAccount)Get(h.A, "Account");
+                var token = new VanillaWeightMaintenanceToken
+                {
+                    AccountId = accountA.Id, ProcessId = 101, Generation = 1, Account = accountA.Clone()
+                };
+                h.Supervisor.MarkWeightMaintenanceCancelled(token, true, "synthetic cancelled cart test");
+                Set(h.B, "Stage", VanillaReconnectStage.Error);
+                Set(h.B, "Detail", "Unrelated recovery error");
+                h.Supervisor.ClearWeightManualHolds();
+                Assert(!h.Supervisor.IsWeightManualHold(accountA.Id), "Explicit clear did not remove the Cart hold.");
+                Assert((VanillaReconnectStage)Get(h.B, "Stage") == VanillaReconnectStage.Error
+                    && (string)Get(h.B, "Detail") == "Unrelated recovery error",
+                    "Clearing a Cart hold erased an unrelated client error.");
             }
         }
 
