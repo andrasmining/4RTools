@@ -212,9 +212,9 @@ namespace _4RTools.Model.Vanilla
                     ThrowIfCancelled(cancelled);
 
                     inventory = EnsureToggledPanel(input, settings.InventoryCtrl, settings.InventoryAlt, settings.InventoryShift,
-                        (Keys)settings.InventoryKey, "Inventory", cancelled, report);
+                        (Keys)settings.InventoryKey, "Inventory", cancelled, activity);
                     cart = EnsureToggledPanel(input, settings.CartCtrl, settings.CartAlt, settings.CartShift,
-                        (Keys)settings.CartKey, "Cart", cancelled, report);
+                        (Keys)settings.CartKey, "Cart", cancelled, activity);
                     if (inventory.IntersectsWith(cart) && IntersectionRatio(inventory, cart) > 0.60)
                         throw new InvalidOperationException("Inventory and Cart overlap too heavily for safe drag-and-drop. Move them apart once and retry.");
 
@@ -307,7 +307,7 @@ namespace _4RTools.Model.Vanilla
                     if (!supervisor.MinimizeWeightMaintenanceClient(token))
                         throw new InvalidOperationException("Autobattle movement was verified but the client could not be minimized.");
                     completed = true;
-                    string message = token.Account.Label + ": automatic cart maintenance completed; moved " + moved
+                    string message = token.Account.Label + ": cart maintenance completed; moved " + moved
                         + " item(s), autobattle movement verified, client minimized.";
                     VanillaDebugLog.Write("WEIGHT", "event=cart-complete trigger=" + trigger + " account='" + token.Account.Label
                         + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved + ".");
