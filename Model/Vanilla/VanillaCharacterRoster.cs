@@ -172,7 +172,13 @@ namespace _4RTools.Model.Vanilla
                 && !string.IsNullOrWhiteSpace(row.CharacterName) && row.Label == row.CharacterName
                 && string.IsNullOrWhiteSpace(row.ProtectedPassword) && row.ProxyNeedsConfiguration && !row.CharacterSlot.HasValue
                 && row.ResumeKey == defaults.ResumeKey && row.ResumeCtrl == defaults.ResumeCtrl
-                && row.ResumeAlt == defaults.ResumeAlt && row.ResumeShift == defaults.ResumeShift;
+                && row.ResumeAlt == defaults.ResumeAlt && row.ResumeShift == defaults.ResumeShift
+                && row.SmartTeleportEnabled == defaults.SmartTeleportEnabled
+                && row.SmartTeleportIdleSeconds == defaults.SmartTeleportIdleSeconds
+                && row.SmartTeleportKey == defaults.SmartTeleportKey
+                && row.SmartTeleportCtrl == defaults.SmartTeleportCtrl
+                && row.SmartTeleportAlt == defaults.SmartTeleportAlt
+                && row.SmartTeleportShift == defaults.SmartTeleportShift;
         }
 
         internal static bool IsEmptyDefault(VanillaReconnectAccount row)
@@ -198,6 +204,10 @@ namespace _4RTools.Model.Vanilla
                     throw new InvalidOperationException("Description, username or character name is invalid.");
                 if (row.CharacterSlot.HasValue && (row.CharacterSlot < 1 || row.CharacterSlot > 15))
                     throw new InvalidOperationException("Character slot must be 1 to 15, or unknown.");
+                if (row.SmartTeleportIdleSeconds < 5 || row.SmartTeleportIdleSeconds > 3600)
+                    throw new InvalidOperationException("Smart Teleport idle time must be between 5 and 3600 seconds.");
+                if (row.SmartTeleportEnabled && (row.SmartTeleportKey < 8 || row.SmartTeleportKey > 254))
+                    throw new InvalidOperationException("Choose a Smart Teleport hotkey before enabling Smart Teleport for a character.");
             }
         }
 
