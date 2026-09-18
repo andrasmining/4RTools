@@ -26,9 +26,10 @@ folders. See the included `README.txt`, `VERSION.txt` and `RELEASE-NOTES.md`.
 ## Workspace and recovery
 
 The compact top area shows up to two observed clients, including character name,
-HP/SP, location and activity when the corresponding state is valid. Recovery,
-automation, temporary actions, weight/cart management, memory finding, diagnostics and data/update
-settings share the same workspace. Debug controls stay on the left of the header;
+HP/SP, location and activity when the corresponding state is valid. Recovery &
+relog, temporary actions, Weight/Cart, memory finding, diagnostics and data/update
+settings share the same workspace. The former Vanilla Automation tab is removed;
+Smart Teleport is configured directly per character in Recovery & relog. Debug controls stay on the left of the header;
 update controls and version status stay on the right.
 
 Any number of account profiles can be saved, with at most **two enabled clients**
@@ -52,46 +53,57 @@ This depends on a readable supported dialog capture, not merely frozen HP or X/Y
 
 ### Autofarming health watchdog
 
-The primary health signal is fresh verified read-only X/Y movement. **30 seconds
-without verified movement** starts bounded hotkey recovery; unchanged, unavailable,
-unreadable, unverified or stale coordinates do not reset the deadline and are never
-converted to zero. The watchdog is inactive during startup/recovery and after STOP.
+Fresh verified read-only X/Y movement is the primary steady-state health signal.
+Smart Teleport is the first-line stationary self-heal for characters that enable it
+(**60 seconds by default per character**). Normal Online supervision does **not** send
+Autobattle wakeup hotkeys merely because a character is stationary.
 
-When the watchdog fires, the configured Autobattle/slave hotkey is tried before a
-restart. Each hotkey attempt gets a 10-second X/Y verification window and there are
-three attempts total. Only after all three fail is that client restarted. Replacement
-clients repeat login, post-login settle, hotkey and movement verification. The same
-movement incident permits at most three client restarts; failure after the third
-replacement stops the supervisor and logs a terminal error. Verified movement resets
-the restart budget.
+Recovery & relog exposes a no-movement restart threshold, defaulting to **180 seconds**
+and configurable from 60 to 3600 seconds. Unchanged, unavailable, unreadable,
+unverified or stale coordinates do not reset that elapsed stall and are never
+converted to zero. Smart Teleport attempts do not postpone the longer restart
+deadline unless actual verified movement occurs. At the threshold, 4RTools restarts
+only the affected client.
 
-Known logout/disconnect dialogs can trigger recovery sooner. Recovery remains globally
-serialized from close through relaunch, login, verified movement and minimization;
-a healthy sibling is not restarted or toggled. Unknown popups receive no blind input.
+Known **Now Logging Out.** and **Disconnected from Server.** dialogs are stronger
+evidence and can recover sooner after two fresh matching captures. A stable return to
+the login/service shell after confirmed gameplay is also recovered without waiting for
+the X/Y threshold. Recovery remains globally serialized from close through relaunch,
+login, verified movement and minimization; a healthy sibling is not restarted/toggled.
 
+Failed close/launch/login/restart attempts continue indefinitely with exponential
+backoff: the configured base delay doubles up to a maximum interval of **one hour**.
+There is no finite three-client-restart shutdown budget.
 
 ### Autobattle movement verification
 
-After every actual login/relog, gameplay must first be stably detected. The client
-then settles for **10 seconds** and the configured resume hotkey is always sent. Fresh,
-verified X/Y is observed for **10 seconds**. Movement on either axis succeeds. Without
-movement, the intended client is revalidated/focused and the hotkey is sent again.
-There are **three total hotkey attempts**.
+After every actual login/relog/replacement, gameplay must first be verified. The client
+then settles for **10 seconds** and the configured resume hotkey is sent. Fresh verified
+X/Y is observed for **10 seconds**. Movement on either axis succeeds. Without movement,
+ownership is revalidated/focused and the hotkey is sent again, for **three total hotkey
+attempts**.
 
-Every settle, send and verification attempt is logged. If all three hotkeys fail,
-the affected client enters the bounded restart path rather than silently remaining
-online. Each replacement repeats the same procedure, for at most three client restarts
-for one movement incident. Failure after that stops automatic recovery completely
-until a manual Start. Already-running healthy clients adopted by 4RTools are not
-blindly toggled; if one later remains stationary for 30 seconds, the watchdog invokes
-the same bounded hotkey-first path.
+This three-hotkey verifier belongs to actual startup/recovery cycles; it is not the
+steady-state stall response. If all three attempts fail, that recovery attempt fails
+into the normal exponential retry/backoff path and later retries continue until
+recovery succeeds or supervision is explicitly stopped/configuration or ownership
+changes.
 
 STOP, settings changes, replaced PIDs/sessions/characters, map changes, death, failed
 reads, stale observations and lost input ownership prevent further automated input.
-Movement confirms only movement, not combat; a deliberately stationary character can
-therefore enter recovery by design.
+Movement confirms only movement, not combat.
 
+### Manual diagnostics and overnight logging
 
+The Recovery **TESTS** menu includes **Smart Teleport now (selected)** and
+**Weight/Cart clean now (selected)**. These actions bypass only the automatic trigger
+condition; they still use the selected character's verified identity/PID, shared input
+lease, popup/quantity-dialog guards, cancellation and ownership checks.
+
+Every automatic/manual Smart Teleport and Cart-maintenance action writes timestamped
+structured events to the global debug log. **COPY DEBUG LOG** also includes a
+last-24-hours summary with Smart Teleport attempts/completions and Weight/Cart
+attempts/completions/items moved, followed by the detailed event trail.
 
 ### Smart Teleport
 
@@ -99,7 +111,7 @@ Smart Teleport is configured on each **username + character** row in Recovery & 
 
 The trigger is only fresh verified read-only X/Y movement. Target, combat and casting state are not required. Any verified coordinate change (including intermediate movement observed by the shared fleet reader) resets the idle timer; stale, missing or unverified coordinates never count as stationary.
 
-When the timeout expires, Smart Teleport acquires the same serialized per-client input lease used by recovery/UI automation and sends the configured hotkey directly to the owned Vanilla window with ordinary Windows background messages, without restoring or foregrounding the game. It then captures that same window and requires two fresh positive detections of the **Select an Area to Warp** dialog with its first choice selected before sending Enter. No recognized dialog means **no Enter**. The popup must then disappear before the action is considered complete. STOP/settings/PID/session/character replacement cancel stale work.
+When the timeout expires, Smart Teleport acquires the same serialized per-client input lease used by recovery/UI work and sends the configured hotkey directly to the owned Vanilla window with ordinary Windows background messages, without restoring or foregrounding the game. It then captures that same window and requires two fresh positive detections of the **Select an Area to Warp** dialog with its first choice selected before sending Enter. No recognized dialog means **no Enter**. The popup must then disappear before the action is considered complete. STOP/settings/PID/session/character replacement cancel stale work.
 
 ### Weight / Cart management
 
@@ -115,7 +127,8 @@ Inventory contents are never read or modified through game memory. Stack `Enter`
 a quantity dialog is positively recognized; single-quantity transfers do not receive Enter. If a
 drag makes no verifiable progress, the Cart appears unable to accept more, or UI ownership becomes
 uncertain, 4RTools stops input and holds only that character with Autobattle OFF for manual Cart
-emptying. Healthy siblings continue normally.
+emptying. The hold survives unrelated settings and supervisor STOP/START changes and is removed
+only by the explicit manual-hold clear action. Healthy siblings continue normally.
 
 ## State validity and boundaries
 
