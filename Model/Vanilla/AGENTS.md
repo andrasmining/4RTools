@@ -81,3 +81,12 @@ the reconnect session log.
 - After successful transfers, resume through the same shared verified ResumeHotkey routine used by recovery diagnostics, require fresh X/Y movement, then minimize the owned client. STOP/settings/client/session/character replacement cancel outstanding Cart work.
 
 - Weight actions are a per-character policy as well as a global feature policy. Every saved character row must carry an independent Weight/Cart enable switch; global Weight-tab settings must never authorize e-mail or Cart input for a character whose row switch is off. Disabling the switch must cancel outstanding Weight/Cart ownership safely and must not affect the healthy sibling character.
+
+## Character-bound Smart Teleport
+
+- Integrated Smart Teleport is a per-character policy keyed by the verified username + character-name row. Never require or expose PID/process selection for this feature; resolve the live PID from the existing identity binding.
+- Its automatic trigger is fresh verified read-only X/Y only. Default stationary time is 60 seconds and is independently configurable per character. Target/combat/casting state is not required. Any verified movement, map/session replacement, stale/missing/unverified coordinates or observation gap resets/re-baselines the idle timer rather than counting as stationary.
+- Capture the teleport hotkey live in the character editor (including modifiers), like the Resume hotkey; do not use a fixed dropdown or hard-code a teleport key.
+- Background teleport must not restore/focus a minimized/hidden client as a fallback. Use ordinary Windows input targeted to the verified owned Vanilla HWND and fail closed if that background path or window ownership is unavailable.
+- Enter is authorized only after a fresh positive recognition of the expected Select an Area to Warp modal with the first choice highlighted, preferably on two consecutive captures. An already-open dialog before the teleport hotkey receives no input. Missing/ambiguous popup evidence means no Enter, and the popup must clear after Enter.
+- Smart Teleport shares the global per-client serialized automation/recovery lease. STOP/settings/PID/session/character replacement cancel outstanding work; contention defers without disturbing the healthy sibling.
