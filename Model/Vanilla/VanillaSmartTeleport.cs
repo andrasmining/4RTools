@@ -292,7 +292,9 @@ namespace _4RTools.Model.Vanilla
             }
             finally
             {
-                state.Tracker.Reset(clock.Elapsed);
+                // A real owned attempt starts a new idle baseline. A deferred attempt did
+                // not send input, so keep the existing due state and retry after contention.
+                if (token != null) state.Tracker.Reset(clock.Elapsed);
                 lock (gate) state.Running = false;
             }
         }
