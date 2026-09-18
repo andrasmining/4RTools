@@ -55,7 +55,7 @@ new Vanilla process appears first.
 Post-login Autobattle/slave activation is memory-state-first. Fresh verified login
 username + character identity + X/Y/map/living HP may establish readiness even when
 the visual classifier returns Unknown. Known login/modal/logout/disconnect states
-still block input. Every readiness transition, 7-second settle, hotkey attempt and
+still block input. Every readiness transition, 10-second settle, hotkey attempt and
 10-second movement window must also be written to the global debug log, not only
 the reconnect session log.
 
@@ -64,6 +64,17 @@ the reconnect session log.
 - For an already-running, identity-matched Vanilla client, fresh verified read-only gameplay memory is the primary startup evidence: expected username + character, X/Y, map and living HP.
 - Visual recognition is supplemental for existing-client adoption. `Unknown` must not fail adoption, trigger hotkey input, or repeatedly restore/focus a client solely to prove gameplay. Explicit login/logout/disconnected evidence may still fail closed.
 - `COPY DEBUG LOG` must retain enough host/session/display/top-level-window telemetry to diagnose machine-specific visual/focus differences without requiring the user to reconstruct the environment manually.
+
+## Steady-state stall escalation
+
+- Smart Teleport is the first-line response to ordinary stationary gameplay. The per-character default is 60 seconds and may be configured independently.
+- Normal Online supervision must not send Autobattle wakeup hotkeys. Fresh verified X/Y is the only steady-state health signal.
+- Persist a global Recovery setting for the no-movement restart threshold. Default to 180 seconds and allow 60-3600 seconds. When reached without verified movement, restart only that client; do not disturb a healthy sibling.
+- A Smart Teleport attempt must not reset/postpone the longer restart deadline merely because it briefly owns the serialized background-input lease. Verified movement or a true context/recovery reset may re-baseline it.
+- Confirmed `Now Logging Out.` / `Disconnected from Server.` dialogs require two fresh matching captures and may recover immediately without waiting for the stall threshold. A stable return to the login/service shell after confirmed gameplay is also a recovery event.
+- Failed recovery retries indefinitely with exponential backoff capped at one hour. There is no finite three-client-restart terminal budget.
+- TESTS exposes safe manual Smart Teleport and Weight/Cart actions for the selected character. They use the production identity/lease/vision/input paths and bypass only the automatic trigger condition.
+- Global debug logging records structured start/result events for every automatic/manual Smart Teleport and Cart action; COPY DEBUG LOG includes a last-24-hours action summary.
 
 ## Launcher and helper-window ownership
 
@@ -77,7 +88,7 @@ the reconnect session log.
 - Inventory and Cart hotkeys and the Use/Equip/Etc category selection are configuration, not hard-coded assumptions. Detect the actual opened panel and slot geometry from the current client image; derive any clicks/drags from detected client-relative structure, never desktop coordinates.
 - Toggle the configured character Autobattle/slave hotkey OFF only after the affected client owns the global serialized input lease. No healthy sibling input is authorized during that lease.
 - A stack quantity confirmation may use Enter only after a fresh, positive quantity-dialog recognition. Quantity-one transfers produce no dialog: no dialog means **no Enter**. Ambiguous/late modal evidence fails closed and must never fall through to chat input.
-- Verify transfer progress after every drag. If Cart acceptance/progress cannot be established, UI ownership is lost, or the Cart appears full, stop further input, leave Autobattle OFF, and place only that character in an explicit manual Cart hold. Automatic recovery must not restart a held character until the user clears that hold.
+- Verify transfer progress after every drag. If Cart acceptance/progress cannot be established, UI ownership is lost, or the Cart appears full, stop further input, leave Autobattle OFF, and place only that character in an explicit manual Cart hold. Automatic recovery must not restart a held character until the user explicitly clears that hold. Unrelated settings changes, STOP/START, relog attempts or app supervision restarts must not silently clear the hold; clearing one Cart hold must not erase unrelated Error states.
 - After successful transfers, resume through the same shared verified ResumeHotkey routine used by recovery diagnostics, require fresh X/Y movement, then minimize the owned client. STOP/settings/client/session/character replacement cancel outstanding Cart work.
 
 - Weight actions are a per-character policy as well as a global feature policy. Every saved character row must carry an independent Weight/Cart enable switch; global Weight-tab settings must never authorize e-mail or Cart input for a character whose row switch is off. Disabling the switch must cancel outstanding Weight/Cart ownership safely and must not affect the healthy sibling character.
