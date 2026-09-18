@@ -72,7 +72,7 @@ namespace _4RTools.Model.Vanilla
             root.Controls.Add(new Label
             {
                 AutoSize = true, MaximumSize = new Size(1150, 0), ForeColor = Color.DimGray, Margin = new Padding(0, 5, 0, 10),
-                Text = "Weight decisions use only verified read-only CurrentWeight/MaxWeight. Cart maintenance uses ordinary UI hotkeys, visual slot detection and drag/drop; it never reads or writes inventory memory. It pauses the configured character Autobattle toggle, opens Inventory + Cart, moves every visible item from the selected categories, presses Enter only when a quantity dialog is positively detected, then uses the shared verified ResumeHotkey routine and minimizes. If a transfer makes no progress (for example a full cart), Autobattle stays OFF and only that character is held for manual emptying."
+                Text = "Weight decisions use only verified read-only CurrentWeight/MaxWeight. The master settings here apply only to character rows whose Weight switch is enabled in Recovery & relog. Cart maintenance uses ordinary UI hotkeys, visual slot detection and drag/drop; it never reads or writes inventory memory. It pauses the configured character Autobattle toggle, opens Inventory + Cart, moves every visible item from the selected categories, presses Enter only when a quantity dialog is positively detected, then uses the shared verified ResumeHotkey routine and minimizes. If a transfer makes no progress (for example a full cart), Autobattle stays OFF and only that character is held for manual emptying."
             }, 0, 1);
 
             root.Controls.Add(BuildCartGroup(), 0, 2);
