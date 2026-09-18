@@ -6,7 +6,6 @@ using System.Linq;
 using System.Windows.Forms;
 using _4RTools.Model;
 using _4RTools.Model.Vanilla;
-using _4RTools.Model.Vanilla.Automation;
 
 namespace _4RTools.Forms
 {
@@ -15,7 +14,7 @@ namespace _4RTools.Forms
         private VanillaReconnectSupervisor integratedReconnectSupervisor;
         private VanillaReconnectForm integratedReconnectView;
         private TabControl vanillaWorkspace;
-        private TabPage vanillaRecoveryPage, vanillaRulesPage, vanillaTemporaryPage, vanillaDiagnosticsPage, vanillaAboutPage;
+        private TabPage vanillaRecoveryPage, vanillaTemporaryPage, vanillaDiagnosticsPage, vanillaAboutPage;
         private TabControl primaryWorkspace;
         private TabPage primaryVanillaPage, primaryLegacyPage;
         private Panel legacySurface;
@@ -23,7 +22,6 @@ namespace _4RTools.Forms
         private bool integratedVanillaReady, updateCheckRunning;
         private VanillaFleetMonitor integratedFleetMonitor;
         private VanillaFleetDashboardPanel integratedFleetDashboard;
-        private VanillaAutomationSession integratedAutomationSession;
         private VanillaTemporaryActionsPanel integratedTemporaryActions;
         private VanillaSmartTeleportService integratedSmartTeleport;
         internal bool FleetPollingEnabled { get { return integratedFleetDashboard?.IsPolling == true; } }
@@ -183,19 +181,18 @@ namespace _4RTools.Forms
             // Recovery owns scrolling inside its responsive root. A second scrolling parent
             // can retain an old virtual width and prevent the embedded form from shrinking.
             vanillaRecoveryPage.AutoScroll = false;
-            vanillaRulesPage = WorkspacePage("Automation");
             vanillaTemporaryPage = WorkspacePage("Temporary actions");
             vanillaDiagnosticsPage = WorkspacePage("Diagnostics");
             vanillaAboutPage = WorkspacePage("Data & updates");
-            vanillaWorkspace.TabPages.AddRange(new[] { vanillaRecoveryPage, vanillaRulesPage, vanillaTemporaryPage, vanillaDiagnosticsPage, vanillaAboutPage });
+            vanillaWorkspace.TabPages.AddRange(new[] { vanillaRecoveryPage, vanillaTemporaryPage, vanillaDiagnosticsPage, vanillaAboutPage });
             vanillaWorkspace.SelectedIndexChanged += (s, e) =>
             {
-                if (vanillaWorkspace.SelectedTab == vanillaRulesPage) EnsureAutomationEmbedded();
                 if (vanillaWorkspace.SelectedTab == vanillaTemporaryPage) EnsureTemporaryActionsEmbedded();
                 if (vanillaWorkspace.SelectedTab == vanillaDiagnosticsPage) EnsureDiagnosticsEmbedded();
             };
 
             integratedReconnectView = new VanillaReconnectForm(integratedReconnectSupervisor, observeClients: !smokeTest);
+            integratedReconnectView.SmartTeleportTestRequested = accountId => integratedSmartTeleport.RunNow(accountId);
             integratedReconnectView.PrepareForEmbeddedHost();
             vanillaRecoveryPage.Controls.Add(integratedReconnectView);
             integratedReconnectView.Show();
@@ -217,23 +214,6 @@ namespace _4RTools.Forms
                 UseVisualStyleBackColor = true,
                 AutoScroll = true
             };
-        }
-
-        private void EnsureAutomationEmbedded()
-        {
-            if (smokeTest) return;
-            if (vanillaExtras != null && !vanillaExtras.IsDisposed) return;
-            integratedAutomationSession?.Dispose();
-            integratedAutomationSession = new VanillaAutomationSession(AppDomain.CurrentDomain.BaseDirectory);
-            integratedAutomationSession.EnableGuard = () => toggleForm?.IsOn == true
-                ? "Switch the original 4RTools automation OFF before starting Vanilla automation." : null;
-            vanillaExtras = new VanillaAutomationForm(integratedAutomationSession,
-                () => { vanillaWorkspace.SelectedTab = vanillaDiagnosticsPage; EnsureDiagnosticsEmbedded(); }, hosted: true, ownsSession: true);
-            vanillaExtras.EmergencyStopRequested = () => ForceOff("Emergency stop");
-            vanillaExtras.EmergencyKeyAllowed = key => key != (int)(Keys)Enum.Parse(typeof(Keys), ProfileSingleton.GetCurrent().UserPreferences.toggleStateKey);
-            PrepareEmbeddedForm(vanillaExtras);
-            vanillaRulesPage.Controls.Add(vanillaExtras);
-            vanillaExtras.Show();
         }
 
         private void EnsureTemporaryActionsEmbedded()
@@ -370,8 +350,6 @@ namespace _4RTools.Forms
             integratedFleetDashboard = null;
             try { integratedFleetMonitor?.Dispose(); } catch { }
             integratedFleetMonitor = null;
-            try { integratedAutomationSession?.Dispose(); } catch { }
-            integratedAutomationSession = null;
             try { integratedReconnectSupervisor?.Dispose(); } catch { }
             integratedReconnectSupervisor = null;
             base.OnFormClosed(e);
