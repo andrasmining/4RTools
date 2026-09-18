@@ -248,6 +248,22 @@ namespace _4RTools.Forms
         private TabPage BuildTeleportPage()
         {
             var page = new TabPage("Smart Teleport") { Padding = new Padding(14), BackColor = Color.White, AutoScroll = true };
+            teleportMode.Items.Add(new ModeChoice(TeleportMode.SmartIdle, "Smart idle"));
+            teleportMode.Items.Add(new ModeChoice(TeleportMode.FixedInterval, "Fixed interval"));
+            if (hosted)
+            {
+                page.Controls.Add(new Label
+                {
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    MaximumSize = new Size(950, 0),
+                    Padding = new Padding(8),
+                    Text = "Smart Teleport is now process-free and configured per character in Recovery & relog. "
+                        + "Edit the username + character row, enable Smart Teleport, press the exact teleport hotkey into the live hotkey box, "
+                        + "and choose the idle X/Y timeout (60 seconds by default). It runs automatically while supervision is ON and does not use target/combat state."
+                });
+                return page;
+            }
             var grid = new BufferedTableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, RowCount = 10 };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 215));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 195));
@@ -257,8 +273,6 @@ namespace _4RTools.Forms
             grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 135));
             grid.Controls.Add(teleportEnabled, 0, 0);
             grid.SetColumnSpan(teleportEnabled, 3);
-            teleportMode.Items.Add(new ModeChoice(TeleportMode.SmartIdle, "Smart idle"));
-            teleportMode.Items.Add(new ModeChoice(TeleportMode.FixedInterval, "Fixed interval"));
             AddSetting(grid, 1, "Mode", teleportMode, "Smart mode requires verified target and combat signals.");
             AddSetting(grid, 2, "Teleport / Fly Wing key", teleportKey, "Choose the hotkey already assigned in Vanilla.");
             AddSetting(grid, 3, "No target for (seconds)", noTarget, "Starts over when a target is acquired.");
@@ -454,7 +468,7 @@ namespace _4RTools.Forms
             var settings = session.Settings.Clone();
             settings.DryRun = dryRun.Checked;
             settings.EmergencyKey = SelectedKey(emergency);
-            settings.Teleport.Enabled = teleportEnabled.Checked;
+            settings.Teleport.Enabled = !hosted && teleportEnabled.Checked;
             settings.Teleport.Mode = ((ModeChoice)teleportMode.SelectedItem).Mode;
             settings.Teleport.Key = SelectedKey(teleportKey);
             settings.Teleport.NoTargetTimeoutMs = Milliseconds(noTarget);
@@ -498,7 +512,7 @@ namespace _4RTools.Forms
                     ruleSummary.Items.Add((rule.Enabled ? "ON: " : "OFF: ") + rule.Name + " — " + rule.Condition);
                 farming.Checked = session.FarmingEnabled;
                 SelectKey(emergency, settings.EmergencyKey);
-                teleportEnabled.Checked = settings.Teleport.Enabled;
+                teleportEnabled.Checked = !hosted && settings.Teleport.Enabled;
                 teleportMode.SelectedItem = teleportMode.Items.Cast<ModeChoice>().First(item => item.Mode == settings.Teleport.Mode);
                 SelectKey(teleportKey, settings.Teleport.Key);
                 SetSeconds(noTarget, settings.Teleport.NoTargetTimeoutMs);
@@ -713,6 +727,13 @@ namespace _4RTools.Forms
 
         private void UpdateModeControls()
         {
+            if (hosted)
+            {
+                teleportEnabled.Enabled = teleportMode.Enabled = teleportKey.Enabled = false;
+                noTarget.Enabled = noCombat.Enabled = cooldown.Enabled = grace.Enabled = fixedInterval.Enabled = false;
+                stuckEnabled.Enabled = stuckTimeout.Enabled = false;
+                return;
+            }
             bool smart = (teleportMode.SelectedItem as ModeChoice)?.Mode == TeleportMode.SmartIdle;
             noTarget.Enabled = noCombat.Enabled = smart;
             stuckEnabled.Enabled = smart;
