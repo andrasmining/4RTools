@@ -624,6 +624,9 @@ namespace _4RTools.Model.Vanilla
                 if (!runtime.ProcessId.HasValue) { reason = "the selected character has no verified running client"; return false; }
                 if (runtime.Stage != VanillaReconnectStage.Online)
                 { reason = "the selected character is not in the stable Online stage"; return false; }
+                VanillaCharacterIdentity observed = CurrentCharacter(runtime.ProcessId.Value);
+                if (observed == null || !VanillaCharacterRoster.Matches(runtime.Account, observed, DateTimeOffset.UtcNow))
+                { reason = "fresh verified username + character identity is unavailable or does not match the selected row"; return false; }
                 if (CharacterOwnershipChanged(runtime, runtime.ProcessId.Value))
                 { reason = "the selected client identity/session changed"; return false; }
                 pid = runtime.ProcessId.Value;
