@@ -3,7 +3,14 @@ name: Per-character weight validation
 on:
   push:
     branches: [feat/per-character-weight-toggle]
-    paths: ['.github/workflows/per-character-weight-validation.yml']
+    paths:
+      - '.github/workflows/per-character-weight-validation.yml'
+      - 'Model/Vanilla/**'
+      - 'Tests/**'
+      - 'Properties/AssemblyInfo.cs'
+      - 'README.md'
+      - 'RELEASE-NOTES.md'
+      - 'packaging/**'
 
 permissions:
   contents: read
