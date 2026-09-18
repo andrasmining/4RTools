@@ -39,6 +39,10 @@ Automatic and manual Smart Teleport and Weight/Cart actions now emit structured 
 
 **COPY DEBUG LOG** includes a **last-24-hours action summary** with Smart Teleport attempts/completions/failures/cancellations and Weight/Cart attempts/completions/items moved/failures/cancellations/manual holds, followed by the detailed logs.
 
+### Review cleanup
+
+The repo-wide review also removes three dead-code compiler warnings and updates the two framework NuGet packages that were producing high-severity advisory warnings (`System.Net.Http` 4.3.4 and `System.Text.RegularExpressions` 4.3.1), without broad dependency churn.
+
 ## Validation scope and limits
 
 Automated validation covers recovery timing/state transitions, configurable thresholds, immediate two-sample terminal recovery, global serialization, backoff, Cart-hold persistence/isolation, Smart Teleport X/Y and popup guards, Weight/Cart vision guards, 24-hour action-summary counting, character/profile persistence, native mock-data UI layout, removal of the Automation tab, presence of both manual TESTS actions, Debug/Release builds, portable package launch, public release identity/checksums and updater discovery.
