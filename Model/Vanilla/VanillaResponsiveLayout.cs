@@ -20,6 +20,8 @@ namespace _4RTools.Model.Vanilla
         private GroupBox responsiveAccountBox;
         private GroupBox responsiveLogBox;
         private ContextMenuStrip responsiveTestsMenu;
+        internal Func<string, string> SmartTeleportTestRequested { get; set; }
+        internal Func<string, string> WeightCartTestRequested { get; set; }
 
         internal void ScheduleResponsiveRecoveryLayout()
         {
@@ -135,6 +137,13 @@ namespace _4RTools.Model.Vanilla
                 check.Margin = new Padding(4, 6, 4, 0);
                 responsiveHeader.Controls.Add(check);
             }
+            responsiveHeader.Controls.Add(new Label
+            {
+                Text = "Restart still (sec)", AutoSize = true, Margin = new Padding(8, 6, 2, 0)
+            });
+            movementRestartSeconds.Dock = DockStyle.None;
+            movementRestartSeconds.Margin = new Padding(0, 2, 4, 2);
+            responsiveHeader.Controls.Add(movementRestartSeconds);
             start.Text = "START";
             CompactButton(start); CompactButton(stop);
             responsiveHeader.Controls.Add(start); responsiveHeader.Controls.Add(stop);
@@ -319,12 +328,15 @@ namespace _4RTools.Model.Vanilla
             AddTestMenuItem("6 - Character", () => RunSelectedStep(VanillaReconnectTestStep.SelectCharacter));
             AddTestMenuItem("7 - Resume hotkey", () => RunSelectedStep(VanillaReconnectTestStep.ResumeHotkey));
             responsiveTestsMenu.Items.Add(new ToolStripSeparator());
+            AddTestMenuItem("Smart Teleport now (selected)", TestSmartTeleportNow);
+            AddTestMenuItem("Weight/Cart clean now (selected)", TestWeightCartNow);
+            responsiveTestsMenu.Items.Add(new ToolStripSeparator());
             AddTestMenuItem("Network-drop test", ArmManualNetworkDropTest);
             AddTestMenuItem("Stop current test", StopCurrentTest);
             var button = new Button { Text = "TESTS \u25BE" };
             CompactButton(button);
             button.Click += (s, e) => responsiveTestsMenu.Show(button, new Point(0, button.Height));
-            help.SetToolTip(button, "Startup tests and individual recovery steps.");
+            help.SetToolTip(button, "Startup/recovery steps plus safe manual Smart Teleport and Weight/Cart diagnostics for the selected character.");
             Disposed += (s, e) => responsiveTestsMenu.Dispose();
             return button;
         }
@@ -332,6 +344,49 @@ namespace _4RTools.Model.Vanilla
         private void AddTestMenuItem(string text, System.Action action)
         {
             responsiveTestsMenu.Items.Add(text, null, (s, e) => action());
+        }
+
+        private VanillaReconnectAccount SelectedTestCharacter()
+        {
+            return SelectedCatalogAccount() ?? SelectedAccount();
+        }
+
+        private void TestSmartTeleportNow()
+        {
+            try
+            {
+                VanillaReconnectAccount selected = SelectedTestCharacter();
+                if (selected == null) throw new InvalidOperationException("Select a character row first.");
+                if (SmartTeleportTestRequested == null) throw new InvalidOperationException("Smart Teleport test service is not available.");
+                string message = SmartTeleportTestRequested(selected.Id);
+                testState.Text = message;
+                supervisor.RecordTestLog(message);
+                VanillaDebugLog.Write("TEST", message);
+            }
+            catch (Exception ex)
+            {
+                testState.Text = "Smart Teleport test: " + ex.Message;
+                VanillaDebugLog.Write("TEST", "Smart Teleport manual test rejected safely: " + ex.Message);
+            }
+        }
+
+        private void TestWeightCartNow()
+        {
+            try
+            {
+                VanillaReconnectAccount selected = SelectedTestCharacter();
+                if (selected == null) throw new InvalidOperationException("Select a character row first.");
+                if (WeightCartTestRequested == null) throw new InvalidOperationException("Weight/Cart test service is not available.");
+                string message = WeightCartTestRequested(selected.Id);
+                testState.Text = message;
+                supervisor.RecordTestLog(message);
+                VanillaDebugLog.Write("TEST", message);
+            }
+            catch (Exception ex)
+            {
+                testState.Text = "Weight/Cart test: " + ex.Message;
+                VanillaDebugLog.Write("TEST", "Weight/Cart manual test rejected safely: " + ex.Message);
+            }
         }
 
         private static FlowLayoutPanel CompactFlow()
