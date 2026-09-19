@@ -25,6 +25,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Legacy Weight settings inherit dedicated Alt+3 Autobattle STOP", WeightCartStopHotkeyMigration);
             failed += Test("Weight policy is independently switchable per character", WeightPolicyPerCharacter);
             failed += Test("Inventory vision finds toggled slot panel and occupied slot", InventoryVision);
+            failed += Test("Cart first-slot classifier distinguishes empty from occupied and rotates safe destinations", CartFirstSlotClassifier);
             failed += Test("Inventory category rail is detected independent of location and scale", InventoryCategoryRail);
             failed += Test("Cart category selection accepts verified highlight transitions and safe retries", InventoryCategorySelectionVerification);
             failed += Test("Quantity Enter is armed only by positive quantity dialog structure", QuantityPromptGuard);
@@ -204,6 +205,54 @@ namespace Vanilla.Diagnostics.Tests
                 Point? occupied = VanillaInventoryVision.FirstOccupiedSlot(after, grid);
                 if (!occupied.HasValue || Math.Abs(occupied.Value.X - 150) > 8 || Math.Abs(occupied.Value.Y - 175) > 8)
                     throw new Exception("Occupied inventory slot was not resolved from the detected lattice.");
+            }
+        }
+
+        private static void CartFirstSlotClassifier()
+        {
+            using (var frame = new Bitmap(900, 650))
+            {
+                Rectangle panel = new Rectangle(90, 80, 420, 330);
+                int[] columns = { 180, 222, 264, 306, 348, 390, 432 };
+                int[] rows = { 160, 202, 244, 286, 328 };
+                using (Graphics g = Graphics.FromImage(frame))
+                {
+                    g.Clear(Color.FromArgb(85, 75, 60));
+                    g.FillRectangle(Brushes.White, panel);
+                    using (var empty = new SolidBrush(Color.FromArgb(205, 216, 232)))
+                        foreach (int y in rows)
+                            foreach (int x in columns)
+                                g.FillEllipse(empty, x - 18, y - 10, 36, 20);
+                }
+
+                var grid = new VanillaUiSlotGrid
+                {
+                    Panel = panel,
+                    Columns = columns,
+                    Rows = rows,
+                    EmptyPaleThreshold = 220
+                };
+
+                VanillaInventoryFirstSlotObservation emptyObservation = VanillaInventoryVision.ObserveFirstSlot(frame, grid);
+                if (emptyObservation.State != VanillaInventorySlotState.Empty)
+                    throw new Exception("Empty first inventory slot was not positively recognized.");
+                if (emptyObservation.PaleRatio < 0.90 || emptyObservation.TemplateDifference > 10)
+                    throw new Exception("Empty first-slot evidence is not coherent with its empty reference slot.");
+
+                using (Graphics g = Graphics.FromImage(frame))
+                    g.FillRectangle(Brushes.OrangeRed, columns[0] - 12, rows[0] - 11, 24, 22);
+
+                VanillaInventoryFirstSlotObservation occupiedObservation = VanillaInventoryVision.ObserveFirstSlot(frame, grid);
+                if (occupiedObservation.State != VanillaInventorySlotState.Occupied)
+                    throw new Exception("Occupied first inventory slot was not positively recognized.");
+
+                Point[] destinations = Enumerable.Range(0, 4)
+                    .Select(i => VanillaInventoryVision.CartDropPoint(grid, i)).ToArray();
+                if (destinations.Distinct().Count() < 3)
+                    throw new Exception("Cart destination rotation did not vary across detected interior points.");
+                foreach (Point point in destinations)
+                    if (!panel.Contains(point))
+                        throw new Exception("Detected Cart destination escaped the Cart panel.");
             }
         }
 
