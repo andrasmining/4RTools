@@ -172,6 +172,7 @@ namespace _4RTools.Model.Vanilla
 
     public sealed class VanillaWeightAlertService : IDisposable
     {
+        internal const int PrecisionCartRetrySeconds = 60;
         private readonly VanillaWeightAlertStore store;
         private readonly VanillaFleetMonitor fleetMonitor;
         private readonly VanillaReconnectSupervisor supervisor;
@@ -429,17 +430,23 @@ namespace _4RTools.Model.Vanilla
             if (string.IsNullOrWhiteSpace(accountId)) return;
             string key = "CART:" + accountId;
             AlertState state;
+            DateTimeOffset now = DateTimeOffset.UtcNow;
             lock (gate)
             {
                 if (!states.TryGetValue(key, out state)) states[key] = state = new AlertState();
-                if (observation.Percent.Value <= current.AutoCartRearmPercent) state.CartArmed = true;
+                if (observation.Percent.Value <= current.AutoCartRearmPercent)
+                {
+                    state.CartArmed = true;
+                    state.NextCartAttemptAt = DateTimeOffset.MinValue;
+                }
                 if (observation.CartVerified && observation.CartPercent.HasValue
                     && observation.CartPercent.Value >= VanillaWeightCartAutomation.CartFullPercent) return;
                 if (!current.AutoCartEnabled || observation.Percent.Value < current.AutoCartThresholdPercent
-                    || !state.CartArmed || state.CartRunning || state.ManualHold
+                    || !state.CartArmed || state.CartRunning || state.ManualHold || now < state.NextCartAttemptAt
                     || supervisor.IsWeightManualHold(accountId)) return;
                 state.CartRunning = true;
                 state.CartArmed = false;
+                state.NextCartAttemptAt = DateTimeOffset.MinValue;
             }
             VanillaDebugLog.Write("WEIGHT", "event=cart-request trigger=automatic-threshold accountId=" + accountId
                 + " pid=" + observation.ProcessId + " character='" + observation.CharacterName
@@ -453,13 +460,28 @@ namespace _4RTools.Model.Vanilla
                     lock (gate)
                     {
                         state.ManualHold = result.RequiresManualIntervention;
-                        if (result.Deferred) state.CartArmed = true;
+                        if (result.Deferred)
+                        {
+                            state.CartArmed = true;
+                            state.NextCartAttemptAt = DateTimeOffset.MinValue;
+                        }
+                        else if (result.StoppedForCartSafety && !result.CartFull && !result.RequiresManualIntervention)
+                        {
+                            // Near-full Cart: keep farming, then retry after a bounded delay so newly
+                            // acquired Peco Feathers can finish a remainder that Mastela cannot fill.
+                            state.CartArmed = true;
+                            state.NextCartAttemptAt = DateTimeOffset.UtcNow.AddSeconds(PrecisionCartRetrySeconds);
+                        }
                     }
                     SetStatus(result.Message);
                 }
                 catch (Exception ex)
                 {
-                    lock (gate) state.CartArmed = true;
+                    lock (gate)
+                    {
+                        state.CartArmed = true;
+                        state.NextCartAttemptAt = DateTimeOffset.UtcNow.AddSeconds(Math.Min(PrecisionCartRetrySeconds, current.PollSeconds * 2));
+                    }
                     VanillaDebugLog.Write("WEIGHT", "event=cart-failed trigger=automatic-threshold accountId=" + accountId
                         + " pid=" + observation.ProcessId + " reason='" + ex.Message + "'.");
                     SetStatus("Automatic cart maintenance failed for " + observation.CharacterName + ": " + ex.Message);
@@ -536,6 +558,7 @@ namespace _4RTools.Model.Vanilla
                 state.CompletionStopping = false;
                 state.CartFullNotified = false;
                 state.DoneNotified = false;
+                state.NextCartAttemptAt = DateTimeOffset.MinValue;
             }
             supervisor.ClearWeightManualHolds();
             SetStatus("Weight manual holds cleared. Automatic cart maintenance can run again after the threshold is reached.");
@@ -652,6 +675,7 @@ namespace _4RTools.Model.Vanilla
             public bool CompletionStopping;
             public DateTimeOffset? LastSentAt;
             public DateTimeOffset NextAttemptAt = DateTimeOffset.MinValue;
+            public DateTimeOffset NextCartAttemptAt = DateTimeOffset.MinValue;
             public DateTimeOffset NextMilestoneMailAt = DateTimeOffset.MinValue;
         }
     }
