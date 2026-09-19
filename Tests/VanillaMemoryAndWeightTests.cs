@@ -137,9 +137,9 @@ namespace Vanilla.Diagnostics.Tests
 
         private static void WeightCartStopHotkeyMigration()
         {
-            const string legacyJson = "{"Version":1,"AutoCartEnabled":true,"AutoCartThresholdPercent":50,"AutoCartRearmPercent":40,"
-                + ""TransferUseItems":true,"TransferEquipItems":false,"TransferEtcItems":true,"
-                + ""InventoryKey":69,"InventoryAlt":true,"CartKey":87,"CartAlt":true}";
+            const string legacyJson = @"{""Version"":1,""AutoCartEnabled"":true,""AutoCartThresholdPercent"":50,""AutoCartRearmPercent"":40,"
+                + @"""TransferUseItems"":true,""TransferEquipItems"":false,""TransferEtcItems"":true,"
+                + @"""InventoryKey"":69,""InventoryAlt"":true,""CartKey"":87,""CartAlt"":true}";
             VanillaWeightAlertSettings legacy = JsonConvert.DeserializeObject<VanillaWeightAlertSettings>(legacyJson);
             if (legacy == null) throw new Exception("Legacy Weight JSON could not be deserialized.");
             legacy.Validate(false);
