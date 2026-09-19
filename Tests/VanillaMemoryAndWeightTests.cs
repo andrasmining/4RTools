@@ -209,8 +209,10 @@ namespace Vanilla.Diagnostics.Tests
 
         private static void InventoryCategoryRail()
         {
-            VerifyCategoryRail(new Size(900, 650), new Rectangle(70, 55, 360, 310), 34, 54, 3);
+            // Critical live regression: Use is active while Fav remains blue.
+            VerifyCategoryRail(new Size(900, 650), new Rectangle(70, 55, 360, 310), 34, 54, 0);
             VerifyCategoryRail(new Size(1500, 950), new Rectangle(760, 180, 500, 430), 48, 78, 1);
+            VerifyCategoryRail(new Size(1200, 800), new Rectangle(140, 120, 420, 360), 40, 66, 3);
         }
 
         private static void VerifyCategoryRail(Size canvas, Rectangle panel, int slotSpacing, int categoryStep, int selectedIndex)
@@ -235,19 +237,23 @@ namespace Vanilla.Diagnostics.Tests
                                 g.FillEllipse(empty, x - Math.Max(12, slotSpacing * 3 / 8), y - Math.Max(7, slotSpacing / 5),
                                     Math.Max(24, slotSpacing * 3 / 4), Math.Max(14, slotSpacing * 2 / 5));
 
-                    using (var rule = new Pen(Color.FromArgb(205, 205, 205), 2))
-                        foreach (int y in boundaries)
-                            // Deliberately make separators shorter than the clickable rail. The
-                            // detector must recover the horizontal click band from the selected
-                            // blue-fill evidence rather than assuming separator width == tab width.
-                            g.DrawLine(rule, rail.Left + Math.Max(3, rail.Width / 3), y, rail.Right - 1, y);
+                    // Fav is visually blue even when it is NOT the active category.
+                    using (var favorite = new SolidBrush(Color.FromArgb(204, 220, 248)))
+                        g.FillRectangle(favorite, Rectangle.FromLTRB(rail.Left, boundaries[3], rail.Right, boundaries[4]));
 
-                    // Simulate Vanilla's selected vertical tab. Paint it after the rules so the
-                    // detector must reconstruct the two obscured boundaries from the remaining
-                    // repeated separator lattice, as happens on the real client.
-                    using (var selected = new SolidBrush(Color.FromArgb(204, 220, 248)))
-                        g.FillRectangle(selected, Rectangle.FromLTRB(rail.Left, boundaries[selectedIndex],
-                            rail.Right, boundaries[selectedIndex + 1]));
+                    using (var rule = new Pen(Color.FromArgb(205, 205, 205), 2))
+                    {
+                        foreach (int y in boundaries)
+                            g.DrawLine(rule, rail.Left, y, rail.Right - 1, y);
+                        g.DrawLine(rule, rail.Left, boundaries[0], rail.Left, boundaries[4]);
+
+                        // Inactive tabs are closed on the right. The active tab merges into the
+                        // inventory body, so its right border is deliberately absent.
+                        for (int tab = 0; tab < 4; tab++)
+                            if (tab != selectedIndex)
+                                g.DrawLine(rule, rail.Right - 1, boundaries[tab] + 2,
+                                    rail.Right - 1, boundaries[tab + 1] - 2);
+                    }
                 }
 
                 var grid = new VanillaUiSlotGrid
@@ -261,10 +267,12 @@ namespace Vanilla.Diagnostics.Tests
                 if (tabs.Tabs == null || tabs.Tabs.Length != 4)
                     throw new Exception("Four category tabs were not recovered from detected UI structure.");
                 if (tabs.SelectedIndex != selectedIndex)
-                    throw new Exception("Selected category tab was not recognized at arbitrary location/scale.");
-                if (tabs.SelectedFillBounds.IsEmpty || tabs.RailBounds.IsEmpty
+                    throw new Exception("Active category tab was not recognized from its open right edge.");
+                if (tabs.RailBounds.IsEmpty || tabs.RightBorderX <= tabs.RailBounds.Left
                     || tabs.RailBounds.Width < rail.Width * 0.60)
-                    throw new Exception("Selected blue fill was not used to recover a usable clickable tab band.");
+                    throw new Exception("Category rail borders were not recovered structurally.");
+                if (selectedIndex != 3 && tabs.SelectedIndex == 3)
+                    throw new Exception("Blue Favorite styling was incorrectly treated as active selection.");
                 for (int i = 0; i < tabs.Tabs.Length; i++)
                 {
                     Point center = new Point(tabs.Tabs[i].Left + tabs.Tabs[i].Width / 2,
@@ -289,24 +297,22 @@ namespace Vanilla.Diagnostics.Tests
             var before = new VanillaInventoryCategoryTabs
             {
                 SelectedIndex = 3,
-                SelectionScores = new[] { 0.010, 0.012, 0.011, 0.240 }
+                SelectionScores = new[] { 0.08, 0.10, 0.09, 0.90 }
             };
             var direct = new VanillaInventoryCategoryTabs
             {
                 SelectedIndex = 0,
-                SelectionScores = new[] { 0.150, 0.010, 0.012, 0.015 }
+                SelectionScores = new[] { 0.92, 0.08, 0.10, 0.09 }
             };
             if (!VanillaWeightCartAutomation.CategorySelectionConfirmed(0, before, direct))
                 throw new Exception("Direct selected-index verification must accept the requested category.");
 
-            // The real client can render a weaker blue fill than the synthetic fixture. If the
-            // target becomes dominant while the old selected tab clearly loses its highlight,
-            // that transition is still positive visual evidence even when the absolute classifier
-            // deliberately leaves SelectedIndex unknown.
+            // If the target tab becomes structurally open while the old tab closes, that
+            // transition is positive evidence even when the absolute classifier is inconclusive.
             var transition = new VanillaInventoryCategoryTabs
             {
                 SelectedIndex = -1,
-                SelectionScores = new[] { 0.082, 0.020, 0.018, 0.030 }
+                SelectionScores = new[] { 0.74, 0.18, 0.16, 0.20 }
             };
             if (!VanillaWeightCartAutomation.CategorySelectionConfirmed(0, before, transition))
                 throw new Exception("Strong target-rise/old-selection-fall transition was rejected.");
@@ -314,7 +320,7 @@ namespace Vanilla.Diagnostics.Tests
             var ambiguous = new VanillaInventoryCategoryTabs
             {
                 SelectedIndex = -1,
-                SelectionScores = new[] { 0.050, 0.045, 0.040, 0.180 }
+                SelectionScores = new[] { 0.35, 0.31, 0.29, 0.70 }
             };
             if (VanillaWeightCartAutomation.CategorySelectionConfirmed(0, before, ambiguous))
                 throw new Exception("Ambiguous/unmoved category highlight must fail closed.");
