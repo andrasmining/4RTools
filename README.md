@@ -127,10 +127,12 @@ does **not** reuse the character ResumeHotkey. After cleanup, Autobattle is star
 the character's existing verified Recovery ResumeHotkey/X-Y movement routine and then minimized.
 
 Inventory contents are never read or modified through game memory. The Inventory **Use / Equip / Etc**
-tab rail is detected from the live panel/slot/separator structure. The detected blue selected-tab
-fill is used to refine the clickable rail band when available. Category clicks target only detected
-tab bounds; if the first click is not positively confirmed, 4RTools re-detects the rail and retries
-through a small deterministic set of safe interior points while polling fresh UI state. A category
+tab rail is detected from the live panel/slot/separator structure. Vanilla's blue **Fav** styling is
+not treated as selection: the active category is identified structurally because its tab is open on
+the right and merges into the Inventory body, while inactive tabs keep a closed vertical right
+border. Category clicks target only detected tab bounds; if the first click is not positively
+confirmed, 4RTools re-detects the rail and retries through a small deterministic set of safe interior
+points while polling fresh UI state. A category
 is advanced only after **two fresh slot-grid captures** both show it empty. Cart destinations are
 positively detected empty slots—there is no calculated/fallback drop position. Stack `Enter` is
 sent only after a quantity dialog is positively recognized; single-quantity transfers do not receive
