@@ -14,7 +14,11 @@ namespace _4RTools.Model.Vanilla
         private bool responsiveRecoveryApplied;
         private bool arrangingRecovery;
         private Panel responsiveRoot;
+        private SplitContainer responsiveSplit;
         private Panel responsiveLeft;
+        private double responsiveWideSplitRatio = 2.0 / 3.0;
+        private double responsiveNarrowSplitRatio = 2.0 / 3.0;
+        private bool responsiveSplitProgrammatic;
         private FlowLayoutPanel responsiveHeader;
         private FlowLayoutPanel responsiveAccountButtons;
         private GroupBox responsiveAccountBox;
@@ -60,7 +64,17 @@ namespace _4RTools.Model.Vanilla
                 AutoScroll = false;
                 AutoScrollMinSize = Size.Empty;
                 responsiveRoot = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, AutoScroll = true };
-                responsiveLeft = new Panel { Margin = Padding.Empty };
+                responsiveSplit = new SplitContainer
+                {
+                    Dock = DockStyle.None,
+                    Margin = Padding.Empty,
+                    BorderStyle = BorderStyle.None,
+                    IsSplitterFixed = false,
+                    FixedPanel = FixedPanel.None,
+                    Panel1MinSize = 0,
+                    Panel2MinSize = 0
+                };
+                responsiveLeft = new Panel { Margin = Padding.Empty, Dock = DockStyle.Fill };
                 responsiveHeader = CompactFlow();
                 responsiveAccountButtons = CompactFlow();
                 BuildRecoveryHeader(browse, start, stop);
@@ -91,19 +105,22 @@ namespace _4RTools.Model.Vanilla
                 help.SetToolTip(responsiveAccountBox, "One row per character; at most two enabled at once. Double-click or Edit a row. Hover a clipped value or Status for the full detail.");
                 ConfigureAccountsGrid();
 
-                responsiveLogBox.Dock = DockStyle.None;
+                responsiveLogBox.Dock = DockStyle.Fill;
                 responsiveLogBox.MinimumSize = Size.Empty;
                 responsiveLogBox.Margin = Padding.Empty;
                 responsiveLogBox.Padding = new Padding(6);
                 responsiveLogBox.Text = "Log";
                 log.WordWrap = true;
                 log.ScrollBars = ScrollBars.Vertical;
-                help.SetToolTip(log, "Reconnect/startup events. Lines wrap to this pane; COPY DEBUG LOG includes the complete diagnostic bundle.");
+                help.SetToolTip(log, "Reconnect/startup events. Drag the divider to give the Log or character table more space. COPY DEBUG LOG includes the complete diagnostic bundle.");
 
                 responsiveLeft.Controls.Add(responsiveHeader);
                 responsiveLeft.Controls.Add(responsiveAccountBox);
-                responsiveRoot.Controls.Add(responsiveLeft);
-                responsiveRoot.Controls.Add(responsiveLogBox);
+                responsiveSplit.Panel1.Controls.Add(responsiveLeft);
+                responsiveSplit.Panel2.Controls.Add(responsiveLogBox);
+                responsiveRoot.Controls.Add(responsiveSplit);
+                responsiveSplit.SplitterMoved += (s, e) => RememberRecoverySplit();
+                help.SetToolTip(responsiveSplit, "Drag this divider to resize Characters versus Log.");
                 Controls.Remove(oldRoot);
                 Controls.Add(responsiveRoot);
                 oldRoot.Dispose();
@@ -189,22 +206,53 @@ namespace _4RTools.Model.Vanilla
 
                 int minimumColumns = accounts.Columns.Cast<DataGridViewColumn>().Where(c => c.Visible).Sum(ColumnMinimumWidth)
                     + SystemInformation.VerticalScrollBarWidth + 20;
-                int leftWidth = (width - gap) * 2 / 3;
-                bool wide = UseWideRecoveryLayout(width) && leftWidth >= minimumColumns;
-                if (!wide) leftWidth = width;
-                int headerHeight = MeasureFlow(responsiveHeader, leftWidth);
-                int buttonsHeight = MeasureFlow(responsiveAccountButtons, Math.Max(1, leftWidth - 16));
+                int defaultWideLeft = (width - gap) * 2 / 3;
+                bool wide = UseWideRecoveryLayout(width) && defaultWideLeft >= minimumColumns;
+                int splitterWidth = Math.Max(5, Font.Height / 3);
+
+                // Measure the left pane using the default/current split axis. The user may later
+                // intentionally shrink Characters below the no-scroll default to gain more Log width.
+                int measureLeftWidth = wide
+                    ? Math.Max(320, (int)Math.Round(Math.Max(1, width - splitterWidth) * responsiveWideSplitRatio))
+                    : width;
+                int headerHeight = MeasureFlow(responsiveHeader, measureLeftWidth);
+                int buttonsHeight = MeasureFlow(responsiveAccountButtons, Math.Max(1, measureLeftWidth - 16));
                 int minimumGrid = accounts.ColumnHeadersHeight + rowHeight * Math.Min(5, MinimumVisibleAccountRows(accounts.Rows.Count)) + 4;
                 int minimumLeft = headerHeight + gap + minimumGrid + buttonsHeight + Font.Height + 26;
                 int minimumLog = Math.Max(116, Font.Height * 6);
-                int needed = wide ? minimumLeft : minimumLeft + minimumLog + gap;
+                int needed = wide ? minimumLeft : minimumLeft + minimumLog + splitterWidth;
                 Size scrollMinimum = new Size(0, needed + gap * 2);
                 if (responsiveRoot.AutoScrollMinSize != scrollMinimum) responsiveRoot.AutoScrollMinSize = scrollMinimum;
                 height = Math.Max(height, needed);
-                int leftHeight = wide ? height : Math.Max(minimumLeft, height * 2 / 3);
-                if (!wide) leftHeight = Math.Min(leftHeight, height - minimumLog - gap);
+
                 Point origin = new Point(gap + responsiveRoot.AutoScrollPosition.X, gap + responsiveRoot.AutoScrollPosition.Y);
-                Put(responsiveLeft, origin.X, origin.Y, leftWidth, leftHeight);
+                responsiveSplitProgrammatic = true;
+                try
+                {
+                    responsiveSplit.Panel1MinSize = 0;
+                    responsiveSplit.Panel2MinSize = 0;
+                    responsiveSplit.SplitterWidth = splitterWidth;
+                    responsiveSplit.Orientation = wide ? Orientation.Vertical : Orientation.Horizontal;
+                    Put(responsiveSplit, origin.X, origin.Y, width, height);
+                    responsiveSplit.PerformLayout();
+
+                    int axis = wide ? responsiveSplit.ClientSize.Width : responsiveSplit.ClientSize.Height;
+                    int usable = Math.Max(1, axis - responsiveSplit.SplitterWidth);
+                    double ratio = wide ? responsiveWideSplitRatio : responsiveNarrowSplitRatio;
+                    int desired = (int)Math.Round(usable * ratio);
+                    int minimumPrimary = wide ? Math.Min(320, Math.Max(80, usable / 3)) : Math.Min(minimumLeft, Math.Max(80, usable / 2));
+                    int minimumSecondary = wide ? Math.Min(220, Math.Max(100, usable / 4)) : Math.Min(minimumLog, Math.Max(80, usable / 4));
+                    desired = Math.Max(minimumPrimary, Math.Min(usable - minimumSecondary, desired));
+                    responsiveSplit.SplitterDistance = Math.Max(1, desired);
+                    responsiveSplit.Panel1MinSize = Math.Max(0, Math.Min(minimumPrimary, responsiveSplit.SplitterDistance));
+                    responsiveSplit.Panel2MinSize = Math.Max(0, Math.Min(minimumSecondary, usable - responsiveSplit.SplitterDistance));
+                    responsiveSplit.PerformLayout();
+                }
+                finally { responsiveSplitProgrammatic = false; }
+
+                int leftWidth = Math.Max(1, responsiveLeft.ClientSize.Width);
+                int leftHeight = Math.Max(1, responsiveLeft.ClientSize.Height);
+                headerHeight = MeasureFlow(responsiveHeader, leftWidth);
                 Put(responsiveHeader, 0, 0, leftWidth, headerHeight);
                 Put(responsiveAccountBox, 0, headerHeight + gap, leftWidth, Math.Max(1, leftHeight - headerHeight - gap));
                 Rectangle inner = responsiveAccountBox.DisplayRectangle;
@@ -212,11 +260,21 @@ namespace _4RTools.Model.Vanilla
                 int gridHeight = Math.Max(1, inner.Height - buttonsHeight - gap);
                 Put(accounts, inner.Left, inner.Top, inner.Width, gridHeight);
                 Put(responsiveAccountButtons, inner.Left, inner.Top + gridHeight + gap, inner.Width, buttonsHeight);
-                if (wide) Put(responsiveLogBox, origin.X + leftWidth + gap, origin.Y, width - leftWidth - gap, height);
-                else Put(responsiveLogBox, origin.X, origin.Y + leftHeight + gap, width, height - leftHeight - gap);
                 ResizeAccountColumns();
             }
             finally { arrangingRecovery = false; }
+        }
+
+        private void RememberRecoverySplit()
+        {
+            if (responsiveSplitProgrammatic || arrangingRecovery || responsiveSplit == null || responsiveSplit.IsDisposed) return;
+            int axis = responsiveSplit.Orientation == Orientation.Vertical
+                ? responsiveSplit.ClientSize.Width : responsiveSplit.ClientSize.Height;
+            int usable = Math.Max(1, axis - responsiveSplit.SplitterWidth);
+            double ratio = Math.Max(0.05, Math.Min(0.95, responsiveSplit.SplitterDistance / (double)usable));
+            if (responsiveSplit.Orientation == Orientation.Vertical) responsiveWideSplitRatio = ratio;
+            else responsiveNarrowSplitRatio = ratio;
+            ResizeAccountColumns();
         }
 
         private static void Put(Control control, int x, int y, int width, int height)
