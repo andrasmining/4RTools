@@ -38,6 +38,12 @@ namespace _4RTools.Model.Vanilla
         public bool TransferUseItems { get; set; } = true;
         public bool TransferEquipItems { get; set; }
         public bool TransferEtcItems { get; set; } = true;
+        // Dedicated Autobattle OFF command used before any Inventory/Cart UI manipulation.
+        // Resume/start remains the per-character Recovery hotkey.
+        public int AutobattleStopKey { get; set; } = (int)Keys.D3;
+        public bool AutobattleStopCtrl { get; set; }
+        public bool AutobattleStopAlt { get; set; } = true;
+        public bool AutobattleStopShift { get; set; }
         public int InventoryKey { get; set; } = (int)Keys.E;
         public bool InventoryCtrl { get; set; }
         public bool InventoryAlt { get; set; } = true;
@@ -47,6 +53,7 @@ namespace _4RTools.Model.Vanilla
         public bool CartAlt { get; set; } = true;
         public bool CartShift { get; set; }
 
+        public string AutobattleStopHotkeyText { get { return HotkeyText(AutobattleStopCtrl, AutobattleStopAlt, AutobattleStopShift, AutobattleStopKey); } }
         public string InventoryHotkeyText { get { return HotkeyText(InventoryCtrl, InventoryAlt, InventoryShift, InventoryKey); } }
         public string CartHotkeyText { get { return HotkeyText(CartCtrl, CartAlt, CartShift, CartKey); } }
 
@@ -71,7 +78,10 @@ namespace _4RTools.Model.Vanilla
             if (SubjectPrefix != null && SubjectPrefix.Length > 120) throw new ArgumentException("Mail subject prefix is too long.");
             if (AutoCartThresholdPercent <= 0 || AutoCartThresholdPercent > 100) throw new ArgumentException("Cart-maintenance threshold must be > 0 and <= 100 percent.");
             if (AutoCartRearmPercent < 0 || AutoCartRearmPercent >= AutoCartThresholdPercent) throw new ArgumentException("Cart-maintenance re-arm percentage must be >= 0 and below its threshold.");
-            if (InventoryKey < 8 || InventoryKey > 254 || CartKey < 8 || CartKey > 254) throw new ArgumentException("Inventory/cart hotkeys are invalid.");
+            if (AutobattleStopKey < 8 || AutobattleStopKey > 254)
+                throw new ArgumentException("Autobattle STOP hotkey is invalid.");
+            if (InventoryKey < 8 || InventoryKey > 254 || CartKey < 8 || CartKey > 254)
+                throw new ArgumentException("Inventory/cart hotkeys are invalid.");
             if (AutoCartEnabled && !TransferUseItems && !TransferEquipItems && !TransferEtcItems)
                 throw new ArgumentException("Enable at least one inventory category for automatic cart maintenance.");
             if (Enabled || requireMailTransport)
