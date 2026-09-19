@@ -254,15 +254,7 @@ namespace _4RTools.Model.Vanilla.Automation
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(logPath));
-                if (File.Exists(logPath) && new FileInfo(logPath).Length > 1024 * 1024)
-                {
-                    string oldest = logPath + ".3";
-                    if (File.Exists(oldest)) File.Delete(oldest);
-                    for (int index = 2; index >= 1; index--)
-                        if (File.Exists(logPath + "." + index)) File.Move(logPath + "." + index, logPath + "." + (index + 1));
-                    File.Move(logPath, logPath + ".1");
-                }
-                File.AppendAllText(logPath, line + Environment.NewLine);
+                VanillaLogRotation.Append(logPath, "vanilla", line + Environment.NewLine);
             }
             catch (Exception ex) { loggingError = "Activity log could not be written: " + ex.Message; }
             Logged?.Invoke(line);
