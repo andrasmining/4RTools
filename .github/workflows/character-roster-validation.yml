@@ -1,0 +1,81 @@
+name: Character roster validation
+
+on:
+  push:
+    branches: [feat/character-table-automation-columns]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: character-roster-validation
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Restore NuGet packages
+        shell: powershell
+        run: |
+          nuget restore 4RTools.sln -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+
+      - name: Validate character roster source policy
+        shell: powershell
+        run: |
+          $version = Get-Content 'Properties/AssemblyInfo.cs' -Raw
+          if ($version -notmatch 'AssemblyFileVersion\("0\.6\.52\.0"\)') { throw 'Expected 0.6.52 release version.' }
+          $ui = Get-Content 'Model/Vanilla/VanillaReconnectUiPreferences.cs' -Raw
+          foreach ($name in @('WeightEnabled','SmartTeleportEnabled','SmartTeleportSeconds','SmartTeleportHotkey')) {
+            if ($ui -notmatch [regex]::Escape($name)) { throw "Missing roster column: $name" }
+          }
+          if ($ui -notmatch '"Enabled", "WeightEnabled", "SmartTeleportEnabled", "SmartTeleportSeconds", "SmartTeleportHotkey"') {
+            throw 'Automation-first character column order is missing.'
+          }
+          $layout = Get-Content 'Model/Vanilla/VanillaResponsiveLayout.cs' -Raw
+          foreach ($header in @('Enabled','Weight','Smart TP','TP sec','TP hotkey')) {
+            if ($layout -notmatch [regex]::Escape($header)) { throw "Missing compact roster header: $header" }
+          }
+
+      - name: Validate shipped Vanilla build profiles
+        shell: powershell
+        run: '& .\scripts\validate-vanilla-build-profiles.ps1'
+
+      - name: Build and test Debug
+        shell: powershell
+        run: '& .\scripts\build.ps1 -Configuration Debug -VanillaRelease'
+
+      - name: Build, test, package and smoke-test Release
+        shell: powershell
+        run: '& .\scripts\build-release.ps1 -Version 0.6.52'
+
+      - name: Native test-owned process recovery checks
+        shell: powershell
+        run: '& .\scripts\test-recovery-native.ps1'
+
+      - name: Render and validate mock-data UI
+        shell: powershell
+        run: '& .\scripts\test-ui-layout.ps1'
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: character-roster-validation-${{ github.sha }}
+          path: |
+            dist/ui-layout/*.png
+            dist/ui-layout/*.txt
+            dist/native-recovery.log
+            dist/4RTools-Vanilla-v0.6.52-portable.zip
+            dist/4RTools-Vanilla-v0.6.52-portable.zip.sha256
+          if-no-files-found: warn
+          retention-days: 7
