@@ -250,10 +250,10 @@ namespace _4RTools.Model.Vanilla
             accounts.ScrollBars = ScrollBars.Both;
             accounts.ShowCellToolTips = true;
             accounts.Columns["Enabled"].HeaderText = "Enabled";
-            accounts.Columns["WeightEnabled"].HeaderText = "Weight";
-            accounts.Columns["SmartTeleportEnabled"].HeaderText = "Smart TP";
-            accounts.Columns["SmartTeleportSeconds"].HeaderText = "TP sec";
-            accounts.Columns["SmartTeleportHotkey"].HeaderText = "TP hotkey";
+            if (accounts.Columns.Contains("WeightEnabled")) accounts.Columns["WeightEnabled"].HeaderText = "Weight";
+            if (accounts.Columns.Contains("SmartTeleportEnabled")) accounts.Columns["SmartTeleportEnabled"].HeaderText = "Smart TP";
+            if (accounts.Columns.Contains("SmartTeleportSeconds")) accounts.Columns["SmartTeleportSeconds"].HeaderText = "TP sec";
+            if (accounts.Columns.Contains("SmartTeleportHotkey")) accounts.Columns["SmartTeleportHotkey"].HeaderText = "TP hotkey";
             accounts.Columns["Slot"].HeaderText = "Slot";
             accounts.Columns["Hotkey"].HeaderText = "Resume";
             foreach (DataGridViewColumn column in accounts.Columns)
