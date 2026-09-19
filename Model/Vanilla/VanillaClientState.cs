@@ -9,7 +9,7 @@ namespace _4RTools.Model.Vanilla
 {
     public enum VanillaField
     {
-        CurrentHP, MaxHP, CurrentSP, MaxSP, CurrentWeight, MaxWeight, CharacterName, X, Y,
+        CurrentHP, MaxHP, CurrentSP, MaxSP, CurrentWeight, MaxWeight, CurrentCartWeight, MaxCartWeight, CharacterName, X, Y,
         CurrentTargetId, ActionState, Map, AutobattleEnabled, StatusEffects, ClientReady, Loading, UserName, CharacterSlot, UserNameMirror
     }
 
@@ -80,6 +80,8 @@ namespace _4RTools.Model.Vanilla
         public StateValue<uint> MaxSP { get { return Get<uint>(VanillaField.MaxSP); } }
         public StateValue<uint> CurrentWeight { get { return Get<uint>(VanillaField.CurrentWeight); } }
         public StateValue<uint> MaxWeight { get { return Get<uint>(VanillaField.MaxWeight); } }
+        public StateValue<uint> CurrentCartWeight { get { return Get<uint>(VanillaField.CurrentCartWeight); } }
+        public StateValue<uint> MaxCartWeight { get { return Get<uint>(VanillaField.MaxCartWeight); } }
         public StateValue<string> UserName { get { return Get<string>(VanillaField.UserName); } }
         public StateValue<string> UserNameMirror { get { return Get<string>(VanillaField.UserNameMirror); } }
         // One-based slot, 1..15. A profile must verify this semantic, not just a readable integer.
