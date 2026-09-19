@@ -507,8 +507,13 @@ namespace _4RTools.Model.Vanilla
                     + ", target=" + categoryName + ", rail=" + original.RailBounds + ".");
                 if (original.SelectedIndex == category)
                 {
-                    report(categoryName + " tab is already positively selected.");
-                    return;
+                    report(categoryName + " tab appears selected; confirming on a second fresh capture before any drag.");
+                    if (ConfirmAlreadySelected(input, inventory, category, cancelled))
+                    {
+                        report(categoryName + " tab selection confirmed on two fresh captures.");
+                        return;
+                    }
+                    report(categoryName + " second selection capture was inconclusive; continuing with detected-bound click attempts.");
                 }
             }
 
@@ -523,8 +528,14 @@ namespace _4RTools.Model.Vanilla
                     beforeTabs = VanillaInventoryVision.DetectCategoryTabs(before, grid);
                     if (beforeTabs.SelectedIndex == category)
                     {
-                        report(categoryName + " tab became selected before click attempt " + (attempt + 1) + "; continuing.");
-                        return;
+                        report(categoryName + " tab appears selected before click attempt " + (attempt + 1)
+                            + "; confirming on a second fresh capture.");
+                        if (ConfirmAlreadySelected(input, inventory, category, cancelled))
+                        {
+                            report(categoryName + " tab selection confirmed before click attempt " + (attempt + 1) + ".");
+                            return;
+                        }
+                        report(categoryName + " second capture was inconclusive; click attempt " + (attempt + 1) + " will proceed.");
                     }
                     Rectangle tab = beforeTabs.Tabs[category];
                     target = CategoryClickPoint(tab, attempt);
@@ -576,6 +587,19 @@ namespace _4RTools.Model.Vanilla
             throw new InvalidOperationException(categoryName
                 + " tab remained unverified after " + CategoryClickAttempts
                 + " detected-bound click attempts; no item drag sent.");
+        }
+
+        private static bool ConfirmAlreadySelected(VanillaForegroundInput input, Rectangle inventory, int category,
+            Func<bool> cancelled)
+        {
+            ThrowIfCancelled(cancelled);
+            Thread.Sleep(CategorySettleMs);
+            using (Bitmap confirm = input.CaptureClientBitmap())
+            {
+                VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(confirm, inventory);
+                VanillaInventoryCategoryTabs tabs = VanillaInventoryVision.DetectCategoryTabs(confirm, grid);
+                return tabs.SelectedIndex == category;
+            }
         }
 
         internal static Point CategoryClickPoint(Rectangle tab, int attempt)
