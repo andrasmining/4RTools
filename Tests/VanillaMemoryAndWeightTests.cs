@@ -118,6 +118,8 @@ namespace Vanilla.Diagnostics.Tests
                 throw new Exception("Equip must remain unknown until an item weight is explicitly verified.");
             Equal(16L, VanillaWeightCartAutomation.CapacitySafeQuantity(9950, 10000, 3), "Mastela capacity quantity");
             Equal(50L, VanillaWeightCartAutomation.CapacitySafeQuantity(9950, 10000, 1), "Peco Feather capacity quantity");
+            Equal(0L, VanillaWeightCartAutomation.CapacitySafeQuantity(9998, 10000, 3), "Mastela cannot fill a 2-weight remainder");
+            Equal(2L, VanillaWeightCartAutomation.CapacitySafeQuantity(9998, 10000, 1), "Peco Feather fills a 2-weight remainder");
             Equal(0L, VanillaWeightCartAutomation.CapacitySafeQuantity(10000, 10000, 1), "full Cart quantity");
             if (VanillaWeightCartAutomation.PrecisionThresholdPercent != 95m
                 || VanillaWeightCartAutomation.FarmingDoneCarryPercent != 50m)
