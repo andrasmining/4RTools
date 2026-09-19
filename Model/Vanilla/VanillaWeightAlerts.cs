@@ -248,6 +248,7 @@ namespace _4RTools.Model.Vanilla
                     if (!observation.Verified || !observation.Percent.HasValue) continue;
                     anyVerified = true;
                     if (!supervisor.IsWeightEnabledForProcess(observation.ProcessId)) continue;
+                    ProcessFarmingMilestones(current, observation);
                     ProcessAutoCart(current, observation);
                     if (current.Enabled) ProcessObservation(current, observation);
                 }
@@ -413,8 +414,11 @@ namespace _4RTools.Model.Vanilla
             {
                 if (!states.TryGetValue(key, out state)) states[key] = state = new AlertState();
                 if (observation.Percent.Value <= current.AutoCartRearmPercent) state.CartArmed = true;
+                if (observation.CartVerified && observation.CartPercent.HasValue
+                    && observation.CartPercent.Value >= VanillaWeightCartAutomation.CartFullPercent) return;
                 if (!current.AutoCartEnabled || observation.Percent.Value < current.AutoCartThresholdPercent
-                    || !state.CartArmed || state.CartRunning || state.ManualHold) return;
+                    || !state.CartArmed || state.CartRunning || state.ManualHold
+                    || supervisor.IsWeightManualHold(accountId)) return;
                 state.CartRunning = true;
                 state.CartArmed = false;
             }
