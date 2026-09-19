@@ -194,37 +194,32 @@ namespace _4RTools.Forms
                     layout.RowStyles[1].SizeType = SizeType.Absolute;
                     layout.RowStyles[1].Height = 0;
                 }
-                if (layout != null && layout.Parent is GroupBox && layout.RowCount == 5)
+                if (layout != null && layout.Parent is GroupBox && layout.RowCount == 4 && layout.ColumnCount == 4)
                 {
-                    // Keep location and activity on the same final row, like HP and SP.
-                    // Reuse both original labels, including their error tooltips and updates.
-                    Control location = layout.GetControlFromPosition(0, 3);
-                    Control activity = layout.GetControlFromPosition(0, 4);
-                    if (location != null && activity != null)
-                    {
-                        layout.SetColumnSpan(location, 1);
-                        layout.SetColumnSpan(activity, 1);
-                        layout.SetCellPosition(activity, new TableLayoutPanelCellPosition(1, 3));
-                    }
-                    while (layout.RowStyles.Count < 5) layout.RowStyles.Add(new RowStyle());
+                    // Current fleet cards are deliberately one compact line of four metrics
+                    // (HP/SP/carried/Cart), short bars, then one location/error line. Do not
+                    // reserve any legacy Activity row or large default GroupBox padding.
+                    while (layout.RowStyles.Count < 4) layout.RowStyles.Add(new RowStyle());
                     layout.RowStyles[0].SizeType = SizeType.AutoSize;
                     layout.RowStyles[1].SizeType = SizeType.AutoSize;
                     layout.RowStyles[2].SizeType = SizeType.Absolute;
                     layout.RowStyles[2].Height = 6;
                     layout.RowStyles[3].SizeType = SizeType.Absolute;
                     layout.RowStyles[3].Height = layout.Font.Height + 4;
-                    layout.RowStyles[4].SizeType = SizeType.Absolute;
-                    layout.RowStyles[4].Height = 0;
+
                     GroupBox card = (GroupBox)layout.Parent;
                     card.Padding = new Padding(6, 3, 6, 3);
                     card.Margin = new Padding(3, 2, 3, 2);
-                    vanillaFleetHelp.SetToolTip(card, "Read-only Vanilla client status. Hover the activity/error line for details.");
+                    vanillaFleetHelp.SetToolTip(card,
+                        "Read-only Vanilla client status: HP, SP, carried weight, Cart weight and location.");
+
                     foreach (Control item in layout.Controls)
                     {
+                        int row = layout.GetRow(item);
                         item.Margin = new Padding(3, 1, 3, 1);
-                        if (layout.GetRow(item) == 2) item.Height = 4;
+                        if (row == 2) item.Height = 4;
                         Label label = item as Label;
-                        if (label == null || layout.GetRow(label) != 3) continue;
+                        if (label == null || row != 3) continue;
                         label.AutoSize = false;
                         label.Dock = DockStyle.Fill;
                         label.AutoEllipsis = true;
