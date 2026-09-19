@@ -19,6 +19,31 @@ namespace _4RTools.Model.Vanilla
         private static readonly object Gate = new object();
         private static readonly Encoding Utf8 = new UTF8Encoding(false);
 
+        internal static void NormalizeDirectory(string directory)
+        {
+            if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentNullException(nameof(directory));
+            lock (Gate)
+            {
+                Directory.CreateDirectory(directory);
+                string[] files;
+                try { files = Directory.GetFiles(directory, "*.log", SearchOption.TopDirectoryOnly); }
+                catch { return; }
+
+                foreach (string path in files)
+                {
+                    try
+                    {
+                        var info = new FileInfo(path);
+                        if (!info.Exists || info.Length <= DefaultMaxFileBytes) continue;
+                        string stem = Path.GetFileNameWithoutExtension(path) + "-oversize";
+                        SplitOversizedFile(path, info.DirectoryName, stem,
+                            DateTime.Now.ToString("yyyyMMdd-HHmmss-fff"), DefaultMaxFileBytes);
+                    }
+                    catch { }
+                }
+            }
+        }
+
         internal static void StartNewSession(string currentPath, string archiveStem)
         {
             StartNewSession(currentPath, archiveStem, DefaultMaxFileBytes, DefaultMaxFamilyBytes, DefaultMaxFamilyFiles);
