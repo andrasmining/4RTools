@@ -68,7 +68,7 @@ namespace _4RTools.Model.Vanilla
                 {
                     Directory.CreateDirectory(VanillaAppData.LogsDirectory);
                     string line = DateTimeOffset.Now.ToString("O") + " [" + Clean(category) + "] " + (message ?? "") + Environment.NewLine;
-                    File.AppendAllText(LogPath, line, Encoding.UTF8);
+                    VanillaLogRotation.Append(LogPath, "debug", line);
                 }
                 catch { }
             }
@@ -87,8 +87,8 @@ namespace _4RTools.Model.Vanilla
             text.AppendLine();
             try
             {
-                IEnumerable<string> recentLines = File.Exists(LogPath) ? File.ReadLines(LogPath) : Enumerable.Empty<string>();
-                text.AppendLine(BuildRecentActionSummary(recentLines, DateTimeOffset.Now.AddHours(-24)));
+                text.AppendLine(BuildRecentActionSummary(ReadDebugHistoryLines(DateTimeOffset.Now.AddHours(-24)),
+                    DateTimeOffset.Now.AddHours(-24)));
             }
             catch (Exception ex) { text.AppendLine("24h action summary unavailable: " + ex.Message); }
             text.AppendLine();
@@ -106,29 +106,40 @@ namespace _4RTools.Model.Vanilla
                 text.AppendLine("MEMORY/RECONNECT BUNDLE FAILED: " + ex.Message);
             }
 
-            var included = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            try
-            {
-                if (Directory.Exists(VanillaAppData.LogsDirectory))
-                {
-                    foreach (string path in Directory.GetFiles(VanillaAppData.LogsDirectory, "*", SearchOption.TopDirectoryOnly)
-                        .Where(p => string.Equals(Path.GetExtension(p), ".log", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(Path.GetExtension(p), ".txt", StringComparison.OrdinalIgnoreCase))
-                        .OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
-                    {
-                        string full = Path.GetFullPath(path);
-                        if (!included.Add(full)) continue;
-                        AppendFile(text, full);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                text.AppendLine("LOG DIRECTORY ENUMERATION FAILED: " + ex.Message);
-            }
+            // The memory/reconnect bundle above already contributes the current
+            // reconnect, memory-access, Vanilla core and update-error logs. Include only
+            // the current debug session here; archived sessions remain separate files on disk
+            // so COPY DEBUG LOG cannot accidentally concatenate many historical 10 MB logs.
+            AppendFile(text, LogPath);
 
             text.AppendLine("=== END GLOBAL DEBUG BUNDLE ===");
             return text.ToString();
+        }
+
+        private static IEnumerable<string> ReadDebugHistoryLines(DateTimeOffset cutoff)
+        {
+            if (!Directory.Exists(VanillaAppData.LogsDirectory)) yield break;
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(VanillaAppData.LogsDirectory, "debug*.log", SearchOption.TopDirectoryOnly)
+                    .Where(path =>
+                    {
+                        try { return File.GetLastWriteTimeUtc(path) >= cutoff.UtcDateTime.AddDays(-1); }
+                        catch { return false; }
+                    })
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+            catch { yield break; }
+
+            foreach (string path in files)
+            {
+                IEnumerable<string> lines;
+                try { lines = File.ReadLines(path); }
+                catch { continue; }
+                foreach (string line in lines) yield return line;
+            }
         }
 
         internal static string BuildRecentActionSummary(IEnumerable<string> lines, DateTimeOffset cutoff)
@@ -231,6 +242,15 @@ namespace _4RTools.Model.Vanilla
                     }
                 }
                 catch { enabled = true; }
+
+                try
+                {
+                    Directory.CreateDirectory(VanillaAppData.LogsDirectory);
+                    // Every 4RTools process gets a fresh debug.log. The previous live file
+                    // becomes a timestamped archive before this process writes its first line.
+                    VanillaLogRotation.StartNewSession(LogPath, "debug");
+                }
+                catch { }
 
                 try
                 {
