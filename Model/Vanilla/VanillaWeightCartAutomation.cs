@@ -517,7 +517,6 @@ namespace _4RTools.Model.Vanilla
                 ThrowIfCancelled(cancelled);
                 VanillaInventoryCategoryTabs beforeTabs;
                 Point target;
-                Size frameSize;
                 using (Bitmap before = input.CaptureClientBitmap())
                 {
                     VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(before, inventory);
@@ -529,7 +528,6 @@ namespace _4RTools.Model.Vanilla
                     }
                     Rectangle tab = beforeTabs.Tabs[category];
                     target = CategoryClickPoint(tab, attempt);
-                    frameSize = before.Size;
                     report(categoryName + " click attempt " + (attempt + 1) + "/" + CategoryClickAttempts
                         + " using a deterministic safe interior point from detected tab bounds " + tab + ".");
                     input.ClickNormalized(NormalizeX(target.X, before.Width), NormalizeY(target.Y, before.Height));
