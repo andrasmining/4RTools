@@ -21,12 +21,14 @@ namespace _4RTools.Model.Vanilla
         public uint? MaxSP { get; internal set; }
         public uint? CurrentWeight { get; internal set; }
         public uint? MaxWeight { get; internal set; }
+        public uint? CurrentCartWeight { get; internal set; }
+        public uint? MaxCartWeight { get; internal set; }
         public bool HpVerified { get; internal set; }
         public bool SpVerified { get; internal set; }
         public bool NameVerified { get; internal set; }
         public bool WeightVerified { get; internal set; }
+        public bool CartWeightVerified { get; internal set; }
         public string Location { get; internal set; }
-        public string Activity { get; internal set; }
         public string Build { get; internal set; }
         public string Error { get; internal set; }
         public bool Ready { get; internal set; }
@@ -36,6 +38,8 @@ namespace _4RTools.Model.Vanilla
 
         public decimal? HpPercent { get { return Percent(CurrentHP, MaxHP); } }
         public decimal? SpPercent { get { return Percent(CurrentSP, MaxSP); } }
+        public decimal? WeightPercent { get { return Percent(CurrentWeight, MaxWeight); } }
+        public decimal? CartWeightPercent { get { return Percent(CurrentCartWeight, MaxCartWeight); } }
 
         private static decimal? Percent(uint? current, uint? maximum)
         {
@@ -267,7 +271,6 @@ namespace _4RTools.Model.Vanilla
             {
                 string name = state.CharacterName.IsAvailable ? state.CharacterName.Value : "Unknown character";
                 var location = BuildLocation(state);
-                var activity = BuildActivity(state, observation);
                 return new VanillaFleetClientInfo
                 {
                     ProcessId = processId,
@@ -284,13 +287,15 @@ namespace _4RTools.Model.Vanilla
                     MaxSP = state.MaxSP.IsAvailable ? (uint?)state.MaxSP.Value : null,
                     CurrentWeight = state.CurrentWeight.IsAvailable ? (uint?)state.CurrentWeight.Value : null,
                     MaxWeight = state.MaxWeight.IsAvailable ? (uint?)state.MaxWeight.Value : null,
+                    CurrentCartWeight = state.CurrentCartWeight.IsAvailable ? (uint?)state.CurrentCartWeight.Value : null,
+                    MaxCartWeight = state.MaxCartWeight.IsAvailable ? (uint?)state.MaxCartWeight.Value : null,
                     HpVerified = state.CurrentHP.Validation == StateValidation.Valid && state.MaxHP.Validation == StateValidation.Valid,
                     SpVerified = state.CurrentSP.Validation == StateValidation.Valid && state.MaxSP.Validation == StateValidation.Valid,
                     NameVerified = state.CharacterName.Validation == StateValidation.Valid,
                     WeightVerified = state.CurrentWeight.Validation == StateValidation.Valid && state.MaxWeight.Validation == StateValidation.Valid,
+                    CartWeightVerified = state.CurrentCartWeight.Validation == StateValidation.Valid && state.MaxCartWeight.Validation == StateValidation.Valid,
                     Snapshot = state,
                     Location = location,
-                    Activity = activity,
                     Build = build,
                     Ready = observation.Ready,
                     Error = null
@@ -308,18 +313,6 @@ namespace _4RTools.Model.Vanilla
                 return "Location mapping pending";
             }
 
-            private static string BuildActivity(VanillaClientState state, RuleObservation observation)
-            {
-                if (observation.Loading) return "Loading";
-                if (observation.IsCasting == true) return "Casting";
-                if (observation.InCombat == true) return "In combat";
-                if (state.LastMovementAtUtc.HasValue && DateTimeOffset.UtcNow - state.LastMovementAtUtc.Value < TimeSpan.FromSeconds(2))
-                    return "Moving";
-                if (observation.HasTarget == true) return "Target acquired";
-                if (observation.PositionValidated) return "Stationary";
-                return "Activity mapping pending";
-            }
-
             private VanillaFleetClientInfo ErrorInfo(string error)
             {
                 return new VanillaFleetClientInfo
@@ -327,7 +320,6 @@ namespace _4RTools.Model.Vanilla
                     ProcessId = processId,
                     CharacterName = "Vanilla MMO",
                     Location = "Unavailable",
-                    Activity = "Observation unavailable",
                     Build = build,
                     Error = error,
                     Ready = false
@@ -398,7 +390,7 @@ namespace _4RTools.Model.Vanilla
                 + ". Hover over a client observation error for details.");
             else if (clients.Count <= 2) SetText(extra, clients.Count == 0
                 ? "No Vanilla clients running. Recovery & relog can start the configured clients."
-                : "Live values are read from the selected Vanilla build's read-only memory map. Location/activity appear automatically when those mappings are verified.");
+                : "Live HP, SP, carried weight, Cart weight and location are read from the selected Vanilla build's verified read-only memory map.");
             else SetText(extra, clients.Count + " Vanilla processes detected; the dashboard shows the first two only.");
         }
 
@@ -416,12 +408,15 @@ namespace _4RTools.Model.Vanilla
         private sealed class ClientCard : GroupBox
         {
             private readonly Label title = new Label { AutoSize = true, Font = new Font("Segoe UI", 11F, FontStyle.Bold) };
-            private readonly Label hp = new Label { AutoSize = true };
-            private readonly Label sp = new Label { AutoSize = true };
+            private readonly Label hp = MetricLabel();
+            private readonly Label sp = MetricLabel();
+            private readonly Label weight = MetricLabel();
+            private readonly Label cartWeight = MetricLabel();
             private readonly Label location = new Label { AutoSize = true, ForeColor = Color.DimGray };
-            private readonly Label activity = new Label { AutoSize = true, ForeColor = Color.DimGray };
-            private readonly StaticLevelBar hpBar = new StaticLevelBar { Height = 8, Dock = DockStyle.Top };
-            private readonly StaticLevelBar spBar = new StaticLevelBar { Height = 8, Dock = DockStyle.Top };
+            private readonly StaticLevelBar hpBar = MetricBar();
+            private readonly StaticLevelBar spBar = MetricBar();
+            private readonly StaticLevelBar weightBar = MetricBar();
+            private readonly StaticLevelBar cartWeightBar = MetricBar();
             private readonly string emptyTitle;
             private readonly ToolTip errorTip = new ToolTip { AutoPopDelay = 30000 };
 
@@ -431,51 +426,75 @@ namespace _4RTools.Model.Vanilla
                 Dock = DockStyle.Fill;
                 Margin = new Padding(4);
                 Padding = new Padding(10);
-                var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 5 };
-                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-                layout.Controls.Add(title, 0, 0); layout.SetColumnSpan(title, 2);
-                layout.Controls.Add(hp, 0, 1); layout.Controls.Add(sp, 1, 1);
-                layout.Controls.Add(hpBar, 0, 2); layout.Controls.Add(spBar, 1, 2);
-                layout.Controls.Add(location, 0, 3); layout.SetColumnSpan(location, 2);
-                layout.Controls.Add(activity, 0, 4); layout.SetColumnSpan(activity, 2);
+                var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 4 };
+                for (int i = 0; i < 4; i++) layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 10));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.Controls.Add(title, 0, 0); layout.SetColumnSpan(title, 4);
+                layout.Controls.Add(hp, 0, 1);
+                layout.Controls.Add(sp, 1, 1);
+                layout.Controls.Add(weight, 2, 1);
+                layout.Controls.Add(cartWeight, 3, 1);
+                layout.Controls.Add(hpBar, 0, 2);
+                layout.Controls.Add(spBar, 1, 2);
+                layout.Controls.Add(weightBar, 2, 2);
+                layout.Controls.Add(cartWeightBar, 3, 2);
+                layout.Controls.Add(location, 0, 3); layout.SetColumnSpan(location, 4);
                 Controls.Add(layout);
                 ShowClient(null);
+            }
+
+            private static Label MetricLabel()
+            {
+                return new Label { AutoSize = true, Margin = new Padding(0, 2, 8, 0) };
+            }
+
+            private static StaticLevelBar MetricBar()
+            {
+                return new StaticLevelBar { Height = 6, Width = 112, Anchor = AnchorStyles.Left, Margin = new Padding(0, 1, 8, 1) };
             }
 
             public void ShowClient(VanillaFleetClientInfo info)
             {
                 errorTip.SetToolTip(this, info?.Error);
-                errorTip.SetToolTip(activity, info?.Error);
+                errorTip.SetToolTip(location, info?.Error);
                 if (info == null)
                 {
                     if (!string.Equals(Text, emptyTitle, StringComparison.Ordinal)) Text = emptyTitle;
                     SetText(title, "Not running");
                     SetText(hp, "HP —");
                     SetText(sp, "SP —");
-                    hpBar.Value = spBar.Value = 0;
+                    SetText(weight, "Weight —");
+                    SetText(cartWeight, "Cart —");
+                    hpBar.Value = spBar.Value = weightBar.Value = cartWeightBar.Value = 0;
                     SetText(location, "Location —");
-                    SetText(activity, "Waiting for client");
                     return;
                 }
+
                 string caption = "PID " + info.ProcessId;
                 if (!string.Equals(Text, caption, StringComparison.Ordinal)) Text = caption;
                 SetText(title, info.CharacterName + (info.NameVerified ? "" : "  [unverified name]"));
-                SetText(hp, "HP  " + Vital(info.CurrentHP, info.MaxHP) + (info.HpVerified ? "" : "  [unverified]"));
-                SetText(sp, "SP  " + Vital(info.CurrentSP, info.MaxSP) + (info.SpVerified ? "" : "  [unverified]"));
+                SetText(hp, "HP " + Vital(info.CurrentHP, info.MaxHP) + (info.HpVerified ? "" : " [unverified]"));
+                SetText(sp, "SP " + Vital(info.CurrentSP, info.MaxSP) + (info.SpVerified ? "" : " [unverified]"));
+                SetText(weight, "Weight " + Vital(info.CurrentWeight, info.MaxWeight) + (info.WeightVerified ? "" : " [unverified]"));
+                SetText(cartWeight, "Cart " + Vital(info.CurrentCartWeight, info.MaxCartWeight)
+                    + (info.CartWeightVerified ? "" : " [unverified]"));
                 hpBar.Value = Clamp(info.HpPercent);
                 spBar.Value = Clamp(info.SpPercent);
-                SetText(location, "Location: " + info.Location);
-                SetText(activity, info.Error == null ? "Activity: " + info.Activity : "Observation: " + info.Error);
+                weightBar.Value = Clamp(info.WeightPercent);
+                cartWeightBar.Value = Clamp(info.CartWeightPercent);
+                SetText(location, info.Error == null ? "Location: " + info.Location : "Observation: " + info.Error);
             }
 
             public void ShowObservationUnavailable(string error)
             {
                 ShowClient(null);
                 SetText(title, "Status unavailable");
-                SetText(activity, "Observation: " + error);
+                SetText(location, "Observation: " + error);
                 errorTip.SetToolTip(this, error);
-                errorTip.SetToolTip(activity, error);
+                errorTip.SetToolTip(location, error);
             }
 
             protected override void Dispose(bool disposing)
@@ -486,7 +505,7 @@ namespace _4RTools.Model.Vanilla
 
             private static string Vital(uint? current, uint? maximum)
             {
-                return current.HasValue && maximum.HasValue ? current.Value + " / " + maximum.Value : "Unavailable";
+                return current.HasValue && maximum.HasValue ? current.Value + "/" + maximum.Value : "Unavailable";
             }
             private static int Clamp(decimal? value) { return value.HasValue ? Math.Max(0, Math.Min(100, (int)Math.Round(value.Value))) : 0; }
         }
