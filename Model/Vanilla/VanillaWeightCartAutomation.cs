@@ -446,13 +446,26 @@ namespace _4RTools.Model.Vanilla
                                         if (promptStillOpen)
                                         {
                                             // A common safe reason is that the stack contains fewer items than the
-                                            // capacity-derived request. One item is always capacity-safe here.
-                                            requestedQuantity = 1;
+                                            // capacity-derived request. Try a small bounded chunk first, then one.
+                                            uint chunk = Math.Min(fit, 20U);
+                                            requestedQuantity = chunk;
                                             activity(token.Account.Label + ": weight maintenance: precision quantity was not accepted immediately; "
-                                                + "falling back to one " + itemRule.ItemName + " so the transfer remains capacity-safe.");
-                                            input.ReplaceFocusedText("1");
+                                                + "retrying a small capacity-safe chunk of " + chunk + " " + itemRule.ItemName + ".");
+                                            input.ReplaceFocusedText(chunk.ToString(System.Globalization.CultureInfo.InvariantCulture));
                                             input.Press(Keys.Enter);
                                             Thread.Sleep(TransferSettleMs);
+
+                                            using (Bitmap chunkCheck = input.CaptureClientBitmap())
+                                                promptStillOpen = VanillaInventoryVision.HasQuantityPrompt(chunkCheck);
+                                            if (promptStillOpen)
+                                            {
+                                                requestedQuantity = 1;
+                                                activity(token.Account.Label + ": weight maintenance: small chunk was still not accepted; "
+                                                    + "falling back to one " + itemRule.ItemName + " so the transfer remains capacity-safe.");
+                                                input.ReplaceFocusedText("1");
+                                                input.Press(Keys.Enter);
+                                                Thread.Sleep(TransferSettleMs);
+                                            }
                                         }
                                     }
                                 }
