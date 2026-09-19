@@ -530,7 +530,9 @@ namespace _4RTools.Model.Vanilla
                     target = CategoryClickPoint(tab, attempt);
                     report(categoryName + " click attempt " + (attempt + 1) + "/" + CategoryClickAttempts
                         + " using a deterministic safe interior point from detected tab bounds " + tab + ".");
-                    input.ClickNormalized(NormalizeX(target.X, before.Width), NormalizeY(target.Y, before.Height));
+                    input.ClickNormalizedWithDiagnostics(NormalizeX(target.X, before.Width), NormalizeY(target.Y, before.Height));
+                    report(categoryName + " click attempt " + (attempt + 1)
+                        + " was accepted by Windows for the verified Vanilla client; waiting for visual state confirmation.");
                 }
 
                 Stopwatch watch = Stopwatch.StartNew();
