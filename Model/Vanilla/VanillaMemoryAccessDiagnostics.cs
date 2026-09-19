@@ -311,7 +311,7 @@ namespace _4RTools.Model.Vanilla
                 string directory = VanillaAppData.LogsDirectory;
                 Directory.CreateDirectory(directory);
                 string line = DateTimeOffset.UtcNow.ToString("O") + " " + message + Environment.NewLine;
-                lock (Gate) File.AppendAllText(LogPath, line, Encoding.UTF8);
+                lock (Gate) VanillaLogRotation.Append(LogPath, "memory-access", line);
             }
             catch { }
         }
