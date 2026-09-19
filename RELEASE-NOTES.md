@@ -1,31 +1,30 @@
-# 4RTools Vanilla 0.6.53
+# 4RTools Vanilla 0.6.54
 
-## Weight / Cart category traversal hardening
+## Cart category click verification retry
 
-This release fixes the live Cart-maintenance failure observed after the **Use** category had been cleared.
+This release fixes the live Weight/Cart failure where 4RTools correctly detected **Favorite** as the current Inventory category and **Use** as the target, sent the Use click, but then stopped because the selected-tab state could not be positively verified.
 
-The previous implementation derived the Use/Equip/Etc click from relative panel coordinates. That could select the wrong vertical tab on another client layout/DPI and leave Autobattle stopped in an uncertain UI state.
+The category switch path is now more robust while remaining fully detection-driven:
 
-Category switching is now fully vision-driven:
+- Recover the four-tab Inventory rail from the live panel/slot/separator structure.
+- Use the **actual detected blue selected-tab fill** to recover the horizontal clickable rail band when available, instead of relying only on separator-line width.
+- Click only deterministic safe interior points inside the freshly detected target-tab rectangle.
+- If the first click is not visually confirmed, re-detect the entire rail and retry at up to two additional safe interior points.
+- After each click, poll fresh screenshots for up to a bounded timeout rather than trusting one fixed-delay frame.
+- Accept either a direct target selected-tab classification or a strong visual transition where the target highlight rises/dominates while the old selected tab loses its highlight.
+- Require two consecutive positive visual confirmations before any item drag begins.
+- If all bounded attempts remain unverified, fail closed with Autobattle OFF and no drag input.
 
-- Detect the current Inventory panel and slot lattice.
-- Detect the four vertical category tabs from the live separator structure beside the detected slot grid.
-- Click only the detected target-tab bounds.
-- Positively verify the selected-tab highlight on two fresh captures before any item drag.
-- Scan the selected category's detected slot grid.
-- When no occupied item is found, require **two fresh empty-grid scans** before declaring that category complete and advancing to the next enabled category.
-- Continue through Use / Equip / Etc according to the Weight-tab switches.
+The visible Recovery log now records each click attempt and whether Windows accepted it for the verified Vanilla client, followed by the observed selection/score while waiting for visual confirmation. Full coordinate/window diagnostics remain available in COPY DEBUG LOG.
 
-Cart destinations are also stricter: every drag now requires a positively detected empty Cart slot. The old calculated fallback drop point has been removed. If no empty Cart slot is detected, the character is held safely with Autobattle OFF instead of guessing.
+The previously added safeguards remain: categories advance only after two fresh empty-grid detections, Cart destinations must be positively detected empty slots, and there is no arbitrary fallback drop point.
 
-## Live diagnostics
+## Input timing boundary
 
-Every major Weight/Cart step is now mirrored into the visible **Recovery & relog Log** as well as the global debug log: lease acquisition, Autobattle STOP, Inventory/Cart detection, category detection/selection verification, first empty scan, confirmed empty-category advance, item movement, quantity-dialog handling, completion, cancellation and failure/manual-hold reasons.
-
-This makes unattended Cart behavior directly visible without having to infer progress from the game window.
+This release does **not** add randomized positions or randomized delays for the purpose of avoiding bot/anti-cheat detection. UI robustness comes from detected control bounds, deterministic bounded retry points and waits driven by observed UI state.
 
 ## Validation scope and limits
 
-Automated tests cover category-rail detection at different panel locations/scales, selected-tab recognition with selected boundaries visually obscured, empty vs occupied slot recognition, strict detected-empty Cart destinations, Debug/Release builds, portable packaging/launch, native recovery checks and the responsive UI suite.
+Automated validation covers category-rail detection at multiple panel locations/scales, recovery of the click band from blue selected-tab fill even when separator lines are shorter, three distinct safe interior retry points, direct selected-index verification, weaker but unambiguous highlight-transition verification, ambiguous-state rejection, Debug/Release builds, portable launch, native recovery and responsive UI validation.
 
-The detector design was additionally checked against the supplied live screenshot structure, where the Inventory showed the Favorite tab selected after the Use transfer. The engineering environment still cannot execute clicks inside the user's live Vanilla/Gepard session, so the final live end-to-end category switch remains a VPS observation boundary. No game-memory writes, injection, packet manipulation or Gepard bypass is used.
+The engineering environment still cannot operate the user's live Vanilla/Gepard session. The exact v0.6.53 failure from the supplied screenshot/log is addressed structurally, but the final live click/selection behavior remains a VPS observation boundary.
