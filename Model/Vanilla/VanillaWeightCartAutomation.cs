@@ -632,17 +632,17 @@ namespace _4RTools.Model.Vanilla
             double targetBefore = before != null && before.SelectionScores != null && category < before.SelectionScores.Length
                 ? before.SelectionScores[category] : 0;
             double strongestOther = after.SelectionScores.Where((value, index) => index != category).DefaultIfEmpty(0).Max();
-            bool targetDominates = targetAfter >= 0.055 && targetAfter - strongestOther >= 0.018;
-            bool targetRose = targetAfter - targetBefore >= 0.028;
+            bool targetDominates = targetAfter >= 0.52 && targetAfter - strongestOther >= 0.16;
+            bool targetRose = targetAfter - targetBefore >= 0.18;
 
-            bool oldSelectionFell = true;
+            bool oldSelectionClosed = true;
             if (before != null && before.SelectedIndex >= 0 && before.SelectedIndex != category
                 && before.SelectionScores != null && before.SelectedIndex < before.SelectionScores.Length
                 && before.SelectedIndex < after.SelectionScores.Length)
             {
-                oldSelectionFell = before.SelectionScores[before.SelectedIndex] - after.SelectionScores[before.SelectedIndex] >= 0.025;
+                oldSelectionClosed = before.SelectionScores[before.SelectedIndex] - after.SelectionScores[before.SelectedIndex] >= 0.15;
             }
-            return targetDominates && targetRose && oldSelectionFell;
+            return targetDominates && targetRose && oldSelectionClosed;
         }
 
         private static string FormatScore(double[] scores, int index)
