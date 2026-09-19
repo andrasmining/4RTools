@@ -28,9 +28,13 @@ Preserve the native mock-data harness's checks for full-width embedding, column 
 
 Report actual Windows mock-data UI results separately from live gameplay/RDP testing. The harness must keep game observation, input, automatic startup, email and network update services inactive; test data must never be real credentials or user profiles.
 
-The table is a character roster: Description, Username, Slot, Character name,
-then the remaining fields. Multiple characters may share one username; at most
-two enabled rows. Unknown slots remain blank, not slot 1. Auto-discovered rows
+The table is a character roster. Keep Enabled, Weight and Smart Teleport as
+the first three columns, followed by Smart Teleport seconds and Smart Teleport
+hotkey. Then show Description, Username, Slot, Character name and the remaining
+resume/password/proxy/runtime fields. Weight is on/off only in this list; its
+detailed settings stay on the Weight tab. Multiple characters may share one
+username; at most two enabled rows. Unknown slots remain blank, not slot 1.
+Auto-discovered rows
 stay disabled. Native UI checks must cover discovery and the character editor.
 
 ## User-presence-aware minimization and launcher pacing
