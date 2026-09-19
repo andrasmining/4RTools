@@ -1,17 +1,26 @@
-# 4RTools Vanilla 0.6.51
+# 4RTools Vanilla 0.6.52
 
-## Dedicated Autobattle STOP for Weight / Cart maintenance
+## Automation-first character roster
 
-Weight/Cart cleanup now has its own persisted **Autobattle STOP** hotkey. The default is **Alt+3**, and it can be changed directly in the Weight tab with the same live key-capture behavior used by the Inventory and Cart hotkeys.
+The Recovery & relog character table now puts the three per-character enable states first:
 
-The previous implementation incorrectly reused the character's Recovery **ResumeHotkey** before Cart work. That was unsafe when Vanilla uses different commands to stop and start Autobattle. Cart maintenance now sends the dedicated Weight STOP chord before opening Inventory/Cart, and the existing per-character Recovery ResumeHotkey is used only after cleanup to start Autobattle again and verify fresh X/Y movement.
+1. **Enabled**
+2. **Weight**
+3. **Smart TP**
 
-Existing Weight settings created by older releases migrate without manual editing: because the STOP field did not exist in those JSON files, it receives the new safe default **Alt+3**. Custom STOP hotkeys are persisted independently from Resume, Inventory and Cart hotkeys.
+Smart Teleport's two row-specific details are also visible directly beside those switches:
 
-The manual **TESTS → Weight/Cart clean now (selected)** action uses the same production path, so it also sends the dedicated STOP command before UI manipulation.
+- **TP sec** — stationary seconds before Smart Teleport triggers.
+- **TP hotkey** — the configured per-character Smart Teleport hotkey.
+
+The remaining columns follow with Description, Username, Slot, Character name, Resume, Password, Proxy, PID and Status.
+
+Weight intentionally remains a simple **Yes/No** per-character column in this roster. Weight/Cart thresholds, STOP/Inventory/Cart hotkeys, categories and mail settings remain on the dedicated Weight tab rather than duplicating them into the character list.
+
+No automation behavior, identity ownership, recovery timing or persistence format is changed by this release; this is a presentation/readability improvement over the existing saved per-character settings.
 
 ## Validation scope and limits
 
-Automated validation covers default/migration behavior, invalid STOP-key rejection, independence from the per-character ResumeHotkey, clone/serialization persistence, native Weight-panel rendering with the visible Alt+3 default, Debug/Release regressions, portable packaging/launch, native recovery checks, responsive UI checks, public release/source/checksum verification and updater discovery.
+Automated validation covers the exact character-column order, Enabled/Weight/Smart Teleport state rendering, Smart Teleport seconds/hotkey rendering, long/many-row character tables, multiple Full-HD and narrow responsive breakpoints, enlarged text, no horizontal account-table scrollbar, Debug/Release regressions, portable packaging/launch, native recovery checks, public release/source/checksum verification and updater discovery.
 
-The engineering environment cannot run the user's live Vanilla/Gepard client. The actual Alt+3 effect therefore still requires live observation on the VPS, but the release uses ordinary owned-window keyboard input only and retains the existing fail-closed Cart/UI safeguards. No game-memory writes, injection, packet manipulation or Gepard bypass is used.
+The native UI validation uses mock character data only and does not operate a live Vanilla/Gepard client.
