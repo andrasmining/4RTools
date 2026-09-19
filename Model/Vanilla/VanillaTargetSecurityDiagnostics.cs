@@ -224,7 +224,7 @@ namespace _4RTools.Model.Vanilla
                 Directory.CreateDirectory(directory);
                 string path = VanillaMemoryAccessDiagnostics.LogPath;
                 string line = DateTimeOffset.UtcNow.ToString("O") + " " + message + Environment.NewLine;
-                lock (Gate) File.AppendAllText(path, line, Encoding.UTF8);
+                lock (Gate) VanillaLogRotation.Append(path, "memory-access", line);
             }
             catch { }
         }
