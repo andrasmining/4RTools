@@ -485,7 +485,11 @@ namespace _4RTools.Model.Vanilla
                 spBar.Value = Clamp(info.SpPercent);
                 weightBar.Value = Clamp(info.WeightPercent);
                 cartWeightBar.Value = Clamp(info.CartWeightPercent);
-                SetText(location, info.Error == null ? "Location: " + info.Location : "Observation: " + info.Error);
+                string locationText = "Location: " + info.Location;
+                if (info.CartWeightVerified && info.CurrentCartWeight.HasValue && info.MaxCartWeight.HasValue
+                    && info.MaxCartWeight.Value >= info.CurrentCartWeight.Value)
+                    locationText += "   |   Cart left " + (info.MaxCartWeight.Value - info.CurrentCartWeight.Value);
+                SetText(location, info.Error == null ? locationText : "Observation: " + info.Error);
             }
 
             public void ShowObservationUnavailable(string error)
