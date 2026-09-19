@@ -173,7 +173,8 @@ namespace _4RTools.Model.Vanilla
                 try
                 {
                     Directory.CreateDirectory(VanillaAppData.LogsDirectory);
-                    File.AppendAllText(Path.Combine(VanillaAppData.LogsDirectory, "update-error.log"), DateTimeOffset.Now.ToString("u") + " " + ex + Environment.NewLine);
+                    VanillaLogRotation.Append(Path.Combine(VanillaAppData.LogsDirectory, "update-error.log"),
+                        "update-error", DateTimeOffset.Now.ToString("u") + " " + ex + Environment.NewLine);
                 }
                 catch { }
                 MessageBox.Show(ex.Message, "4RTools Vanilla update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
