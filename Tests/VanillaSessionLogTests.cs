@@ -12,6 +12,7 @@ namespace Vanilla.Diagnostics.Tests
         {
             Test("Session log uses a fresh named file", FreshPath);
             Test("Session log rotates at configured size", Rotation);
+            Test("Single oversized session payload is split below the cap", OversizedSessionPayload);
             Test("Legacy reconnect.log is archived", LegacyArchive);
             Test("Shared fixed log starts a fresh timestamped session", SharedFreshSession);
             Test("Shared fixed log rotates before the configured cap", SharedBoundedRotation);
@@ -45,6 +46,23 @@ namespace Vanilla.Diagnostics.Tests
                 string current = Current(log);
                 Assert(!string.Equals(first, current, StringComparison.OrdinalIgnoreCase), "Log should rotate to another part.");
                 Assert(new FileInfo(current).Length < 1400, "Rotated part should remain bounded.");
+            }
+            finally { Cleanup(root); }
+        }
+
+        private static void OversizedSessionPayload()
+        {
+            string root = Temp();
+            try
+            {
+                object log = Create(root, 1024, 16384, "oversized-line");
+                MethodInfo write = LogType().GetMethod("WriteLine", BindingFlags.Instance | BindingFlags.NonPublic);
+                write.Invoke(log, new object[] { new string('q', 5000) });
+                string dir = Path.Combine(root, "Logs");
+                string[] files = Directory.GetFiles(dir, "reconnect-oversized-line*.log");
+                Assert(files.Length >= 5, "Oversized reconnect payload did not split across parts.");
+                foreach (string file in files)
+                    Assert(new FileInfo(file).Length <= 1024, "Reconnect part exceeded configured max: " + file);
             }
             finally { Cleanup(root); }
         }
