@@ -419,14 +419,42 @@ namespace _4RTools.Model.Vanilla
                                         cartSafetyStop = true;
                                         break;
                                     }
-                                    requestedQuantity = fit;
-                                    activity(token.Account.Label + ": weight maintenance: Cart "
-                                        + cartBefore.Current + "/" + cartBefore.Maximum + " is above 95%; precision fill for "
-                                        + itemRule.ItemName + " (" + itemRule.UnitWeight + " weight each) requests at most " + fit
-                                        + " item(s) to fit the remaining " + cartBefore.Remaining + " weight.");
-                                    input.ReplaceFocusedText(fit.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                                    input.Press(Keys.Enter);
-                                    Thread.Sleep(TransferSettleMs);
+                                    bool fullStackDefinitelyFits = pendingWeightBefore.HasValue
+                                        && cartBefore.Remaining >= pendingWeightBefore.Value;
+                                    if (fullStackDefinitelyFits)
+                                    {
+                                        activity(token.Account.Label + ": weight maintenance: Cart is above 95%, but the remaining "
+                                            + cartBefore.Remaining + " capacity is at least the character's entire current carried weight "
+                                            + pendingWeightBefore.Value + "; the full stack is provably safe.");
+                                        input.Press(Keys.Enter);
+                                        Thread.Sleep(TransferSettleMs);
+                                    }
+                                    else
+                                    {
+                                        requestedQuantity = fit;
+                                        activity(token.Account.Label + ": weight maintenance: Cart "
+                                            + cartBefore.Current + "/" + cartBefore.Maximum + " is above 95%; precision fill for "
+                                            + itemRule.ItemName + " (" + itemRule.UnitWeight + " weight each) requests at most " + fit
+                                            + " item(s) to fit the remaining " + cartBefore.Remaining + " weight.");
+                                        input.ReplaceFocusedText(fit.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                                        input.Press(Keys.Enter);
+                                        Thread.Sleep(TransferSettleMs);
+
+                                        bool promptStillOpen;
+                                        using (Bitmap quantityCheck = input.CaptureClientBitmap())
+                                            promptStillOpen = VanillaInventoryVision.HasQuantityPrompt(quantityCheck);
+                                        if (promptStillOpen)
+                                        {
+                                            // A common safe reason is that the stack contains fewer items than the
+                                            // capacity-derived request. One item is always capacity-safe here.
+                                            requestedQuantity = 1;
+                                            activity(token.Account.Label + ": weight maintenance: precision quantity was not accepted immediately; "
+                                                + "falling back to one " + itemRule.ItemName + " so the transfer remains capacity-safe.");
+                                            input.ReplaceFocusedText("1");
+                                            input.Press(Keys.Enter);
+                                            Thread.Sleep(TransferSettleMs);
+                                        }
+                                    }
                                 }
                                 else
                                 {
