@@ -389,8 +389,9 @@ namespace _4RTools.Model.Vanilla
                 state.Tracker.Reset(clock.Elapsed);
                 Func<bool> cancelled = () => supervisor.SmartTeleportCancelled(token);
                 string detail;
-                bool completed = VanillaVerifiedTeleportAction.TryExecute(pid, token.Account, cancelled, mode, out detail);
+                VanillaVerifiedTeleportAction.TryExecute(pid, token.Account, cancelled, mode, out detail);
                 supervisor.CompleteSmartTeleport(token, detail);
+            }
             catch (OperationCanceledException)
             {
                 VanillaDebugLog.Write("TELEPORT", "event=teleport-cancelled mode=" + mode + " account='"
