@@ -57,6 +57,7 @@ internal static class UiLayoutHarness
                 CheckWeightCartHotkeys(main);
                 SeedFleet(main);
                 RunCase(main, recovery, 1920, 1020, 2, 1F, false);
+                CheckRecoverySplitter(main, recovery);
                 RunCase(main, recovery, 1920, 1020, 4, 1F, false);
                 // Realistic Full-HD work area, allowing space for borders/title/taskbar.
                 RunCase(main, recovery, 1904, 981, 12, 1F, false);
@@ -109,6 +110,32 @@ internal static class UiLayoutHarness
         Check(items.Contains("Smart Teleport now (selected)"), "TESTS menu is missing manual Smart Teleport.");
         Check(items.Contains("Weight/Cart clean now (selected)"), "TESTS menu is missing manual Weight/Cart cleaning.");
         report.AppendLine("CASE workspace policy: Automation tab removed; 180s restart default; manual Smart Teleport and Weight/Cart TESTS actions present.");
+    }
+
+    private static void CheckRecoverySplitter(Form main, object recovery)
+    {
+        caseNumber++;
+        ResizeNativeViewport(main, 1920, 1020);
+        Pump();
+        SplitContainer split = (SplitContainer)Field(recovery, "responsiveSplit");
+        Control left = (Control)Field(recovery, "responsiveLeft");
+        Control logBox = (Control)Field(recovery, "responsiveLogBox");
+        Check(split != null && !split.IsSplitterFixed, "Recovery Characters/Log divider is not draggable.");
+        Check(split.Orientation == Orientation.Vertical, "Full-HD Recovery splitter is not vertical.");
+
+        int original = split.SplitterDistance;
+        int leftBefore = left.Width, logBefore = logBox.Width;
+        int target = Math.Max(split.Panel1MinSize, original - Math.Max(100, split.Width / 10));
+        if (target >= original) target = Math.Max(1, original - 40);
+        split.SplitterDistance = target;
+        Pump();
+        Check(left.Width < leftBefore, "Dragging Recovery divider toward Characters did not shrink the character pane.");
+        Check(logBox.Width > logBefore, "Dragging Recovery divider did not enlarge the Log pane.");
+        Check(FullyVisible(logBox, main), "Log pane became clipped after divider resize.");
+
+        split.SplitterDistance = original;
+        Pump();
+        report.AppendLine("CASE draggable recovery splitter: Characters/Log divider resizes both panes and restores cleanly.");
     }
 
     private static void CheckWeightCartHotkeys(Form main)
