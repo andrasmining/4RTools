@@ -529,9 +529,12 @@ completions/items moved, plus the detailed timestamped events.
 
 ## Character roster and identity discovery
 
-The recovery table is a CHARACTER roster, not one row per login account. Keep
-Description, Username, Slot and Character name in that order after Enabled,
-then existing hotkey/password/proxy/PID/status fields. Several rows may share
+The recovery table is a CHARACTER roster, not one row per login account. Its
+first columns are Enabled, Weight, Smart Teleport, Smart Teleport seconds and
+Smart Teleport hotkey. Then show Description, Username, Slot, Character name and
+the existing resume/password/proxy/PID/status fields. Weight stays a simple
+per-character on/off indicator in this table; detailed Weight settings belong on
+the Weight tab. Several rows may share
 one username; at most two rows may be enabled. Preserve row IDs, encrypted
 passwords and proxy associations. Keep historical JSON names for migration.
 
