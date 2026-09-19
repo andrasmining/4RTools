@@ -255,6 +255,11 @@ namespace _4RTools.Model.Vanilla
             return rule == null ? (uint?)null : rule.UnitWeight;
         }
 
+        internal static bool RequiresPrecisionFill(decimal cartPercent)
+        {
+            return cartPercent >= PrecisionThresholdPercent;
+        }
+
         internal static uint CapacitySafeQuantity(uint currentCartWeight, uint maximumCartWeight, uint unitWeight)
         {
             if (unitWeight == 0 || maximumCartWeight <= currentCartWeight) return 0;
@@ -370,7 +375,7 @@ namespace _4RTools.Model.Vanilla
                                 break;
                             }
 
-                            bool precision = cartBefore.Percent >= PrecisionThresholdPercent;
+                            bool precision = RequiresPrecisionFill(cartBefore.Percent);
                             if (precision && itemRule == null)
                             {
                                 cartSafetyStop = true;
