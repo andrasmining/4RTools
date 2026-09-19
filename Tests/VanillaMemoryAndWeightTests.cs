@@ -26,6 +26,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Weight policy is independently switchable per character", WeightPolicyPerCharacter);
             failed += Test("Inventory vision finds toggled slot panel and occupied slot", InventoryVision);
             failed += Test("Inventory category rail is detected independent of location and scale", InventoryCategoryRail);
+            failed += Test("Cart category selection accepts verified highlight transitions and safe retries", InventoryCategorySelectionVerification);
             failed += Test("Quantity Enter is armed only by positive quantity dialog structure", QuantityPromptGuard);
             failed += Test("Smart Teleport settings are per character with 60s default", SmartTeleportSettings);
             failed += Test("Smart Teleport idle trigger uses only fresh verified X/Y", SmartTeleportTracker);
@@ -236,7 +237,10 @@ namespace Vanilla.Diagnostics.Tests
 
                     using (var rule = new Pen(Color.FromArgb(205, 205, 205), 2))
                         foreach (int y in boundaries)
-                            g.DrawLine(rule, rail.Left, y, rail.Right - 1, y);
+                            // Deliberately make separators shorter than the clickable rail. The
+                            // detector must recover the horizontal click band from the selected
+                            // blue-fill evidence rather than assuming separator width == tab width.
+                            g.DrawLine(rule, rail.Left + Math.Max(3, rail.Width / 3), y, rail.Right - 1, y);
 
                     // Simulate Vanilla's selected vertical tab. Paint it after the rules so the
                     // detector must reconstruct the two obscured boundaries from the remaining
@@ -258,6 +262,9 @@ namespace Vanilla.Diagnostics.Tests
                     throw new Exception("Four category tabs were not recovered from detected UI structure.");
                 if (tabs.SelectedIndex != selectedIndex)
                     throw new Exception("Selected category tab was not recognized at arbitrary location/scale.");
+                if (tabs.SelectedFillBounds.IsEmpty || tabs.RailBounds.IsEmpty
+                    || tabs.RailBounds.Width < rail.Width * 0.60)
+                    throw new Exception("Selected blue fill was not used to recover a usable clickable tab band.");
                 for (int i = 0; i < tabs.Tabs.Length; i++)
                 {
                     Point center = new Point(tabs.Tabs[i].Left + tabs.Tabs[i].Width / 2,
@@ -275,6 +282,51 @@ namespace Vanilla.Diagnostics.Tests
                 if (!VanillaInventoryVision.FirstOccupiedSlot(frame, grid).HasValue)
                     throw new Exception("Occupied slot was not recognized after adding an item to the detected grid.");
             }
+        }
+
+        private static void InventoryCategorySelectionVerification()
+        {
+            var before = new VanillaInventoryCategoryTabs
+            {
+                SelectedIndex = 3,
+                SelectionScores = new[] { 0.010, 0.012, 0.011, 0.240 }
+            };
+            var direct = new VanillaInventoryCategoryTabs
+            {
+                SelectedIndex = 0,
+                SelectionScores = new[] { 0.150, 0.010, 0.012, 0.015 }
+            };
+            if (!VanillaWeightCartAutomation.CategorySelectionConfirmed(0, before, direct))
+                throw new Exception("Direct selected-index verification must accept the requested category.");
+
+            // The real client can render a weaker blue fill than the synthetic fixture. If the
+            // target becomes dominant while the old selected tab clearly loses its highlight,
+            // that transition is still positive visual evidence even when the absolute classifier
+            // deliberately leaves SelectedIndex unknown.
+            var transition = new VanillaInventoryCategoryTabs
+            {
+                SelectedIndex = -1,
+                SelectionScores = new[] { 0.082, 0.020, 0.018, 0.030 }
+            };
+            if (!VanillaWeightCartAutomation.CategorySelectionConfirmed(0, before, transition))
+                throw new Exception("Strong target-rise/old-selection-fall transition was rejected.");
+
+            var ambiguous = new VanillaInventoryCategoryTabs
+            {
+                SelectedIndex = -1,
+                SelectionScores = new[] { 0.050, 0.045, 0.040, 0.180 }
+            };
+            if (VanillaWeightCartAutomation.CategorySelectionConfirmed(0, before, ambiguous))
+                throw new Exception("Ambiguous/unmoved category highlight must fail closed.");
+
+            Rectangle tab = new Rectangle(20, 30, 30, 60);
+            var points = Enumerable.Range(0, 3).Select(i => VanillaWeightCartAutomation.CategoryClickPoint(tab, i)).ToArray();
+            if (points.Distinct().Count() != 3)
+                throw new Exception("Bounded category retries must use distinct deterministic interior points.");
+            foreach (Point point in points)
+                if (!tab.Contains(point) || point.X <= tab.Left || point.X >= tab.Right - 1
+                    || point.Y <= tab.Top || point.Y >= tab.Bottom - 1)
+                    throw new Exception("Category retry click escaped the detected safe tab interior.");
         }
 
         private static void QuantityPromptGuard()
