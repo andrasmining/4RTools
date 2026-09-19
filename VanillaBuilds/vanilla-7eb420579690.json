@@ -1,10 +1,10 @@
 {
   "SchemaVersion": 1,
-  "Label": "Vanilla — verified HP/SP, character name, username, weight, position and map",
+  "Label": "Vanilla — verified HP/SP, character name, username, carried/cart weight, position and map",
   "Sha256": "7eb420579690bd2f5c81b42fa69888cb3d144486d3c275a19073f5216698b3ef",
   "Machine": 332,
   "ImageSize": 15839232,
-  "Evidence": "Verified read-only mappings for HP/SP, character name, weight, X/Y and current map for this exact executable fingerprint. Current map was reproduced across repeated map changes and independently across both live clients on 2026-09-13. User-supplied live username finder evidence on 2026-09-16 identifies two module-relative username copies; both must agree before identity use. Cross-restart/other-account live verification was not performed in this engineering session.",
+  "Evidence": "Verified read-only mappings for HP/SP, character name, carried weight, X/Y and current map for this exact executable fingerprint. Current map was reproduced across repeated map changes and independently across both live clients on 2026-09-13. User-supplied live username finder evidence on 2026-09-16 identifies two module-relative username copies; both must agree before identity use. User-supplied live memory-finder evidence on 2026-09-19 identified Cart current weight at absolute 0x00D3C9C8 (module base 0x00400000 => offset 0x93C9C8), while the immediately preceding 0x00D3C9C4 was among the stable 10000 candidates for the known fixed cart capacity. Cart validation requires MaxCartWeight == 10000 and CurrentCartWeight <= MaxCartWeight before either field becomes usable. Cross-restart/other-account live verification was not performed in this engineering session.",
   "MemoryMap": {
     "SchemaVersion": 1,
     "ProcessName": "Vanilla MMO.exe",
@@ -19,6 +19,8 @@
       "UserNameMirror": {"Module": "Vanilla MMO.exe", "Address": "0xD39159", "Encoding": "Utf8", "ByteCount": 24, "Evidence": "Second user-supplied username copy in the same live finder screenshot, 2026-09-16: absolute 0x01139159, module offset 0xD39159. Diagnostic corroboration only; disagreement invalidates username instead of choosing a copy."},
       "MaxWeight": { "Module": "Vanilla MMO.exe", "Address": "0xD352EC", "Encoding": "UInt32", "Evidence": "Live maximum carried weight matched the visible client on 2026-09-13." },
       "CurrentWeight": { "Module": "Vanilla MMO.exe", "Address": "0xD352F0", "Encoding": "UInt32", "Evidence": "Live current carried weight tracked inventory changes on 2026-09-13." },
+      "MaxCartWeight": { "Module": "Vanilla MMO.exe", "Address": "0x93C9C4", "Encoding": "UInt32", "Evidence": "User-supplied 2026-09-19 finder screenshots: absolute 0x00D3C9C4 is a stable 10000 candidate immediately preceding the independently searched cart-current candidate 0x00D3C9C8. Vanilla cart maximum is known to be fixed at 10000; runtime validation rejects any other value." },
+      "CurrentCartWeight": { "Module": "Vanilla MMO.exe", "Address": "0x93C9C8", "Encoding": "UInt32", "Evidence": "User-supplied 2026-09-19 finder screenshot: cart current weight 263 included absolute 0x00D3C9C8, module base 0x00400000, offset 0x93C9C8. The adjacent preceding DWORD is the validated fixed 10000 cart maximum." },
       "X": { "Module": "Vanilla MMO.exe", "Address": "0xD219FC", "Encoding": "Int32", "Evidence": "Live X coordinate matched controlled movement on 2026-09-13." },
       "Y": { "Module": "Vanilla MMO.exe", "Address": "0xD21A00", "Encoding": "Int32", "Evidence": "Live Y coordinate matched controlled movement on 2026-09-13." },
       "Map": { "Module": "Vanilla MMO.exe", "Address": "0xD34388", "Encoding": "Utf8", "ByteCount": 40, "Evidence": "Live current map text tracked repeated map transitions and matched independently in both live clients on 2026-09-13." }
@@ -34,6 +36,8 @@
     "UserNameMirror",
     "MaxWeight",
     "CurrentWeight",
+    "MaxCartWeight",
+    "CurrentCartWeight",
     "X",
     "Y",
     "Map"
