@@ -167,8 +167,9 @@ namespace _4RTools.Model.Vanilla
     internal sealed class VanillaWeightCartAutomation
     {
         private const int ToggleSettleMs = 500;
-        private const int CategorySettleMs = 350;
-        private const int CategoryVerifyTimeoutMs = 1400;
+        private const int CategorySettleMs = 140;
+        private const int CategoryVerifyTimeoutMs = 1800;
+        private const int CategoryClickAttempts = 3;
         private const int EmptyCategoryConfirmMs = 180;
         private const int TransferSettleMs = 300;
         private const int MaxTransfers = 120;
@@ -495,51 +496,136 @@ namespace _4RTools.Model.Vanilla
             Func<bool> cancelled, System.Action<string> report)
         {
             ThrowIfCancelled(cancelled);
-            Point target;
-            int beforeSelected;
-            using (Bitmap before = input.CaptureClientBitmap())
+            VanillaInventoryCategoryTabs original;
+            using (Bitmap first = input.CaptureClientBitmap())
             {
-                VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(before, inventory);
-                VanillaInventoryCategoryTabs tabs = VanillaInventoryVision.DetectCategoryTabs(before, grid);
-                if (category < 0 || category >= tabs.Tabs.Length)
+                VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(first, inventory);
+                original = VanillaInventoryVision.DetectCategoryTabs(first, grid);
+                if (category < 0 || category >= original.Tabs.Length)
                     throw new InvalidOperationException("Detected category rail does not contain the requested " + categoryName + " tab.");
-                beforeSelected = tabs.SelectedIndex;
-                Rectangle tab = tabs.Tabs[category];
-                target = new Point(tab.Left + tab.Width / 2, tab.Top + tab.Height / 2);
-                report("Detected four-tab inventory rail; current selection=" + CategoryName(beforeSelected)
-                    + ", target=" + categoryName + ".");
-                if (beforeSelected == category)
+                report("Detected four-tab inventory rail; current selection=" + CategoryName(original.SelectedIndex)
+                    + ", target=" + categoryName + ", rail=" + original.RailBounds + ".");
+                if (original.SelectedIndex == category)
                 {
                     report(categoryName + " tab is already positively selected.");
                     return;
                 }
-                input.ClickNormalized(NormalizeX(target.X, before.Width), NormalizeY(target.Y, before.Height));
             }
 
-            Stopwatch watch = Stopwatch.StartNew();
-            int stable = 0;
-            while (watch.ElapsedMilliseconds < CategoryVerifyTimeoutMs)
+            for (int attempt = 0; attempt < CategoryClickAttempts; attempt++)
             {
                 ThrowIfCancelled(cancelled);
-                Thread.Sleep(stable == 0 ? CategorySettleMs : 120);
-                using (Bitmap after = input.CaptureClientBitmap())
+                VanillaInventoryCategoryTabs beforeTabs;
+                Point target;
+                Size frameSize;
+                using (Bitmap before = input.CaptureClientBitmap())
                 {
-                    VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(after, inventory);
-                    VanillaInventoryCategoryTabs tabs = VanillaInventoryVision.DetectCategoryTabs(after, grid);
-                    if (tabs.SelectedIndex == category)
+                    VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(before, inventory);
+                    beforeTabs = VanillaInventoryVision.DetectCategoryTabs(before, grid);
+                    if (beforeTabs.SelectedIndex == category)
                     {
-                        stable++;
-                        if (stable >= 2)
+                        report(categoryName + " tab became selected before click attempt " + (attempt + 1) + "; continuing.");
+                        return;
+                    }
+                    Rectangle tab = beforeTabs.Tabs[category];
+                    target = CategoryClickPoint(tab, attempt);
+                    frameSize = before.Size;
+                    report(categoryName + " click attempt " + (attempt + 1) + "/" + CategoryClickAttempts
+                        + " using a deterministic safe interior point from detected tab bounds " + tab + ".");
+                    input.ClickNormalized(NormalizeX(target.X, before.Width), NormalizeY(target.Y, before.Height));
+                }
+
+                Stopwatch watch = Stopwatch.StartNew();
+                int stable = 0;
+                while (watch.ElapsedMilliseconds < CategoryVerifyTimeoutMs)
+                {
+                    ThrowIfCancelled(cancelled);
+                    Thread.Sleep(CategorySettleMs);
+                    using (Bitmap after = input.CaptureClientBitmap())
+                    {
+                        VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(after, inventory);
+                        VanillaInventoryCategoryTabs afterTabs = VanillaInventoryVision.DetectCategoryTabs(after, grid);
+                        bool confirmed = CategorySelectionConfirmed(category, beforeTabs, afterTabs);
+                        if (confirmed)
                         {
-                            report(categoryName + " tab selection positively verified on two fresh captures.");
-                            return;
+                            stable++;
+                            if (stable >= 2)
+                            {
+                                report(categoryName + " tab selection positively verified on two fresh captures after click attempt "
+                                    + (attempt + 1) + ".");
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            stable = 0;
+                            if (watch.ElapsedMilliseconds >= CategoryVerifyTimeoutMs / 2)
+                            {
+                                report(categoryName + " click attempt " + (attempt + 1)
+                                    + " still unverified; observed selection=" + CategoryName(afterTabs.SelectedIndex)
+                                    + ", targetScore=" + FormatScore(afterTabs.SelectionScores, category) + ".");
+                            }
                         }
                     }
-                    else stable = 0;
                 }
+
+                report(categoryName + " click attempt " + (attempt + 1)
+                    + " was not verified; re-detecting the rail before any retry. No item drag sent.");
             }
+
             throw new InvalidOperationException(categoryName
-                + " tab click was derived from detected UI structure, but the selected-tab state could not be positively verified; no item drag sent.");
+                + " tab remained unverified after " + CategoryClickAttempts
+                + " detected-bound click attempts; no item drag sent.");
+        }
+
+        internal static Point CategoryClickPoint(Rectangle tab, int attempt)
+        {
+            if (tab.Width < 3 || tab.Height < 3)
+                throw new ArgumentException("Detected category tab is too small for a safe click.");
+            double[] xFractions = { 0.50, 0.68, 0.32 };
+            double[] yFractions = { 0.50, 0.43, 0.57 };
+            int index = Math.Max(0, Math.Min(xFractions.Length - 1, attempt));
+            int insetX = Math.Max(1, tab.Width / 6);
+            int insetY = Math.Max(1, tab.Height / 6);
+            int left = tab.Left + insetX, right = tab.Right - insetX - 1;
+            int top = tab.Top + insetY, bottom = tab.Bottom - insetY - 1;
+            if (right < left) { left = tab.Left + 1; right = tab.Right - 2; }
+            if (bottom < top) { top = tab.Top + 1; bottom = tab.Bottom - 2; }
+            int x = left + (int)Math.Round((right - left) * xFractions[index]);
+            int y = top + (int)Math.Round((bottom - top) * yFractions[index]);
+            return new Point(Math.Max(tab.Left + 1, Math.Min(tab.Right - 2, x)),
+                Math.Max(tab.Top + 1, Math.Min(tab.Bottom - 2, y)));
+        }
+
+        internal static bool CategorySelectionConfirmed(int category, VanillaInventoryCategoryTabs before,
+            VanillaInventoryCategoryTabs after)
+        {
+            if (after == null || after.SelectionScores == null || category < 0 || category >= after.SelectionScores.Length)
+                return false;
+            if (after.SelectedIndex == category) return true;
+
+            double targetAfter = after.SelectionScores[category];
+            double targetBefore = before != null && before.SelectionScores != null && category < before.SelectionScores.Length
+                ? before.SelectionScores[category] : 0;
+            double strongestOther = after.SelectionScores.Where((value, index) => index != category).DefaultIfEmpty(0).Max();
+            bool targetDominates = targetAfter >= 0.055 && targetAfter - strongestOther >= 0.018;
+            bool targetRose = targetAfter - targetBefore >= 0.028;
+
+            bool oldSelectionFell = true;
+            if (before != null && before.SelectedIndex >= 0 && before.SelectedIndex != category
+                && before.SelectionScores != null && before.SelectedIndex < before.SelectionScores.Length
+                && before.SelectedIndex < after.SelectionScores.Length)
+            {
+                oldSelectionFell = before.SelectionScores[before.SelectedIndex] - after.SelectionScores[before.SelectedIndex] >= 0.025;
+            }
+            return targetDominates && targetRose && oldSelectionFell;
+        }
+
+        private static string FormatScore(double[] scores, int index)
+        {
+            return scores != null && index >= 0 && index < scores.Length
+                ? scores[index].ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)
+                : "n/a";
         }
 
         private bool TryDragNextDetectedItem(VanillaWeightMaintenanceToken token, VanillaForegroundInput input,
@@ -616,6 +702,8 @@ namespace _4RTools.Model.Vanilla
     internal sealed class VanillaInventoryCategoryTabs
     {
         internal Rectangle[] Tabs;
+        internal Rectangle RailBounds;
+        internal Rectangle SelectedFillBounds;
         internal int SelectedIndex;
         internal double[] SelectionScores;
     }
