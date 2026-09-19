@@ -54,6 +54,9 @@ namespace _4RTools.Model.Vanilla
                 MigrateDirectory(Path.Combine(candidate, "Logs"), LogsDirectory, "*.log", currentInstall);
                 if (currentInstall) CleanupKnownLegacyDirectories(candidate);
             }
+            // Enforce the global log-file cap even for legacy/migrated files that
+            // predate bounded rotation. This runs before normal application logging begins.
+            VanillaLogRotation.NormalizeDirectory(LogsDirectory);
             CleanupOldUpdateStaging();
         }
 
