@@ -142,6 +142,118 @@ namespace _4RTools.Model.Vanilla
         }
     }
 
+    internal static class VanillaVerifiedTeleportAction
+    {
+        internal static bool TryExecute(int pid, VanillaReconnectAccount account, Func<bool> cancelled, string mode, out string detail)
+        {
+            if (pid <= 0) throw new ArgumentOutOfRangeException(nameof(pid));
+            if (account == null) throw new ArgumentNullException(nameof(account));
+            if (cancelled == null) throw new ArgumentNullException(nameof(cancelled));
+            mode = string.IsNullOrWhiteSpace(mode) ? "verified" : mode;
+
+            if (account.SmartTeleportKey < 8 || account.SmartTeleportKey > 254)
+            {
+                detail = "Smart Teleport recovery skipped: no teleport hotkey is configured";
+                VanillaDebugLog.Write("TELEPORT", "event=teleport-skipped mode=" + mode + " account='" + account.Label
+                    + "' accountId=" + account.Id + " pid=" + pid + " reason='teleport hotkey not configured'; inputSent=false.");
+                return false;
+            }
+
+            using (var input = new VanillaBackgroundWindowInput(pid, cancelled))
+            using (Bitmap before = input.CaptureClientBitmap())
+            {
+                if (VanillaTeleportVision.HasWarpDialog(null, before))
+                {
+                    detail = "Smart Teleport deferred because a warp dialog was already open";
+                    VanillaDebugLog.Write("TELEPORT", "event=teleport-deferred mode=" + mode + " account='" + account.Label
+                        + "' pid=" + pid + " reason='warp dialog already open before hotkey'; no input sent.");
+                    return false;
+                }
+
+                VanillaDebugLog.Write("TELEPORT", "event=teleport-hotkey mode=" + mode + " account='" + account.Label
+                    + "' pid=" + pid + " idleSeconds=" + account.SmartTeleportIdleSeconds
+                    + " hotkey='" + account.SmartTeleportHotkeyText + "'.");
+                input.Chord(account.SmartTeleportCtrl, account.SmartTeleportAlt,
+                    account.SmartTeleportShift, (Keys)account.SmartTeleportKey);
+
+                if (!WaitForWarpDialog(input, before, cancelled, 3000))
+                {
+                    detail = "Smart Teleport popup not verified; no Enter sent";
+                    VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='" + account.Label
+                        + "' pid=" + pid + " stage=popup reason='expected warp popup not positively detected'; enterSent=false.");
+                    return false;
+                }
+
+                using (Bitmap confirmation = input.CaptureClientBitmap())
+                {
+                    if (!VanillaTeleportVision.HasWarpDialog(null, confirmation))
+                    {
+                        detail = "Smart Teleport popup was no longer present; no Enter sent";
+                        VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='" + account.Label
+                            + "' pid=" + pid + " stage=confirmation reason='warp popup disappeared'; enterSent=false.");
+                        return false;
+                    }
+                }
+
+                VanillaDebugLog.Write("TELEPORT", "event=teleport-enter mode=" + mode + " account='" + account.Label
+                    + "' pid=" + pid + " popupConfirmed=true firstChoiceSelected=true.");
+                input.Press(Keys.Enter);
+                if (!WaitForWarpDialogGone(input, cancelled, 2500))
+                {
+                    detail = "Smart Teleport confirmation did not clear; no further input sent";
+                    VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='" + account.Label
+                        + "' pid=" + pid + " stage=post-enter reason='warp popup remained visible'; no further input sent.");
+                    return false;
+                }
+
+                detail = "Smart Teleport completed in background";
+                VanillaDebugLog.Write("TELEPORT", "event=teleport-complete mode=" + mode + " account='" + account.Label
+                    + "' accountId=" + account.Id + " pid=" + pid + " popupCleared=true.");
+                return true;
+            }
+        }
+
+        private static bool WaitForWarpDialog(VanillaBackgroundWindowInput input, Bitmap before, Func<bool> cancelled, int timeoutMs)
+        {
+            Stopwatch watch = Stopwatch.StartNew();
+            int consecutive = 0;
+            while (watch.ElapsedMilliseconds < timeoutMs)
+            {
+                if (cancelled()) throw new OperationCanceledException();
+                using (Bitmap frame = input.CaptureClientBitmap())
+                {
+                    if (VanillaTeleportVision.HasWarpDialog(before, frame))
+                    {
+                        if (++consecutive >= 2) return true;
+                    }
+                    else consecutive = 0;
+                }
+                Thread.Sleep(150);
+            }
+            return false;
+        }
+
+        private static bool WaitForWarpDialogGone(VanillaBackgroundWindowInput input, Func<bool> cancelled, int timeoutMs)
+        {
+            Stopwatch watch = Stopwatch.StartNew();
+            int absent = 0;
+            while (watch.ElapsedMilliseconds < timeoutMs)
+            {
+                if (cancelled()) throw new OperationCanceledException();
+                using (Bitmap frame = input.CaptureClientBitmap())
+                {
+                    if (!VanillaTeleportVision.HasWarpDialog(null, frame))
+                    {
+                        if (++absent >= 2) return true;
+                    }
+                    else absent = 0;
+                }
+                Thread.Sleep(150);
+            }
+            return false;
+        }
+    }
+
     internal sealed class VanillaSmartTeleportService : IDisposable
     {
         private sealed class CharacterState
@@ -276,58 +388,9 @@ namespace _4RTools.Model.Vanilla
                     + "' accountId=" + token.AccountId + " pid=" + pid + " hotkey='" + token.Account.SmartTeleportHotkeyText + "'.");
                 state.Tracker.Reset(clock.Elapsed);
                 Func<bool> cancelled = () => supervisor.SmartTeleportCancelled(token);
-                using (var input = new VanillaBackgroundWindowInput(pid, cancelled))
-                using (Bitmap before = input.CaptureClientBitmap())
-                {
-                    if (VanillaTeleportVision.HasWarpDialog(null, before))
-                    {
-                        VanillaDebugLog.Write("TELEPORT", "event=teleport-deferred mode=" + mode + " account='" + token.Account.Label
-                            + "' pid=" + pid + " reason='warp dialog already open before hotkey'; no input sent.");
-                        supervisor.CompleteSmartTeleport(token, "Smart Teleport deferred because a warp dialog was already open");
-                        return;
-                    }
-
-                    VanillaDebugLog.Write("TELEPORT", "event=teleport-hotkey mode=" + mode + " account='" + token.Account.Label
-                        + "' pid=" + pid + " idleSeconds=" + token.Account.SmartTeleportIdleSeconds
-                        + " hotkey='" + token.Account.SmartTeleportHotkeyText + "'.");
-                    input.Chord(token.Account.SmartTeleportCtrl, token.Account.SmartTeleportAlt,
-                        token.Account.SmartTeleportShift, (Keys)token.Account.SmartTeleportKey);
-
-                    bool popup = WaitForWarpDialog(input, before, cancelled, 3000);
-                    if (!popup)
-                    {
-                        VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='" + token.Account.Label
-                            + "' pid=" + pid + " stage=popup reason='expected warp popup not positively detected'; enterSent=false.");
-                        supervisor.CompleteSmartTeleport(token, "Smart Teleport popup not verified; no Enter sent");
-                        return;
-                    }
-
-                    using (Bitmap confirmation = input.CaptureClientBitmap())
-                    {
-                        if (!VanillaTeleportVision.HasWarpDialog(null, confirmation))
-                        {
-                            VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='" + token.Account.Label
-                                + "' pid=" + pid + " stage=confirmation reason='warp popup disappeared'; enterSent=false.");
-                            supervisor.CompleteSmartTeleport(token, "Smart Teleport popup was no longer present; no Enter sent");
-                            return;
-                        }
-                    }
-                    VanillaDebugLog.Write("TELEPORT", "event=teleport-enter mode=" + mode + " account='" + token.Account.Label
-                        + "' pid=" + pid + " popupConfirmed=true firstChoiceSelected=true.");
-                    input.Press(Keys.Enter);
-                    if (!WaitForWarpDialogGone(input, cancelled, 2500))
-                    {
-                        VanillaDebugLog.Write("TELEPORT", "event=teleport-failed mode=" + mode + " account='" + token.Account.Label
-                            + "' pid=" + pid + " stage=post-enter reason='warp popup remained visible'; no further input sent.");
-                        supervisor.CompleteSmartTeleport(token, "Smart Teleport confirmation did not clear; no further input sent");
-                        return;
-                    }
-
-                    VanillaDebugLog.Write("TELEPORT", "event=teleport-complete mode=" + mode + " account='" + token.Account.Label
-                        + "' accountId=" + token.AccountId + " pid=" + pid + " popupCleared=true.");
-                    supervisor.CompleteSmartTeleport(token, "Smart Teleport completed in background");
-                }
-            }
+                string detail;
+                bool completed = VanillaVerifiedTeleportAction.TryExecute(pid, token.Account, cancelled, mode, out detail);
+                supervisor.CompleteSmartTeleport(token, detail);
             catch (OperationCanceledException)
             {
                 VanillaDebugLog.Write("TELEPORT", "event=teleport-cancelled mode=" + mode + " account='"
@@ -348,46 +411,6 @@ namespace _4RTools.Model.Vanilla
                 if (token != null) state.Tracker.Reset(clock.Elapsed);
                 lock (gate) state.Running = false;
             }
-        }
-
-        private static bool WaitForWarpDialog(VanillaBackgroundWindowInput input, Bitmap before, Func<bool> cancelled, int timeoutMs)
-        {
-            Stopwatch watch = Stopwatch.StartNew();
-            int consecutive = 0;
-            while (watch.ElapsedMilliseconds < timeoutMs)
-            {
-                if (cancelled()) throw new OperationCanceledException();
-                using (Bitmap frame = input.CaptureClientBitmap())
-                {
-                    if (VanillaTeleportVision.HasWarpDialog(before, frame))
-                    {
-                        if (++consecutive >= 2) return true;
-                    }
-                    else consecutive = 0;
-                }
-                Thread.Sleep(150);
-            }
-            return false;
-        }
-
-        private static bool WaitForWarpDialogGone(VanillaBackgroundWindowInput input, Func<bool> cancelled, int timeoutMs)
-        {
-            Stopwatch watch = Stopwatch.StartNew();
-            int absent = 0;
-            while (watch.ElapsedMilliseconds < timeoutMs)
-            {
-                if (cancelled()) throw new OperationCanceledException();
-                using (Bitmap frame = input.CaptureClientBitmap())
-                {
-                    if (!VanillaTeleportVision.HasWarpDialog(null, frame))
-                    {
-                        if (++absent >= 2) return true;
-                    }
-                    else absent = 0;
-                }
-                Thread.Sleep(150);
-            }
-            return false;
         }
 
         public void Dispose()
