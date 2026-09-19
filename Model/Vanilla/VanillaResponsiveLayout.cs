@@ -38,6 +38,7 @@ namespace _4RTools.Model.Vanilla
 
         internal static bool UseWideRecoveryLayout(int availableWidth) { return availableWidth >= 1100; }
         internal static int MinimumVisibleAccountRows(int accountCount) { return Math.Max(5, accountCount + 1); }
+        internal static int MinimumRecoveryLogHeight(int fontHeight) { return Math.Max(84, Math.Max(1, fontHeight) * 4); }
         internal static int PreferredAccountsPanelHeight(int availableHeight)
         {
             if (availableHeight < 620) return 170;
@@ -219,7 +220,11 @@ namespace _4RTools.Model.Vanilla
                 int buttonsHeight = MeasureFlow(responsiveAccountButtons, Math.Max(1, measureLeftWidth - 16));
                 int minimumGrid = accounts.ColumnHeadersHeight + rowHeight * Math.Min(5, MinimumVisibleAccountRows(accounts.Rows.Count)) + 4;
                 int minimumLeft = headerHeight + gap + minimumGrid + buttonsHeight + Font.Height + 26;
-                int minimumLog = Math.Max(116, Font.Height * 6);
+                // The log has its own vertical scrollbar, so four readable lines are
+                // enough for the minimum stacked layout. Keeping a six-line hard minimum made
+                // the entire Recovery surface exceed the viewport at 1050x700 and 150% text,
+                // clipping the log itself behind the outer AutoScroll viewport.
+                int minimumLog = MinimumRecoveryLogHeight(Font.Height);
                 int needed = wide ? minimumLeft : minimumLeft + minimumLog + splitterWidth;
                 Size scrollMinimum = new Size(0, needed + gap * 2);
                 if (responsiveRoot.AutoScrollMinSize != scrollMinimum) responsiveRoot.AutoScrollMinSize = scrollMinimum;
