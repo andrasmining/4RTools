@@ -129,7 +129,25 @@ namespace _4RTools.Model.Vanilla
             }
             try
             {
-                text.Append(File.ReadAllText(path));
+                var info = new FileInfo(path);
+                const int maxBytes = 4 * 1024 * 1024;
+                if (info.Length <= maxBytes)
+                {
+                    text.Append(File.ReadAllText(path));
+                }
+                else
+                {
+                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete))
+                    {
+                        stream.Seek(-maxBytes, SeekOrigin.End);
+                        using (var reader = new StreamReader(stream, Encoding.UTF8, true))
+                        {
+                            text.AppendLine("(file larger than 4 MB; including final 4 MB)");
+                            text.Append(reader.ReadToEnd());
+                        }
+                    }
+                }
                 if (text.Length > 0 && text[text.Length - 1] != '\n') text.AppendLine();
             }
             catch (Exception ex) { text.AppendLine("(could not read file: " + ex.Message + ")"); }
