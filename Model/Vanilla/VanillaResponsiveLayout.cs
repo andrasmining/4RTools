@@ -232,7 +232,14 @@ namespace _4RTools.Model.Vanilla
                     responsiveSplit.Panel1MinSize = 0;
                     responsiveSplit.Panel2MinSize = 0;
                     responsiveSplit.SplitterWidth = splitterWidth;
-                    responsiveSplit.Orientation = wide ? Orientation.Vertical : Orientation.Horizontal;
+                    Orientation targetOrientation = wide ? Orientation.Vertical : Orientation.Horizontal;
+                    if (responsiveSplit.Orientation != targetOrientation)
+                    {
+                        // Clear the old-axis distance before rotating; a wide vertical distance can
+                        // exceed the available height when switching to the stacked narrow layout.
+                        responsiveSplit.SplitterDistance = 1;
+                        responsiveSplit.Orientation = targetOrientation;
+                    }
                     Put(responsiveSplit, origin.X, origin.Y, width, height);
                     responsiveSplit.PerformLayout();
 
@@ -274,7 +281,9 @@ namespace _4RTools.Model.Vanilla
             double ratio = Math.Max(0.05, Math.Min(0.95, responsiveSplit.SplitterDistance / (double)usable));
             if (responsiveSplit.Orientation == Orientation.Vertical) responsiveWideSplitRatio = ratio;
             else responsiveNarrowSplitRatio = ratio;
-            ResizeAccountColumns();
+            // Header/account bounds are manually optimized inside Panel1, so re-run the bounded
+            // responsive arrangement after every actual user drag.
+            ArrangeRecoveryWorkspace();
         }
 
         private static void Put(Control control, int x, int y, int width, int height)
