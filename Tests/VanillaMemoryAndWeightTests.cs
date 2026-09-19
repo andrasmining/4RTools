@@ -24,6 +24,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Legacy Weight settings inherit dedicated Alt+3 Autobattle STOP", WeightCartStopHotkeyMigration);
             failed += Test("Weight policy is independently switchable per character", WeightPolicyPerCharacter);
             failed += Test("Inventory vision finds toggled slot panel and occupied slot", InventoryVision);
+            failed += Test("Inventory category rail is detected independent of location and scale", InventoryCategoryRail);
             failed += Test("Quantity Enter is armed only by positive quantity dialog structure", QuantityPromptGuard);
             failed += Test("Smart Teleport settings are per character with 60s default", SmartTeleportSettings);
             failed += Test("Smart Teleport idle trigger uses only fresh verified X/Y", SmartTeleportTracker);
@@ -201,6 +202,77 @@ namespace Vanilla.Diagnostics.Tests
                 Point? occupied = VanillaInventoryVision.FirstOccupiedSlot(after, grid);
                 if (!occupied.HasValue || Math.Abs(occupied.Value.X - 150) > 8 || Math.Abs(occupied.Value.Y - 175) > 8)
                     throw new Exception("Occupied inventory slot was not resolved from the detected lattice.");
+            }
+        }
+
+        private static void InventoryCategoryRail()
+        {
+            VerifyCategoryRail(new Size(900, 650), new Rectangle(70, 55, 360, 310), 34, 54, 3);
+            VerifyCategoryRail(new Size(1500, 950), new Rectangle(760, 180, 500, 430), 48, 78, 1);
+        }
+
+        private static void VerifyCategoryRail(Size canvas, Rectangle panel, int slotSpacing, int categoryStep, int selectedIndex)
+        {
+            using (var frame = new Bitmap(canvas.Width, canvas.Height))
+            {
+                int railWidth = Math.Max(28, (int)Math.Round(slotSpacing * 1.15));
+                int firstColumn = panel.Left + railWidth + slotSpacing;
+                int origin = panel.Top + Math.Max(18, slotSpacing / 2);
+                int[] columns = Enumerable.Range(0, 7).Select(i => firstColumn + i * slotSpacing).ToArray();
+                int[] rows = Enumerable.Range(0, 5).Select(i => origin + categoryStep / 2 + i * slotSpacing).ToArray();
+                int[] boundaries = Enumerable.Range(0, 5).Select(i => origin + i * categoryStep).ToArray();
+                Rectangle rail = Rectangle.FromLTRB(panel.Left, boundaries[0], firstColumn - (int)Math.Round(slotSpacing * 0.65), boundaries[4]);
+
+                using (Graphics g = Graphics.FromImage(frame))
+                {
+                    g.Clear(Color.FromArgb(85, 75, 60));
+                    g.FillRectangle(Brushes.White, panel);
+                    using (var empty = new SolidBrush(Color.FromArgb(205, 216, 232)))
+                        foreach (int y in rows)
+                            foreach (int x in columns)
+                                g.FillEllipse(empty, x - slotSpacing / 3, y - Math.Max(5, slotSpacing / 6),
+                                    Math.Max(18, slotSpacing * 2 / 3), Math.Max(10, slotSpacing / 3));
+
+                    using (var rule = new Pen(Color.FromArgb(205, 205, 205), 2))
+                        foreach (int y in boundaries)
+                            g.DrawLine(rule, rail.Left, y, rail.Right - 1, y);
+
+                    // Simulate Vanilla's selected vertical tab. Paint it after the rules so the
+                    // detector must reconstruct the two obscured boundaries from the remaining
+                    // repeated separator lattice, as happens on the real client.
+                    using (var selected = new SolidBrush(Color.FromArgb(204, 220, 248)))
+                        g.FillRectangle(selected, Rectangle.FromLTRB(rail.Left, boundaries[selectedIndex],
+                            rail.Right, boundaries[selectedIndex + 1]));
+                }
+
+                var grid = new VanillaUiSlotGrid
+                {
+                    Panel = panel,
+                    Columns = columns,
+                    Rows = rows,
+                    EmptyPaleThreshold = 220
+                };
+                VanillaInventoryCategoryTabs tabs = VanillaInventoryVision.DetectCategoryTabs(frame, grid);
+                if (tabs.Tabs == null || tabs.Tabs.Length != 4)
+                    throw new Exception("Four category tabs were not recovered from detected UI structure.");
+                if (tabs.SelectedIndex != selectedIndex)
+                    throw new Exception("Selected category tab was not recognized at arbitrary location/scale.");
+                for (int i = 0; i < tabs.Tabs.Length; i++)
+                {
+                    Point center = new Point(tabs.Tabs[i].Left + tabs.Tabs[i].Width / 2,
+                        tabs.Tabs[i].Top + tabs.Tabs[i].Height / 2);
+                    if (!rail.Contains(center))
+                        throw new Exception("Detected category click target escaped the visually detected tab rail.");
+                }
+
+                if (VanillaInventoryVision.FirstOccupiedSlot(frame, grid).HasValue)
+                    throw new Exception("An all-empty detected slot grid must be recognized as empty.");
+
+                using (Graphics g = Graphics.FromImage(frame))
+                    g.FillRectangle(Brushes.OrangeRed, columns[0] - slotSpacing / 4, rows[0] - slotSpacing / 5,
+                        Math.Max(12, slotSpacing / 2), Math.Max(12, slotSpacing * 2 / 5));
+                if (!VanillaInventoryVision.FirstOccupiedSlot(frame, grid).HasValue)
+                    throw new Exception("Occupied slot was not recognized after adding an item to the detected grid.");
             }
         }
 
