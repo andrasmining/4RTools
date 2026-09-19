@@ -84,13 +84,15 @@ appearance is only styling, not an active-tab signal. The selected category is d
 structurally from the tab whose right edge is open into the Inventory body while inactive
 tabs retain their right border. If a click is not positively confirmed, 4RTools re-detects
 the rail and retries through a bounded deterministic set of safe interior points while
-polling fresh visual state. It advances
-only after two fresh grid captures both show that category empty. Cart drops require a
-detected empty Cart slot; there is no arbitrary fallback drop point. For stack transfers Enter is pressed
-only after a quantity dialog is positively detected. A quantity-one item has no dialog
-and receives no Enter. Major Cart steps are visible in the Recovery log and global
-debug log. If the UI cannot be identified safely, no empty Cart slot exists, the Cart
-rejects a transfer, or progress cannot be verified, input stops and only that character
+polling fresh visual state. For item traversal, only the first inventory slot is authoritative:
+4RTools classifies it against a fresh detected empty-slot reference, requiring two consecutive
+occupied captures before dragging and two consecutive empty captures before advancing. Cart
+drops may land anywhere inside the detected Cart item body and rotate deterministically among
+safe detected interior points; an empty destination slot is not required. For stack transfers
+Enter is pressed only after a quantity dialog is positively detected. A quantity-one item has no
+dialog and receives no Enter. Major Cart steps are visible in the Recovery log and global debug
+log. If the UI cannot be identified safely, first-slot state stays ambiguous, the Cart rejects a
+transfer, or progress cannot be verified, input stops and only that character
 is held for manual Cart emptying with Autobattle left OFF. That hold survives unrelated
 settings and supervisor STOP/START changes and is removed only by the explicit hold-clear
 action. Memory access remains read-only; inventory state is never read/written from game memory.
@@ -153,7 +155,8 @@ detailed event trail.
 Character roster
 ----------------
 One row represents one character, not one account. Several rows may share a
-username; at most two may be enabled. The list starts with Enabled, Weight and
+username; at most two may be enabled. The Recovery Characters/Log divider is draggable so the
+user can temporarily enlarge either pane. The list starts with Enabled, Weight and
 Smart Teleport, then Smart Teleport seconds and hotkey. Description, Username,
 Slot and Character name follow. Weight remains on/off only in this list; detailed
 Weight/Cart settings are on the Weight tab. Running characters are discovered automatically
