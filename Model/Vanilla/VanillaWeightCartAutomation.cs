@@ -168,6 +168,8 @@ namespace _4RTools.Model.Vanilla
     {
         private const int ToggleSettleMs = 500;
         private const int CategorySettleMs = 350;
+        private const int CategoryVerifyTimeoutMs = 1400;
+        private const int EmptyCategoryConfirmMs = 180;
         private const int TransferSettleMs = 300;
         private const int MaxTransfers = 120;
         private readonly VanillaFleetMonitor fleet;
@@ -242,30 +244,26 @@ namespace _4RTools.Model.Vanilla
                     foreach (int category in categories)
                     {
                         ThrowIfCancelled(cancelled);
-                        SelectCategory(input, inventory, category);
-                        Thread.Sleep(CategorySettleMs);
-                        string categoryName = category == 0 ? "Use" : category == 1 ? "Equip" : "Etc";
-                        activity(token.Account.Label + ": weight maintenance: processing " + categoryName + " inventory items.");
+                        string categoryName = CategoryName(category);
+                        activity(token.Account.Label + ": weight maintenance: detecting and selecting " + categoryName + " tab.");
+                        SelectCategory(input, inventory, category, categoryName, cancelled, activity);
                         int noProgress = 0;
+                        int categoryMoved = 0;
                         while (moved < MaxTransfers)
                         {
                             ThrowIfCancelled(cancelled);
-                            uint? pendingWeightBefore = null;
+                            uint? pendingWeightBefore;
                             Point sourcePoint;
-                            using (Bitmap frame = input.CaptureClientBitmap())
+                            if (!TryDragNextDetectedItem(token, input, inventory, cart, categoryName, cancelled, activity,
+                                out sourcePoint, out pendingWeightBefore))
                             {
-                                VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(frame, inventory);
-                                Point? source = VanillaInventoryVision.FirstOccupiedSlot(frame, grid);
-                                if (!source.HasValue) break;
-                                sourcePoint = source.Value;
-                                VanillaUiSlotGrid cartGrid = VanillaInventoryVision.DetectSlotGrid(frame, cart);
-                                Point destination = VanillaInventoryVision.FirstEmptySlot(frame, cartGrid)
-                                    ?? VanillaInventoryVision.SafeDropPoint(cart, frame.Size);
-                                Point from = sourcePoint;
-                                uint? weightBefore = CurrentWeight(token.ProcessId);
-                                input.DragNormalized(NormalizeX(from.X, frame.Width), NormalizeY(from.Y, frame.Height),
-                                    NormalizeX(destination.X, frame.Width), NormalizeY(destination.Y, frame.Height));
-                                pendingWeightBefore = weightBefore;
+                                activity(token.Account.Label + ": weight maintenance: " + categoryName
+                                    + " confirmed empty on two fresh detected-grid scans; moved " + categoryMoved
+                                    + " item(s) from this tab; advancing.");
+                                VanillaDebugLog.Write("WEIGHT", "event=cart-category-empty account='" + token.Account.Label
+                                    + "' accountId=" + token.AccountId + " pid=" + pid + " category=" + categoryName
+                                    + " moved=" + categoryMoved + " samples=2.");
+                                break;
                             }
 
                             Thread.Sleep(TransferSettleMs);
@@ -278,7 +276,7 @@ namespace _4RTools.Model.Vanilla
                             }
                             else
                             {
-                                VanillaDebugLog.Write("WEIGHT", token.Account.Label + ": no quantity dialog detected during the bounded post-drag window; Enter was NOT sent (single-item safe path).");
+                                activity(token.Account.Label + ": weight maintenance: no quantity dialog detected in the bounded window; Enter NOT sent.");
                             }
 
                             bool cleared, weightReduced = WaitForWeightReduction(token.ProcessId, pendingWeightBefore, cancelled);
@@ -306,7 +304,9 @@ namespace _4RTools.Model.Vanilla
                             {
                                 noProgress = 0;
                                 moved++;
-                                activity(token.Account.Label + ": weight maintenance: moved inventory item " + moved + " to Cart.");
+                                categoryMoved++;
+                                activity(token.Account.Label + ": weight maintenance: moved " + categoryName + " item "
+                                    + categoryMoved + " (total " + moved + ") to a detected empty Cart slot.");
                             }
                         }
                         if (moved >= MaxTransfers)
@@ -315,6 +315,7 @@ namespace _4RTools.Model.Vanilla
                             throw new VanillaCartManualException("Transfer safety limit reached. Autobattle is left OFF for manual inspection.");
                         }
                     }
+                    activity(token.Account.Label + ": weight maintenance: every enabled inventory category is confirmed complete.");
 
                     ClosePanelIfOpen(input, settings.CartCtrl, settings.CartAlt, settings.CartShift, (Keys)settings.CartKey, cart, "Cart", cancelled);
                     ClosePanelIfOpen(input, settings.InventoryCtrl, settings.InventoryAlt, settings.InventoryShift, (Keys)settings.InventoryKey, inventory, "Inventory", cancelled);
@@ -487,15 +488,105 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        private static void SelectCategory(VanillaForegroundInput input, Rectangle inventory, int category)
+        private static void SelectCategory(VanillaForegroundInput input, Rectangle inventory, int category, string categoryName,
+            Func<bool> cancelled, System.Action<string> report)
         {
-            double x = inventory.Left + Math.Max(8, inventory.Width * 0.025);
-            double bodyTop = inventory.Top + Math.Max(18, inventory.Height * 0.07);
-            double bodyBottom = inventory.Bottom - Math.Max(24, inventory.Height * 0.09);
-            double segment = Math.Max(20, (bodyBottom - bodyTop) / 4.0);
-            double y = bodyTop + segment * (category + 0.5);
-            using (Bitmap frame = input.CaptureClientBitmap())
-                input.ClickNormalized(NormalizeX(x, frame.Width), NormalizeY(y, frame.Height));
+            ThrowIfCancelled(cancelled);
+            Point target;
+            int beforeSelected;
+            using (Bitmap before = input.CaptureClientBitmap())
+            {
+                VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(before, inventory);
+                VanillaInventoryCategoryTabs tabs = VanillaInventoryVision.DetectCategoryTabs(before, grid);
+                if (category < 0 || category >= tabs.Tabs.Length)
+                    throw new InvalidOperationException("Detected category rail does not contain the requested " + categoryName + " tab.");
+                beforeSelected = tabs.SelectedIndex;
+                Rectangle tab = tabs.Tabs[category];
+                target = new Point(tab.Left + tab.Width / 2, tab.Top + tab.Height / 2);
+                report("Detected four-tab inventory rail; current selection=" + CategoryName(beforeSelected)
+                    + ", target=" + categoryName + ".");
+                if (beforeSelected == category)
+                {
+                    report(categoryName + " tab is already positively selected.");
+                    return;
+                }
+                input.ClickNormalized(NormalizeX(target.X, before.Width), NormalizeY(target.Y, before.Height));
+            }
+
+            Stopwatch watch = Stopwatch.StartNew();
+            int stable = 0;
+            while (watch.ElapsedMilliseconds < CategoryVerifyTimeoutMs)
+            {
+                ThrowIfCancelled(cancelled);
+                Thread.Sleep(stable == 0 ? CategorySettleMs : 120);
+                using (Bitmap after = input.CaptureClientBitmap())
+                {
+                    VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(after, inventory);
+                    VanillaInventoryCategoryTabs tabs = VanillaInventoryVision.DetectCategoryTabs(after, grid);
+                    if (tabs.SelectedIndex == category)
+                    {
+                        stable++;
+                        if (stable >= 2)
+                        {
+                            report(categoryName + " tab selection positively verified on two fresh captures.");
+                            return;
+                        }
+                    }
+                    else stable = 0;
+                }
+            }
+            throw new InvalidOperationException(categoryName
+                + " tab click was derived from detected UI structure, but the selected-tab state could not be positively verified; no item drag sent.");
+        }
+
+        private bool TryDragNextDetectedItem(VanillaWeightMaintenanceToken token, VanillaForegroundInput input,
+            Rectangle inventory, Rectangle cart, string categoryName, Func<bool> cancelled, System.Action<string> report,
+            out Point sourcePoint, out uint? weightBefore)
+        {
+            sourcePoint = Point.Empty;
+            weightBefore = null;
+            for (int sample = 1; sample <= 2; sample++)
+            {
+                ThrowIfCancelled(cancelled);
+                using (Bitmap frame = input.CaptureClientBitmap())
+                {
+                    VanillaUiSlotGrid inventoryGrid = VanillaInventoryVision.DetectSlotGrid(frame, inventory);
+                    Point? source = VanillaInventoryVision.FirstOccupiedSlot(frame, inventoryGrid);
+                    if (!source.HasValue)
+                    {
+                        if (sample == 1)
+                        {
+                            report(categoryName + " scan 1/2 found no occupied slot; confirming before advancing.");
+                        }
+                        else return false;
+                    }
+                    else
+                    {
+                        VanillaUiSlotGrid cartGrid = VanillaInventoryVision.DetectSlotGrid(frame, cart);
+                        Point? destination = VanillaInventoryVision.FirstEmptySlot(frame, cartGrid);
+                        if (!destination.HasValue)
+                            throw new VanillaCartManualException("No positively detected empty Cart slot remains. No fallback coordinate was used; Autobattle stays OFF for manual Cart inspection.");
+
+                        sourcePoint = source.Value;
+                        weightBefore = CurrentWeight(token.ProcessId);
+                        report(categoryName + " item detected and an empty Cart slot detected; dragging between detected slot centers.");
+                        input.DragNormalized(NormalizeX(sourcePoint.X, frame.Width), NormalizeY(sourcePoint.Y, frame.Height),
+                            NormalizeX(destination.Value.X, frame.Width), NormalizeY(destination.Value.Y, frame.Height));
+                        return true;
+                    }
+                }
+                Thread.Sleep(EmptyCategoryConfirmMs);
+            }
+            return false;
+        }
+
+        private static string CategoryName(int category)
+        {
+            if (category == 0) return "Use";
+            if (category == 1) return "Equip";
+            if (category == 2) return "Etc";
+            if (category == 3) return "Favorite";
+            return "unknown";
         }
 
         private static double IntersectionRatio(Rectangle a, Rectangle b)
