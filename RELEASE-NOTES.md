@@ -1,30 +1,28 @@
-# 4RTools Vanilla 0.6.54
+# 4RTools Vanilla 0.6.55
 
-## Cart category click verification retry
+## Correct active Inventory tab detection
 
-This release fixes the live Weight/Cart failure where 4RTools correctly detected **Favorite** as the current Inventory category and **Use** as the target, sent the Use click, but then stopped because the selected-tab state could not be positively verified.
+The v0.6.54 live test showed that the **Use** tab had actually been selected correctly, but 4RTools still reported **Favorite** and rejected the action.
 
-The category switch path is now more robust while remaining fully detection-driven:
+The cause was visual semantics: Vanilla renders **Fav with a blue background even when Fav is not the active category**. Blue Fav is styling, not the selection indicator.
 
-- Recover the four-tab Inventory rail from the live panel/slot/separator structure.
-- Use the **actual detected blue selected-tab fill** to recover the horizontal clickable rail band when available, instead of relying only on separator-line width.
-- Click only deterministic safe interior points inside the freshly detected target-tab rectangle.
-- If the first click is not visually confirmed, re-detect the entire rail and retry at up to two additional safe interior points.
-- After each click, poll fresh screenshots for up to a bounded timeout rather than trusting one fixed-delay frame.
-- Accept either a direct target selected-tab classification or a strong visual transition where the target highlight rises/dominates while the old selected tab loses its highlight.
-- Require two consecutive positive visual confirmations before any item drag begins.
-- If all bounded attempts remain unverified, fail closed with Autobattle OFF and no drag input.
+The active Inventory category is now detected from the tab structure itself:
 
-The visible Recovery log now records each click attempt and whether Windows accepted it for the verified Vanilla client, followed by the observed selection/score while waiting for visual confirmation. Full coordinate/window diagnostics remain available in COPY DEBUG LOG.
+- Recover the four category tab boundaries from the detected Inventory panel and slot lattice.
+- Recover the category rail's vertical borders from repeated grayscale UI-rule pixels.
+- The **active tab is the one whose right edge is open/merged into the Inventory body**.
+- Inactive tabs retain a closed vertical right border.
+- Fav may remain blue without being classified as active.
+- The active/open-edge state must be stable enough to beat the other three tabs before it is accepted.
+- If the requested tab is already active, two fresh captures confirm it and no redundant click is sent.
+- Otherwise the existing bounded detected-tab retry path remains: up to three deterministic safe interior click points, fresh rail detection between attempts, and two positive captures before item dragging.
 
-The previously added safeguards remain: categories advance only after two fresh empty-grid detections, Cart destinations must be positively detected empty slots, and there is no arbitrary fallback drop point.
+This exactly matches the supplied live screenshot, where **Use items are visible and Use is active while Fav remains blue**.
 
-## Input timing boundary
-
-This release does **not** add randomized positions or randomized delays for the purpose of avoiding bot/anti-cheat detection. UI robustness comes from detected control bounds, deterministic bounded retry points and waits driven by observed UI state.
+All previous Cart safeguards remain: two fresh empty-grid scans before advancing categories, only positively detected empty Cart destinations, no fallback drop coordinates, visible Recovery-log progress, and fail-closed manual hold when UI state is uncertain.
 
 ## Validation scope and limits
 
-Automated validation covers category-rail detection at multiple panel locations/scales, recovery of the click band from blue selected-tab fill even when separator lines are shorter, three distinct safe interior retry points, direct selected-index verification, weaker but unambiguous highlight-transition verification, ambiguous-state rejection, Debug/Release builds, portable launch, native recovery and responsive UI validation.
+The regression fixture now explicitly reproduces the live appearance: **Use active + Fav blue**. It also tests other active tabs, multiple panel positions/scales, open-edge transition verification, bounded click points, Debug/Release builds, portable launch, native recovery and responsive UI validation.
 
-The engineering environment still cannot operate the user's live Vanilla/Gepard session. The exact v0.6.53 failure from the supplied screenshot/log is addressed structurally, but the final live click/selection behavior remains a VPS observation boundary.
+The engineering environment cannot drive the user's live Vanilla/Gepard window, so the final end-to-end confirmation remains the next VPS test. No randomized anti-detection input behavior, game-memory writes, injection, packet manipulation or Gepard bypass is used.
