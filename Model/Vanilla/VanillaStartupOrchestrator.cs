@@ -427,9 +427,9 @@ namespace _4RTools.Model.Vanilla
                     WaitForAutobattleReady(account, pid.Value,
                         () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
                         60000, "Sequential startup post-character");
-                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: verified character online; settling 10s before restart-only " + account.HotkeyText);
+                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: verified character online; settling 10s before recovery cycle 1/3 (" + account.HotkeyText + " -> 10s -> teleport -> 10s)");
                     BriefPause(generation, VanillaAutobattleResumeVerifier.PostLoginSettleMs);
-                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: 10s settle complete; invoking the same ResumeHotkey verifier used by TESTS (1/3)");
+                    ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: 10s settle complete; starting shared 3-cycle autoattack + verified teleport recovery with 180s restart deadline");
                     VerifyAutobattleResumeAsync(account, pid.Value,
                         () => StartupCancelled(generation) || ResumeWorkerCancelled(runtime, pid.Value, resumeGeneration),
                         detail => ResumeProgress(runtime, pid.Value, resumeGeneration, "Sequential startup: " + detail))
@@ -772,7 +772,7 @@ namespace _4RTools.Model.Vanilla
             if (hardenedSupervisorButtonsInstalled) return;
             hardenedSupervisorButtonsInstalled = true;
             ReplaceSupervisorButton(this, "START SUPERVISOR", "START SUPERVISOR", StartSupervisorHardened,
-                "Cold-start enabled clients strictly one at a time. A client must reach gameplay, verify autobattle movement (up to three 10-second attempts), and be minimized before another client can start.");
+                "Cold-start enabled clients strictly one at a time. A stationary client gets up to three autoattack/10s/teleport/10s recovery cycles; movement stops input immediately, and restart escalation waits for the 180-second deadline.");
             ReplaceSupervisorButton(this, "STOP", "STOP", StopSupervisorHardened,
                 "Stop continuous supervision and cancel any in-progress serialized startup. Running Vanilla clients are left open.");
         }
