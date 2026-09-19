@@ -40,7 +40,7 @@ namespace _4RTools.Forms
         {
             if (integratedFleetDashboard == null || integratedFleetDashboard.IsDisposed) return;
             // A compact strip must still contain its text. Font metrics, not just screen
-            // height, determine the minimum; location/activity must never disappear.
+            // height, determine the minimum; the final location/Cart-left row must never disappear.
             int contentHeight = 0;
             foreach (TableLayoutPanel outer in integratedFleetDashboard.Controls.OfType<TableLayoutPanel>())
             foreach (GroupBox card in outer.Controls.OfType<GroupBox>())
@@ -55,8 +55,12 @@ namespace _4RTools.Forms
                         .Select(c => (r == 2 ? 4 : c.Font.Height) + c.Margin.Vertical).DefaultIfEmpty(0).Max();
                     rowsHeight += measured + (r == 2 ? 2 : 0);
                 }
+                // GroupBox borders/title and TableLayout rounding can consume a few pixels
+                // beyond the summed row metrics on compact RDP heights. Keep a small explicit
+                // containment allowance so the final Location / Cart-left row never touches
+                // the dashboard viewport edge.
                 contentHeight = Math.Max(contentHeight, rowsHeight + card.Font.Height + card.Padding.Vertical
-                    + card.Margin.Vertical + outer.Padding.Vertical + 8);
+                    + card.Margin.Vertical + outer.Padding.Vertical + 16);
             }
             int dashboardHeight = Math.Max(PreferredFleetDashboardHeight(ClientSize.Height), contentHeight);
             integratedFleetDashboard.MinimumSize = new Size(0, dashboardHeight);
