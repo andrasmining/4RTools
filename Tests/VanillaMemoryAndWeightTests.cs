@@ -23,6 +23,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Known farming loot weights support capacity-safe Cart fill", CartCapacityRules);
             failed += Test("Weight alert thresholds enforce re-arm hysteresis", WeightThresholds);
             failed += Test("Enabled weight e-mail alerts require SMTP transport", WeightMailValidation);
+            failed += Test("Cart milestone mail uses saved SMTP independently of weight-warning switch", MilestoneMailPolicy);
             failed += Test("Weight cart settings validate independent UI automation", WeightCartSettings);
             failed += Test("Legacy Weight settings inherit dedicated Alt+3 Autobattle STOP", WeightCartStopHotkeyMigration);
             failed += Test("Weight policy is independently switchable per character", WeightPolicyPerCharacter);
@@ -142,6 +143,23 @@ namespace Vanilla.Diagnostics.Tests
             Throws(() => settings.Validate(false));
             settings.RearmPercent = 80m; settings.ThresholdPercent = 0m;
             Throws(() => settings.Validate(false));
+        }
+
+        private static void MilestoneMailPolicy()
+        {
+            var settings = new VanillaWeightAlertSettings
+            {
+                Enabled = false,
+                SmtpHost = "smtp.example.invalid",
+                SmtpPort = 587,
+                FromAddress = "sender@example.invalid",
+                ToAddress = "receiver@example.invalid"
+            };
+            if (!VanillaWeightAlertService.MilestoneMailConfigured(settings))
+                throw new Exception("Valid saved SMTP must enable Cart-full/DONE milestone mail even when carried-weight warnings are off.");
+            settings.SmtpHost = "";
+            if (VanillaWeightAlertService.MilestoneMailConfigured(settings))
+                throw new Exception("Milestone mail was enabled without a valid SMTP transport.");
         }
 
         private static void WeightCartSettings()
