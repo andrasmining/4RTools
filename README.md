@@ -33,7 +33,10 @@ Smart Teleport is configured directly per character in Recovery & relog. Debug c
 update controls and version status stay on the right.
 
 Any number of account profiles can be saved, with at most **two enabled clients**
-at once. Recovery settings auto-save. Proxy selection belongs to each account,
+at once. The character table starts with **Enabled, Weight, Smart TP, TP sec,
+TP hotkey**, so each row's automation state is visible immediately. Weight is
+only an on/off indicator there; detailed Weight/Cart settings stay on the Weight
+tab. Recovery settings auto-save. Proxy selection belongs to each account,
 including cold startup, recovery and diagnostic input. Startup and recovery are
 serialized; a healthy client is not restarted or toggled merely because another
 client needs recovery.
