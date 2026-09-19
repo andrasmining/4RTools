@@ -249,7 +249,11 @@ namespace _4RTools.Model.Vanilla
             accounts.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False;
             accounts.ScrollBars = ScrollBars.Both;
             accounts.ShowCellToolTips = true;
-            accounts.Columns["Enabled"].HeaderText = "On";
+            accounts.Columns["Enabled"].HeaderText = "Enabled";
+            accounts.Columns["WeightEnabled"].HeaderText = "Weight";
+            accounts.Columns["SmartTeleportEnabled"].HeaderText = "Smart TP";
+            accounts.Columns["SmartTeleportSeconds"].HeaderText = "TP sec";
+            accounts.Columns["SmartTeleportHotkey"].HeaderText = "TP hotkey";
             accounts.Columns["Slot"].HeaderText = "Slot";
             accounts.Columns["Hotkey"].HeaderText = "Resume";
             foreach (DataGridViewColumn column in accounts.Columns)
@@ -270,16 +274,20 @@ namespace _4RTools.Model.Vanilla
             int standard;
             switch (column.Name)
             {
-                case "Enabled": standard = 34; break;
-                case "Label": standard = 100; break;
-                case "CharacterName": standard = 110; break;
-                case "User": standard = 90; break;
+                case "Enabled": standard = 52; break;
+                case "WeightEnabled": standard = 48; break;
+                case "SmartTeleportEnabled": standard = 58; break;
+                case "SmartTeleportSeconds": standard = 48; break;
+                case "SmartTeleportHotkey": standard = 68; break;
+                case "Label": standard = 88; break;
+                case "CharacterName": standard = 96; break;
+                case "User": standard = 78; break;
                 case "Slot": standard = 38; break;
-                case "Hotkey": standard = 68; break;
-                case "Secret": standard = 70; break;
-                case "AccountProxy": standard = 68; break;
-                case "RuntimePid": standard = 52; break;
-                case "RuntimeStatus": standard = 100; break;
+                case "Hotkey": standard = 58; break;
+                case "Secret": standard = 62; break;
+                case "AccountProxy": standard = 58; break;
+                case "RuntimePid": standard = 48; break;
+                case "RuntimeStatus": standard = 88; break;
                 default: standard = 60; break;
             }
             int textWidth = TextRenderer.MeasureText(column.HeaderText, accounts.Font, Size.Empty, TextFormatFlags.NoPadding).Width + 14;
