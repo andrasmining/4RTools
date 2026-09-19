@@ -335,6 +335,7 @@ namespace _4RTools.Model.Vanilla
                 catch (OperationCanceledException ex)
                 {
                     string detail = "Weight/cart maintenance cancelled by supervisor/settings/client ownership change: " + ex.Message;
+                    activity(token.Account.Label + ": " + detail);
                     supervisor.MarkWeightMaintenanceCancelled(token, paused, detail);
                     VanillaDebugLog.Write("WEIGHT", "event=cart-cancelled trigger=" + trigger + " account='" + token.Account.Label
                         + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved
@@ -352,6 +353,7 @@ namespace _4RTools.Model.Vanilla
                 catch (VanillaCartManualException ex)
                 {
                     manualHold = true;
+                    activity(token.Account.Label + ": weight maintenance stopped safely; manual Cart hold required: " + ex.Message);
                     bool cancelledNow = cancelled();
                     VanillaDebugLog.Write("WEIGHT", "event=cart-manual-hold trigger=" + trigger + " account='" + token.Account.Label
                         + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved + " reason='" + ex.Message
@@ -364,6 +366,7 @@ namespace _4RTools.Model.Vanilla
                 }
                 catch (Exception ex)
                 {
+                    activity(token.Account.Label + ": weight maintenance failed closed: " + ex.Message);
                     // After Autobattle has been toggled OFF, any unexpected UI state is deliberately
                     // fail-closed, including a cancellation racing with this exception. Never let a
                     // stale generation erase the manual hold merely because another failure won first.
