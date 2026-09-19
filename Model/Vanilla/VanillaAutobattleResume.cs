@@ -14,6 +14,7 @@ namespace _4RTools.Model.Vanilla
         internal const int MaximumAttempts = 3;
         internal const int ObservationWindowMs = 10000;
         internal const int PostLoginSettleMs = 10000;
+        internal const int RecoveryDeadlineMs = 180000;
         internal const int PollIntervalMs = 100;
         internal const int MaximumSampleAgeMs = 1000;
         private bool started;
@@ -21,12 +22,12 @@ namespace _4RTools.Model.Vanilla
         internal bool MovementVerified { get; private set; }
 
         internal async Task VerifyAsync(int processId, Func<VanillaClientState> read, System.Action focus, System.Action send,
-            Func<bool> cancelled, Func<TimeSpan> clock, Func<DateTimeOffset> utcNow,
+            Func<int, bool> teleport, Func<bool> cancelled, Func<TimeSpan> clock, Func<DateTimeOffset> utcNow,
             Func<int, Task> delay, System.Action<string> report)
         {
             if (started) throw new InvalidOperationException("A resume verification cannot be restarted.");
             started = true;
-            if (processId <= 0 || read == null || focus == null || send == null || cancelled == null
+            if (processId <= 0 || read == null || focus == null || send == null || teleport == null || cancelled == null
                 || clock == null || utcNow == null || delay == null || report == null)
                 throw new ArgumentException("Resume verification requires a client and complete observation/input services.");
 
@@ -58,45 +59,148 @@ namespace _4RTools.Model.Vanilla
                 return state;
             };
 
+            TimeSpan recoveryDeadline = now() + TimeSpan.FromMilliseconds(RecoveryDeadlineMs);
             for (int attempt = 1; attempt <= MaximumAttempts; attempt++)
             {
                 checkCancelled();
-                if (attempt > 1) report("Retrying autobattle " + attempt + "/" + MaximumAttempts);
+                if (attempt > 1) report("Retrying autobattle recovery cycle " + attempt + "/" + MaximumAttempts);
                 focus();
                 checkCancelled();
                 VanillaClientState current = sample();
-                // Focusing may take time. Recheck after focus, before pressing a toggle again.
+                // Focusing may take time. Recheck after focus, before pressing another toggle.
                 if (baseline != null && Moved(baseline, current))
                 {
                     MovementVerified = true;
-                    report("Movement verified after " + Attempts + "/" + MaximumAttempts + " attempts");
+                    report("Movement verified after " + Attempts + "/" + MaximumAttempts + " recovery cycles");
                     return;
                 }
+
                 baseline = current;
-                checkCancelled();
                 Attempts = attempt;
                 report("Sending autobattle hotkey attempt " + attempt + "/" + MaximumAttempts);
                 send();
                 checkCancelled();
-                TimeSpan deadline = now() + TimeSpan.FromMilliseconds(ObservationWindowMs);
+
+                TimeSpan phaseDeadline = now() + TimeSpan.FromMilliseconds(ObservationWindowMs);
+                if (phaseDeadline > recoveryDeadline) phaseDeadline = recoveryDeadline;
                 report("Autobattle hotkey sent; verifying X/Y movement " + attempt + "/" + MaximumAttempts + " (10s)");
-                while (true)
+                if (await ObserveMovementAsync(baseline, sample, cancelled, now, delay, phaseDeadline).ConfigureAwait(false))
                 {
-                    current = sample();
+                    MovementVerified = true;
+                    report("Movement verified after " + attempt + "/" + MaximumAttempts + " recovery cycles");
+                    return;
+                }
+
+                checkCancelled();
+                current = null;
+                try { current = sample(); }
+                catch (InvalidOperationException ex) when (IsTransientObservationFailure(ex))
+                {
+                    report("Client is still loading after autobattle; no teleport/input will be sent until fresh X/Y returns");
+                }
+                if (current == null)
+                {
+                    if (await ObserveMovementAsync(baseline, sample, cancelled, now, delay, recoveryDeadline).ConfigureAwait(false))
+                    {
+                        MovementVerified = true;
+                        report("Movement verified while waiting for fresh gameplay state");
+                        return;
+                    }
+                    break;
+                }
+                if (Moved(baseline, current))
+                {
+                    MovementVerified = true;
+                    report("Movement verified before teleport " + attempt + "/" + MaximumAttempts + "; teleport suppressed");
+                    return;
+                }
+
+                baseline = current;
+                report("Still stationary after autobattle " + attempt + "/" + MaximumAttempts
+                    + "; trying verified Smart Teleport before any retry");
+                bool teleportConfirmed = false;
+                try { teleportConfirmed = teleport(attempt); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    report("Smart Teleport attempt " + attempt + "/" + MaximumAttempts + " failed safely: " + ex.Message);
+                }
+                checkCancelled();
+
+                current = null;
+                try { current = sample(); }
+                catch (InvalidOperationException ex) when (IsTransientObservationFailure(ex))
+                {
+                    // A confirmed warp may briefly expose Loading. Do not treat that as stillness,
+                    // and never send another action until a fresh gameplay sample exists.
+                }
+                if (current != null)
+                {
                     if (Moved(baseline, current))
                     {
                         MovementVerified = true;
-                        report("Movement verified after " + attempt + "/" + MaximumAttempts + " attempts");
+                        report("Movement verified immediately after teleport " + attempt + "/" + MaximumAttempts);
                         return;
                     }
-                    TimeSpan remaining = deadline - now();
-                    if (remaining <= TimeSpan.Zero) break;
-                    await delay(Math.Max(1, Math.Min(PollIntervalMs, (int)Math.Ceiling(remaining.TotalMilliseconds))))
-                        .ConfigureAwait(false);
-                    checkCancelled();
+                    baseline = current;
+                }
+
+                if (now() >= recoveryDeadline) break;
+                phaseDeadline = now() + TimeSpan.FromMilliseconds(ObservationWindowMs);
+                if (phaseDeadline > recoveryDeadline) phaseDeadline = recoveryDeadline;
+                report((teleportConfirmed ? "Verified teleport completed" : "Teleport attempt completed without confirmed warp")
+                    + "; verifying X/Y movement " + attempt + "/" + MaximumAttempts + " (10s)");
+                if (await ObserveMovementAsync(baseline, sample, cancelled, now, delay, phaseDeadline).ConfigureAwait(false))
+                {
+                    MovementVerified = true;
+                    report("Movement verified after teleport " + attempt + "/" + MaximumAttempts);
+                    return;
                 }
             }
-            throw new InvalidOperationException("Failed: no verified X/Y movement after 3 autobattle hotkey attempts (10 seconds per attempt).");
+
+            TimeSpan remaining = recoveryDeadline - now();
+            if (remaining > TimeSpan.Zero)
+            {
+                report("Three recovery cycles exhausted; monitoring X/Y until the 180s restart deadline");
+                if (await ObserveMovementAsync(baseline, sample, cancelled, now, delay, recoveryDeadline).ConfigureAwait(false))
+                {
+                    MovementVerified = true;
+                    report("Movement verified during final passive recovery watch");
+                    return;
+                }
+            }
+            throw new InvalidOperationException(
+                "Failed: no verified X/Y movement after 3 autobattle + teleport recovery cycles within 180 seconds.");
+        }
+
+        private static async Task<bool> ObserveMovementAsync(VanillaClientState baseline, Func<VanillaClientState> sample,
+            Func<bool> cancelled, Func<TimeSpan> clock, Func<int, Task> delay, TimeSpan deadline)
+        {
+            while (true)
+            {
+                if (cancelled()) throw new OperationCanceledException("Autobattle verification cancelled; no further hotkeys will be sent.");
+                try
+                {
+                    VanillaClientState current = sample();
+                    if (Moved(baseline, current)) return true;
+                }
+                catch (InvalidOperationException ex) when (IsTransientObservationFailure(ex))
+                {
+                    // Loading is expected briefly after a verified teleport. It authorizes no input
+                    // but may be observed until fresh gameplay/X-Y state returns.
+                }
+
+                TimeSpan remaining = deadline - clock();
+                if (remaining <= TimeSpan.Zero) return false;
+                await delay(Math.Max(1, Math.Min(PollIntervalMs, (int)Math.Ceiling(remaining.TotalMilliseconds))))
+                    .ConfigureAwait(false);
+            }
+        }
+
+        private static bool IsTransientObservationFailure(InvalidOperationException ex)
+        {
+            return ex != null && string.Equals(ex.Message, "The client is loading or no longer ready for autobattle.",
+                StringComparison.Ordinal);
         }
 
         private static bool Moved(VanillaClientState before, VanillaClientState after)
