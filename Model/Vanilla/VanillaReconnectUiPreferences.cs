@@ -128,7 +128,37 @@ namespace _4RTools.Model.Vanilla
                     Name = "WeightEnabled",
                     HeaderText = "Weight",
                     ReadOnly = true,
+                    FillWeight = 45
+                });
+            }
+            if (!accounts.Columns.Contains("SmartTeleportEnabled"))
+            {
+                accounts.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    Name = "SmartTeleportEnabled",
+                    HeaderText = "Smart TP",
+                    ReadOnly = true,
                     FillWeight = 55
+                });
+            }
+            if (!accounts.Columns.Contains("SmartTeleportSeconds"))
+            {
+                accounts.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    Name = "SmartTeleportSeconds",
+                    HeaderText = "TP sec",
+                    ReadOnly = true,
+                    FillWeight = 45
+                });
+            }
+            if (!accounts.Columns.Contains("SmartTeleportHotkey"))
+            {
+                accounts.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    Name = "SmartTeleportHotkey",
+                    HeaderText = "TP hotkey",
+                    ReadOnly = true,
+                    FillWeight = 65
                 });
             }
             if (!accounts.Columns.Contains("RuntimePid"))
@@ -151,8 +181,16 @@ namespace _4RTools.Model.Vanilla
                     FillWeight = 110
                 });
             }
+            string[] order =
+            {
+                "Enabled", "WeightEnabled", "SmartTeleportEnabled", "SmartTeleportSeconds", "SmartTeleportHotkey",
+                "Label", "User", "Slot", "CharacterName", "Hotkey", "Secret", "AccountProxy", "RuntimePid", "RuntimeStatus"
+            };
+            for (int i = 0; i < order.Length; i++)
+                if (accounts.Columns.Contains(order[i])) accounts.Columns[order[i]].DisplayIndex = i;
+
             help.SetToolTip(accounts,
-                "One row per character, including multiple characters on one username. At most two enabled rows. Running characters are discovered from verified memory. Unknown username/slot stay blank until verified or configured. Double-click to edit; Weight/Cart is independently switchable per character; passwords and proxies are never guessed.");
+                "One row per character. The first columns show whether supervision, Weight/Cart and Smart Teleport are enabled; Smart Teleport seconds/hotkey are visible directly in the list. Detailed Weight settings remain on the Weight tab. Double-click a row to edit character-specific settings.");
         }
 
         private void AccountRuntimeUpdated()
@@ -232,7 +270,22 @@ namespace _4RTools.Model.Vanilla
                 if (accounts.Columns.Contains("WeightEnabled"))
                 {
                     row.Cells["WeightEnabled"].Value = profile != null && profile.WeightEnabled ? "Yes" : "No";
-                    row.Cells["WeightEnabled"].ToolTipText = "Per-character Weight policy. No e-mail alert or automatic Cart maintenance runs for this character when set to No.";
+                    row.Cells["WeightEnabled"].ToolTipText = "Per-character Weight policy. Detailed Weight/Cart settings are configured on the Weight tab.";
+                }
+                if (accounts.Columns.Contains("SmartTeleportEnabled"))
+                {
+                    row.Cells["SmartTeleportEnabled"].Value = profile != null && profile.SmartTeleportEnabled ? "Yes" : "No";
+                    row.Cells["SmartTeleportEnabled"].ToolTipText = "Per-character Smart Teleport enable switch.";
+                }
+                if (accounts.Columns.Contains("SmartTeleportSeconds"))
+                {
+                    row.Cells["SmartTeleportSeconds"].Value = profile == null ? "—" : profile.SmartTeleportIdleSeconds.ToString();
+                    row.Cells["SmartTeleportSeconds"].ToolTipText = "Stationary seconds before this character's Smart Teleport triggers.";
+                }
+                if (accounts.Columns.Contains("SmartTeleportHotkey"))
+                {
+                    row.Cells["SmartTeleportHotkey"].Value = profile == null ? "—" : profile.SmartTeleportHotkeyText;
+                    row.Cells["SmartTeleportHotkey"].ToolTipText = "This character's configured Smart Teleport hotkey.";
                 }
                 if (accounts.Columns.Contains("AccountProxy"))
                 {
