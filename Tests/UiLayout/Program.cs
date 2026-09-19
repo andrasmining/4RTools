@@ -415,8 +415,12 @@ internal static class UiLayoutHarness
                 Check(label.Height >= label.Font.Height && FullyVisible(label, main),
                     name + ": live-card text is clipped: " + label.Text + " bounds=" + BoundsIn(label, main));
             }
-            Check(Descendants(fleet).OfType<Label>().Count(c => c.Visible && c.Text.StartsWith("Activity:")) == 2,
-                name + ": both live-card activity fields must remain visible.");
+            Check(Descendants(fleet).OfType<Label>().Count(c => c.Visible && c.Text.StartsWith("Activity:")) == 0,
+                name + ": unverified Activity fields must not be shown.");
+            Check(Descendants(fleet).OfType<Label>().Count(c => c.Visible && c.Text.StartsWith("Weight ")) == 2,
+                name + ": both live-card carried-weight fields must remain visible.");
+            Check(Descendants(fleet).OfType<Label>().Count(c => c.Visible && c.Text.StartsWith("Cart ")) == 2,
+                name + ": both live-card Cart-weight fields must remain visible.");
             if (rows > grid.DisplayedRowCount(false))
             {
                 grid.FirstDisplayedScrollingRowIndex = rows - 1;
@@ -522,9 +526,12 @@ internal static class UiLayoutHarness
             Property(info, "ProcessId", 12064 + i);
             Property(info, "CharacterName", i == 0 ? "Mock Novicer" : "Mock Nordina");
             Property(info, "NameVerified", true); Property(info, "HpVerified", true); Property(info, "SpVerified", true);
+            Property(info, "WeightVerified", true); Property(info, "CartWeightVerified", true);
             Property(info, "CurrentHP", (uint?)3465); Property(info, "MaxHP", (uint?)4187);
             Property(info, "CurrentSP", (uint?)303); Property(info, "MaxSP", (uint?)367);
-            Property(info, "Location", "yuno_fild08 (283, 233)"); Property(info, "Activity", "Stationary");
+            Property(info, "CurrentWeight", (uint?)2630); Property(info, "MaxWeight", (uint?)5490);
+            Property(info, "CurrentCartWeight", (uint?)(9600 + i * 100)); Property(info, "MaxCartWeight", (uint?)10000);
+            Property(info, "Location", "yuno_fild08 (283, 233)");
             Call(cards.GetValue(i), "ShowClient", info);
         }
     }
