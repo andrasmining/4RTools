@@ -144,8 +144,10 @@ detailed event trail.
 Character roster
 ----------------
 One row represents one character, not one account. Several rows may share a
-username; at most two may be enabled. Description, Username, Slot and Character
-name precede the existing fields. Running characters are discovered automatically
+username; at most two may be enabled. The list starts with Enabled, Weight and
+Smart Teleport, then Smart Teleport seconds and hotkey. Description, Username,
+Slot and Character name follow. Weight remains on/off only in this list; detailed
+Weight/Cart settings are on the Weight tab. Running characters are discovered automatically
 from fresh verified memory and added once, disabled. Existing secrets/proxies stay
 unchanged. The unique key is username plus character name, not name alone.
 The shared reader includes both supplied username addresses; agreeing values fill
