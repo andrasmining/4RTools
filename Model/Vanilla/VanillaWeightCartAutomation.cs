@@ -189,8 +189,8 @@ namespace _4RTools.Model.Vanilla
                 weightCompletedHolds.Clear();
                 foreach (Runtime runtime in runtimes.Values)
                     if (held.Contains(runtime.Account.Id) && runtime.ProcessId.HasValue && runtime.Account.Enabled
-                        && runtime.Stage == VanillaReconnectStage.Error)
-                        SetStage(runtime, VanillaReconnectStage.Online, "Manual Weight/Cart hold explicitly cleared");
+                        && (runtime.Stage == VanillaReconnectStage.Error || runtime.Stage == VanillaReconnectStage.Stopped))
+                        SetStage(runtime, VanillaReconnectStage.Online, "Weight/Cart hold explicitly cleared");
             }
             VanillaDebugLog.Write("WEIGHT", "event=cart-holds-cleared source=explicit-user-action manualAndCompleted=true.");
             RaiseUpdated();
