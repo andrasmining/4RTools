@@ -619,10 +619,119 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
+        private VanillaFleetClientInfo CurrentClient(int pid)
+        {
+            return fleet.Poll().FirstOrDefault(item => item.ProcessId == pid);
+        }
+
         private uint? CurrentWeight(int pid)
         {
-            VanillaFleetClientInfo client = fleet.Poll().FirstOrDefault(item => item.ProcessId == pid);
+            VanillaFleetClientInfo client = CurrentClient(pid);
             return client != null && client.WeightVerified ? client.CurrentWeight : null;
+        }
+
+        private VanillaCartWeightSample CurrentCartWeight(int pid)
+        {
+            VanillaFleetClientInfo client = CurrentClient(pid);
+            if (client == null || !client.CartWeightVerified
+                || !client.CurrentCartWeight.HasValue || !client.MaxCartWeight.HasValue
+                || client.MaxCartWeight.Value == 0)
+                return null;
+            return new VanillaCartWeightSample
+            {
+                Current = client.CurrentCartWeight.Value,
+                Maximum = client.MaxCartWeight.Value,
+                Percent = client.CurrentCartWeight.Value * 100m / client.MaxCartWeight.Value
+            };
+        }
+
+        private bool WaitForCartWeightIncrease(int pid, uint before, Func<bool> cancelled, out VanillaCartWeightSample after)
+        {
+            after = null;
+            Stopwatch watch = Stopwatch.StartNew();
+            while (watch.ElapsedMilliseconds < 1800)
+            {
+                ThrowIfCancelled(cancelled);
+                VanillaCartWeightSample current = CurrentCartWeight(pid);
+                if (current != null)
+                {
+                    after = current;
+                    if (current.Current > before) return true;
+                }
+                Thread.Sleep(150);
+            }
+            return false;
+        }
+
+        internal bool StopForFarmingCompletion(int pid, VanillaWeightAlertSettings settings, System.Action<string> report)
+        {
+            report = report ?? (_ => { });
+            VanillaWeightMaintenanceToken token;
+            string reason;
+            if (!supervisor.TryBeginWeightMaintenance(pid, out token, out reason))
+            {
+                if (supervisor.IsWeightCompletedHold(supervisor.ManagedAccountIdForProcess(pid))) return true;
+                report("Farming-complete stop deferred: " + reason + ".");
+                return false;
+            }
+
+            bool paused = false;
+            try
+            {
+                VanillaFleetClientInfo client = CurrentClient(pid);
+                if (client == null || !client.WeightVerified || !client.CartWeightVerified
+                    || !client.WeightPercent.HasValue || !client.CartWeightPercent.HasValue
+                    || client.CartWeightPercent.Value < CartFullPercent
+                    || client.WeightPercent.Value < FarmingDoneCarryPercent)
+                {
+                    supervisor.CompleteWeightMaintenance(token, false,
+                        "Farming-complete stop cancelled because fresh weight conditions were no longer satisfied.");
+                    return false;
+                }
+
+                using (var input = new VanillaForegroundInput(pid))
+                {
+                    input.CancellationRequested = () => supervisor.WeightMaintenanceCancelled(token);
+                    report(token.Account.Label + ": Cart 100% and carried weight "
+                        + client.WeightPercent.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
+                        + "%; stopping Autobattle with " + settings.AutobattleStopHotkeyText + ".");
+                    input.Chord(settings.AutobattleStopCtrl, settings.AutobattleStopAlt,
+                        settings.AutobattleStopShift, (Keys)settings.AutobattleStopKey);
+                    paused = true;
+                    Thread.Sleep(500);
+                }
+
+                string detail = token.Account.Label + ": farming complete — Cart 100% and carried weight "
+                    + client.WeightPercent.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
+                    + "%; Autobattle intentionally OFF.";
+                supervisor.CompleteWeightFarmingDone(token, detail);
+                VanillaDebugLog.Write("WEIGHT", "event=farming-done-stop account='" + token.Account.Label
+                    + "' accountId=" + token.AccountId + " pid=" + pid + " cartPercent="
+                    + client.CartWeightPercent.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
+                    + " carriedPercent=" + client.WeightPercent.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + ".");
+                report(detail);
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                supervisor.MarkWeightMaintenanceCancelled(token, paused,
+                    "Farming-complete stop cancelled by supervisor/settings/client ownership change.");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                if (paused)
+                    supervisor.MarkWeightMaintenanceCancelled(token, true,
+                        "Farming-complete stop failed after Autobattle may have been paused: " + ex.Message);
+                else
+                    supervisor.CompleteWeightMaintenance(token, false,
+                        "Farming-complete stop failed before Autobattle was changed: " + ex.Message);
+                VanillaDebugLog.Write("WEIGHT", "event=farming-done-stop-failed account='" + token.Account.Label
+                    + "' accountId=" + token.AccountId + " pid=" + pid + " paused=" + paused
+                    + " reason='" + ex.Message + "'.");
+                report(token.Account.Label + ": farming-complete stop failed safely: " + ex.Message);
+                return false;
+            }
         }
 
         private static bool WaitForQuantityPrompt(VanillaForegroundInput input, Func<bool> cancelled, int timeoutMs)
