@@ -864,6 +864,12 @@ namespace _4RTools.Model.Vanilla
             var claimed = new HashSet<int>(runtimes.Values.Where(r => r.ProcessId.HasValue).Select(r => r.ProcessId.Value));
             foreach (var runtime in desired.Select(a => runtimes[a.Id]))
             {
+                if (weightCompletedHolds.Contains(runtime.Account.Id))
+                {
+                    SetStage(runtime, VanillaReconnectStage.Stopped,
+                        "Farming complete: Cart full and carried weight target reached; Autobattle intentionally OFF");
+                    continue;
+                }
                 if (weightManualHolds.Contains(runtime.Account.Id))
                 {
                     SetStage(runtime, VanillaReconnectStage.Error, "Weight/cart maintenance needs manual emptying; automatic recovery is held for this character only");
