@@ -208,8 +208,12 @@ namespace _4RTools.Model.Vanilla
                 input.CancellationRequested = cancelled;
                 try
                 {
-                    activity(token.Account.Label + ": weight maintenance: pausing Autobattle with " + token.Account.HotkeyText + ".");
-                    input.Chord(token.Account.ResumeCtrl, token.Account.ResumeAlt, token.Account.ResumeShift, (Keys)token.Account.ResumeKey);
+                    activity(token.Account.Label + ": weight maintenance: stopping Autobattle with dedicated Weight hotkey "
+                        + settings.AutobattleStopHotkeyText + ".");
+                    VanillaDebugLog.Write("WEIGHT", "event=cart-autobattle-stop account='" + token.Account.Label
+                        + "' accountId=" + token.AccountId + " pid=" + pid + " hotkey='" + settings.AutobattleStopHotkeyText + "'.");
+                    input.Chord(settings.AutobattleStopCtrl, settings.AutobattleStopAlt,
+                        settings.AutobattleStopShift, (Keys)settings.AutobattleStopKey);
                     paused = true;
                     Thread.Sleep(700);
                     ThrowIfCancelled(cancelled);
