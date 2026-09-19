@@ -474,10 +474,14 @@ namespace Vanilla.Diagnostics.Tests
             while (directory != null && !File.Exists(Path.Combine(directory.FullName, "VanillaBuilds", "vanilla-7eb420579690.json"))) directory = directory.Parent;
             Assert(directory != null, "Shipped mapping missing from validation checkout.");
             var p = VanillaBuildProfile.Parse(File.ReadAllText(Path.Combine(directory.FullName, "VanillaBuilds", "vanilla-7eb420579690.json")));
-            Assert(VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.MaxCartWeight].Address) == 0x93C9C4,
+            Assert(VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.MaxCartWeight].Address) == 0xD34B40,
                 "Wrong Cart maximum module offset.");
-            Assert(VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.CurrentCartWeight].Address) == 0x93C9C8,
+            Assert(VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.CurrentCartWeight].Address) == 0xD34B3C,
                 "Wrong Cart current-weight module offset.");
+            Assert(0x400000UL + VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.CurrentCartWeight].Address) == 0x01134B3CUL,
+                "Cart current-weight mapping no longer matches the supplied absolute finder address.");
+            Assert(0x400000UL + VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.MaxCartWeight].Address) == 0x01134B40UL,
+                "Cart maximum mapping no longer matches the supplied 10000 candidate address.");
             foreach (var field in new[] { VanillaField.MaxCartWeight, VanillaField.CurrentCartWeight })
             {
                 var mapping = p.MemoryMap.Fields[field];
