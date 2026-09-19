@@ -231,6 +231,21 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
+        internal static bool MilestoneMailConfigured(VanillaWeightAlertSettings value)
+        {
+            if (value == null) return false;
+            try
+            {
+                var probe = value.Clone();
+                // Cart-full and DONE mails are independent of the optional carried-weight
+                // warning switch. They only require a valid saved SMTP transport.
+                probe.Enabled = true;
+                probe.Validate(true);
+                return true;
+            }
+            catch { return false; }
+        }
+
         public void SendTest(VanillaWeightAlertSettings value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
@@ -312,7 +327,8 @@ namespace _4RTools.Model.Vanilla
             }
 
             DateTimeOffset now = DateTimeOffset.UtcNow;
-            if (current.Enabled)
+            bool milestoneMail = MilestoneMailConfigured(current);
+            if (milestoneMail)
             {
                 bool sendCartFull;
                 lock (gate) sendCartFull = !state.CartFullNotified && now >= state.NextMilestoneMailAt;
@@ -358,7 +374,7 @@ namespace _4RTools.Model.Vanilla
             if (alreadyDone)
             {
                 lock (gate) state.FarmingDone = true;
-                if (current.Enabled) TrySendDoneMail(current, observation, accountId, state);
+                if (milestoneMail) TrySendDoneMail(current, observation, accountId, state);
                 return;
             }
 
@@ -382,7 +398,7 @@ namespace _4RTools.Model.Vanilla
                         text => SetStatus(text));
                     if (!stopped) return;
                     lock (gate) state.FarmingDone = true;
-                    if (current.Enabled) TrySendDoneMail(current, observation, accountId, state);
+                    if (milestoneMail) TrySendDoneMail(current, observation, accountId, state);
                 }
                 finally
                 {
