@@ -284,6 +284,125 @@ namespace _4RTools.Model.Vanilla
             };
         }
 
+        private void ProcessFarmingMilestones(VanillaWeightAlertSettings current, VanillaWeightObservation observation)
+        {
+            if (!observation.CartVerified || !observation.CartPercent.HasValue) return;
+            string accountId = supervisor.ManagedAccountIdForProcess(observation.ProcessId);
+            if (string.IsNullOrWhiteSpace(accountId)) return;
+            string key = "FARM:" + accountId;
+            AlertState state;
+            lock (gate)
+            {
+                if (!states.TryGetValue(key, out state)) states[key] = state = new AlertState();
+                if (observation.CartPercent.Value < VanillaWeightCartAutomation.CartFullPercent)
+                {
+                    state.CartFullNotified = false;
+                    state.DoneNotified = false;
+                    state.FarmingDone = false;
+                    state.CompletionStopping = false;
+                    return;
+                }
+            }
+
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            if (current.Enabled)
+            {
+                bool sendCartFull;
+                lock (gate) sendCartFull = !state.CartFullNotified && now >= state.NextMilestoneMailAt;
+                if (sendCartFull)
+                {
+                    try
+                    {
+                        string carried = observation.Percent.HasValue
+                            ? observation.Percent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%"
+                            : "unavailable";
+                        SendMail(current, "Cart full: " + observation.CharacterName,
+                            "Character: " + observation.CharacterName + Environment.NewLine
+                            + "Cart: " + observation.CurrentCartWeight + " / " + observation.MaxCartWeight + " (100%)" + Environment.NewLine
+                            + "Carried weight: " + observation.CurrentWeight + " / " + observation.MaxWeight + " (" + carried + ")" + Environment.NewLine
+                            + "Farming continues until carried weight reaches "
+                            + VanillaWeightCartAutomation.FarmingDoneCarryPercent.ToString("0.#", CultureInfo.InvariantCulture) + "%." + Environment.NewLine
+                            + "Observed: " + DateTimeOffset.Now.ToString("u", CultureInfo.InvariantCulture));
+                        lock (gate)
+                        {
+                            state.CartFullNotified = true;
+                            state.NextMilestoneMailAt = DateTimeOffset.MinValue;
+                        }
+                        VanillaDebugLog.Write("WEIGHT", "event=cart-full-email-sent accountId=" + accountId
+                            + " pid=" + observation.ProcessId + " character='" + observation.CharacterName + "'.");
+                        SetStatus("Cart full notification sent for " + observation.CharacterName + ".");
+                    }
+                    catch (Exception ex)
+                    {
+                        lock (gate) state.NextMilestoneMailAt = now + TimeSpan.FromMinutes(5);
+                        VanillaDebugLog.Write("WEIGHT", "event=cart-full-email-failed accountId=" + accountId
+                            + " pid=" + observation.ProcessId + " reason='" + ex.Message + "'.");
+                    }
+                }
+            }
+
+            if (!observation.Percent.HasValue
+                || observation.Percent.Value < VanillaWeightCartAutomation.FarmingDoneCarryPercent)
+                return;
+
+            bool startStop;
+            lock (gate)
+            {
+                startStop = !state.FarmingDone && !state.CompletionStopping;
+                if (startStop) state.CompletionStopping = true;
+            }
+            if (!startStop) return;
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    bool stopped = cartAutomation.StopForFarmingCompletion(observation.ProcessId, current,
+                        text => SetStatus(text));
+                    if (!stopped) return;
+                    lock (gate) state.FarmingDone = true;
+
+                    if (current.Enabled)
+                    {
+                        bool sendDone;
+                        lock (gate) sendDone = !state.DoneNotified && DateTimeOffset.UtcNow >= state.NextMilestoneMailAt;
+                        if (sendDone)
+                        {
+                            try
+                            {
+                                SendMail(current, "DONE: " + observation.CharacterName,
+                                    "DONE" + Environment.NewLine
+                                    + "Character: " + observation.CharacterName + Environment.NewLine
+                                    + "Cart: " + observation.CurrentCartWeight + " / " + observation.MaxCartWeight + " (100%)" + Environment.NewLine
+                                    + "Carried weight: " + observation.CurrentWeight + " / " + observation.MaxWeight + " ("
+                                    + observation.Percent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%)" + Environment.NewLine
+                                    + "Autobattle: OFF" + Environment.NewLine
+                                    + "Observed: " + DateTimeOffset.Now.ToString("u", CultureInfo.InvariantCulture));
+                                lock (gate)
+                                {
+                                    state.DoneNotified = true;
+                                    state.NextMilestoneMailAt = DateTimeOffset.MinValue;
+                                }
+                                VanillaDebugLog.Write("WEIGHT", "event=farming-done-email-sent accountId=" + accountId
+                                    + " pid=" + observation.ProcessId + " character='" + observation.CharacterName + "'.");
+                                SetStatus("DONE notification sent for " + observation.CharacterName + ".");
+                            }
+                            catch (Exception ex)
+                            {
+                                lock (gate) state.NextMilestoneMailAt = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
+                                VanillaDebugLog.Write("WEIGHT", "event=farming-done-email-failed accountId=" + accountId
+                                    + " pid=" + observation.ProcessId + " reason='" + ex.Message + "'.");
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    lock (gate) state.CompletionStopping = false;
+                }
+            });
+        }
+
         private void ProcessAutoCart(VanillaWeightAlertSettings current, VanillaWeightObservation observation)
         {
             string accountId = supervisor.ManagedAccountIdForProcess(observation.ProcessId);
