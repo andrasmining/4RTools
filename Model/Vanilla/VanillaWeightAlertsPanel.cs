@@ -24,7 +24,7 @@ namespace _4RTools.Model.Vanilla
         private bool autobattleStopCtrl, autobattleStopAlt, autobattleStopShift;
         private bool inventoryCtrl, inventoryAlt, inventoryShift, cartCtrl, cartAlt, cartShift;
 
-        private readonly CheckBox enabled = new CheckBox { Text = "Enable overweight e-mail alert", AutoSize = true };
+        private readonly CheckBox enabled = new CheckBox { Text = "Enable carried-weight warning e-mail", AutoSize = true };
         private readonly NumericUpDown threshold = Number(1, 100, 85, 1);
         private readonly NumericUpDown rearm = Number(0, 99, 80, 1);
         private readonly NumericUpDown pollSeconds = Number(2, 60, 5, 0);
@@ -39,7 +39,7 @@ namespace _4RTools.Model.Vanilla
         private readonly TextBox subjectPrefix = new TextBox { Width = 220 };
         private readonly Button save = new Button { Text = "SAVE WEIGHT SETTINGS", AutoSize = true };
         private readonly Button test = new Button { Text = "SEND TEST E-MAIL", AutoSize = true };
-        private readonly Button clearHold = new Button { Text = "CLEAR MANUAL CART HOLD", AutoSize = true };
+        private readonly Button clearHold = new Button { Text = "CLEAR WEIGHT/CART HOLD", AutoSize = true };
         private readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(1150, 0), ForeColor = Color.DimGray };
         private readonly DataGridView live = new DataGridView
         {
@@ -75,7 +75,7 @@ namespace _4RTools.Model.Vanilla
             root.Controls.Add(new Label
             {
                 AutoSize = true, MaximumSize = new Size(1150, 0), ForeColor = Color.DimGray, Margin = new Padding(0, 5, 0, 10),
-                Text = "Weight decisions use only verified read-only CurrentWeight/MaxWeight. The master settings here apply only to character rows whose Weight switch is enabled in Recovery & relog. Cart maintenance uses ordinary UI hotkeys, visual slot detection and drag/drop; it never reads or writes inventory memory. It sends the dedicated Autobattle STOP hotkey, opens Inventory + Cart, moves every visible item from the selected categories, presses Enter only when a quantity dialog is positively detected, then uses the shared verified ResumeHotkey routine and minimizes. If a transfer makes no progress (for example a full cart), Autobattle stays OFF and only that character is held for manual emptying."
+                Text = "Weight decisions use verified read-only carried and Cart weight only. Cart maintenance uses ordinary UI hotkeys, visual slot/category detection and drag/drop; it never reads or writes inventory memory. At 95% Cart weight it switches to capacity-safe precision filling: Mastela Fruit=3 and Peco Feather=1, using a positively detected quantity dialog and verifying every Cart-weight increase. At Cart 100% farming continues until carried weight reaches 50%, then Autobattle is intentionally stopped. Saved SMTP settings send Cart-full and DONE milestone e-mails independently of the optional carried-weight warning switch."
             }, 0, 1);
 
             root.Controls.Add(BuildCartGroup(), 0, 2);
@@ -84,7 +84,8 @@ namespace _4RTools.Model.Vanilla
             buttons.Controls.Add(save); buttons.Controls.Add(test); buttons.Controls.Add(clearHold); buttons.Controls.Add(status);
             root.Controls.Add(buttons, 0, 4);
 
-            live.Columns.Add("Client", "Client"); live.Columns.Add("Weight", "Weight"); live.Columns.Add("Percent", "%"); live.Columns.Add("Verification", "State");
+            live.Columns.Add("Client", "Client"); live.Columns.Add("Weight", "Weight"); live.Columns.Add("Percent", "%");
+            live.Columns.Add("Cart", "Cart"); live.Columns.Add("CartPercent", "Cart %"); live.Columns.Add("Verification", "State");
             var liveHost = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
             liveHost.RowStyles.Add(new RowStyle(SizeType.AutoSize)); liveHost.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             liveHost.Controls.Add(new Label { AutoSize = true, Font = new Font("Segoe UI", 9F, FontStyle.Bold), Margin = new Padding(0, 10, 0, 4), Text = "Live verified weight" }, 0, 0);
@@ -113,7 +114,7 @@ namespace _4RTools.Model.Vanilla
 
         private Control BuildMailGroup()
         {
-            var group = new GroupBox { Text = "Optional e-mail alert", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(10) };
+            var group = new GroupBox { Text = "E-mail notifications", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(10) };
             var settings = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, RowCount = 8 };
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -128,6 +129,12 @@ namespace _4RTools.Model.Vanilla
             Add(settings, 5, 0, "From e-mail", fromAddress); Add(settings, 5, 2, "Recipient e-mail", toAddress);
             Add(settings, 6, 0, "Subject prefix", subjectPrefix);
             settings.Controls.Add(new Label { AutoSize = true, ForeColor = Color.DimGray, Text = "Leave password blank to keep the already saved protected password." }, 2, 6);
+            var milestoneHint = new Label
+            {
+                AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(1100, 0),
+                Text = "Cart 100% and DONE milestone e-mails use these SMTP settings whenever they are configured; the checkbox above controls only carried-weight warning e-mails."
+            };
+            settings.Controls.Add(milestoneHint, 0, 7); settings.SetColumnSpan(milestoneHint, 4);
             group.Controls.Add(settings); return group;
         }
 
@@ -170,8 +177,13 @@ namespace _4RTools.Model.Vanilla
         {
             VanillaWeightAlertSettings value = ReadSettings(); value.Validate(false); if (value.Enabled) value.Validate(true);
             service.ApplySettings(value, true); loaded = service.Settings; smtpPassword.Clear();
-            status.Text = value.AutoCartEnabled ? "Saved. Automatic cart maintenance is armed at " + value.AutoCartThresholdPercent.ToString("0.#") + "%."
-                : value.Enabled ? "Saved. Weight e-mail alert is enabled." : "Saved. Automatic actions and e-mail alerts are disabled.";
+            bool milestoneMail = VanillaWeightAlertService.MilestoneMailConfigured(value);
+            status.Text = value.AutoCartEnabled
+                ? "Saved. Automatic Cart maintenance is armed at " + value.AutoCartThresholdPercent.ToString("0.#")
+                    + "%. Milestone mail " + (milestoneMail ? "is configured." : "is not configured until valid SMTP/addresses are saved.")
+                : value.Enabled ? "Saved. Carried-weight warning e-mail is enabled."
+                : milestoneMail ? "Saved. Cart-full/DONE milestone mail is configured."
+                : "Saved. Automatic actions and e-mail notifications are disabled.";
         }
 
         private enum HotkeyTarget { AutobattleStop, Inventory, Cart }
@@ -227,9 +239,15 @@ namespace _4RTools.Model.Vanilla
             {
                 string weight = item.CurrentWeight.HasValue && item.MaxWeight.HasValue ? item.CurrentWeight + " / " + item.MaxWeight : "Unavailable";
                 string percent = item.Percent.HasValue ? item.Percent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%" : "—";
-                live.Rows.Add(item.CharacterName + " (PID " + item.ProcessId + ")", weight, percent, item.Verified ? "Verified" : (item.Error ?? "Unavailable"));
+                string cart = item.CurrentCartWeight.HasValue && item.MaxCartWeight.HasValue
+                    ? item.CurrentCartWeight + " / " + item.MaxCartWeight : "Unavailable";
+                string cartPercent = item.CartPercent.HasValue
+                    ? item.CartPercent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%" : "—";
+                string verification = item.Verified && item.CartVerified ? "Verified"
+                    : item.Error ?? (item.Verified ? "Cart unavailable" : "Weight unavailable");
+                live.Rows.Add(item.CharacterName + " (PID " + item.ProcessId + ")", weight, percent, cart, cartPercent, verification);
             }
-            if (observations.Count == 0) live.Rows.Add("No Vanilla clients", "—", "—", "Waiting");
+            if (observations.Count == 0) live.Rows.Add("No Vanilla clients", "—", "—", "—", "—", "Waiting");
         }
 
         private static void Add(TableLayoutPanel panel, int row, int column, string caption, Control control)
