@@ -27,6 +27,8 @@ namespace _4RTools.Model.Vanilla
                 {
                     { VanillaField.CurrentHP, (uint)(1000 - (step % 4) * 50) }, { VanillaField.MaxHP, 1000U },
                     { VanillaField.CurrentSP, (uint)(step == 0 ? 0 : 300 - step * 10) }, { VanillaField.MaxSP, 300U },
+                    { VanillaField.CurrentWeight, (uint)(1200 + step * 25) }, { VanillaField.MaxWeight, 5000U },
+                    { VanillaField.CurrentCartWeight, (uint)(5000 + step * 100) }, { VanillaField.MaxCartWeight, 10000U },
                     { VanillaField.CharacterName, "Demo character" }, { VanillaField.X, 100 + step / 3 }, { VanillaField.Y, 200 },
                     { VanillaField.CurrentTargetId, step < 4 ? 0UL : (step < 8 ? 1001UL : 1002UL) },
                     { VanillaField.ActionState, step < 4 ? 0U : 1U }, { VanillaField.Map, "synthetic_map" },
