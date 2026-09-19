@@ -78,13 +78,18 @@ command before opening Inventory/Cart; it never reuses the character ResumeHotke
 After cleanup it starts Autobattle again through the existing verified per-character
 ResumeHotkey/X-Y path and minimizes.
 
-For stack transfers Enter is pressed only after a quantity dialog is positively
-detected. A quantity-one item has no dialog and receives no Enter. If the UI cannot
-be identified safely, the Cart rejects a transfer, or progress cannot be verified,
-input stops and only that character is held for manual Cart emptying with Autobattle
-left OFF. That hold survives unrelated settings and supervisor STOP/START changes and
-is removed only by the explicit hold-clear action. Memory access remains read-only;
-inventory state is never read/written from game memory.
+Use/Equip/Etc category tabs are detected from the live Inventory panel, slot grid and
+separator structure; no fixed or percentage category coordinates are used. A selected
+tab is positively re-detected after the click. 4RTools advances only after two fresh
+grid captures both show that category empty. Cart drops require a detected empty Cart
+slot; there is no arbitrary fallback drop point. For stack transfers Enter is pressed
+only after a quantity dialog is positively detected. A quantity-one item has no dialog
+and receives no Enter. Major Cart steps are visible in the Recovery log and global
+debug log. If the UI cannot be identified safely, no empty Cart slot exists, the Cart
+rejects a transfer, or progress cannot be verified, input stops and only that character
+is held for manual Cart emptying with Autobattle left OFF. That hold survives unrelated
+settings and supervisor STOP/START changes and is removed only by the explicit hold-clear
+action. Memory access remains read-only; inventory state is never read/written from game memory.
 
 Persistent configuration and updates
 ------------------------------------
