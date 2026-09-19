@@ -30,10 +30,10 @@ namespace _4RTools.Model.Vanilla
             if (string.IsNullOrWhiteSpace(sessionToken)) throw new ArgumentNullException(nameof(sessionToken));
             directory = Path.Combine(Path.GetFullPath(baseDirectory), "Logs");
             Directory.CreateDirectory(directory);
-            ArchiveLegacyLog();
-            stem = "reconnect-" + Sanitize(sessionToken);
             this.maxFileBytes = maxFileBytes;
             this.maxDirectoryBytes = maxDirectoryBytes;
+            ArchiveLegacyLog();
+            stem = "reconnect-" + Sanitize(sessionToken);
             currentPath = PartPath(part);
             if (!File.Exists(currentPath))
                 File.WriteAllText(currentPath, DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss") + " 4RTools Vanilla session log started." + Environment.NewLine, Encoding.UTF8);
@@ -47,19 +47,40 @@ namespace _4RTools.Model.Vanilla
             if (line == null) return;
             lock (gate)
             {
-                string payload = line + Environment.NewLine;
-                int bytes = Encoding.UTF8.GetByteCount(payload);
-                long currentLength = File.Exists(currentPath) ? new FileInfo(currentPath).Length : 0;
-                if (currentLength > 0 && currentLength + bytes > maxFileBytes)
+                string remaining = line + Environment.NewLine;
+                while (remaining.Length > 0)
                 {
-                    part++;
-                    currentPath = PartPath(part);
-                    File.WriteAllText(currentPath, DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss")
-                        + " 4RTools Vanilla log rotated from previous part." + Environment.NewLine, Encoding.UTF8);
+                    long currentLength = File.Exists(currentPath) ? new FileInfo(currentPath).Length : 0L;
+                    if (currentLength >= maxFileBytes)
+                    {
+                        RotatePart();
+                        currentLength = new FileInfo(currentPath).Length;
+                    }
+
+                    long available = maxFileBytes - currentLength;
+                    int chars = VanillaLogRotation.PrefixLengthWithinBytes(remaining, available);
+                    if (chars <= 0)
+                    {
+                        RotatePart();
+                        continue;
+                    }
+
+                    string piece = remaining.Substring(0, chars);
+                    File.AppendAllText(currentPath, piece, Encoding.UTF8);
+                    remaining = remaining.Substring(chars);
+                    if (remaining.Length > 0) RotatePart();
                 }
-                File.AppendAllText(currentPath, payload, Encoding.UTF8);
+
                 if (part > 1 || new FileInfo(currentPath).Length > maxFileBytes / 2) Prune();
             }
+        }
+
+        private void RotatePart()
+        {
+            part++;
+            currentPath = PartPath(part);
+            File.WriteAllText(currentPath, DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                + " 4RTools Vanilla log rotated from previous part." + Environment.NewLine, Encoding.UTF8);
         }
 
         private string PartPath(int value)
@@ -71,13 +92,12 @@ namespace _4RTools.Model.Vanilla
         {
             string legacy = Path.Combine(directory, "reconnect.log");
             if (!File.Exists(legacy)) return;
-            string stamp;
-            try { stamp = File.GetLastWriteTime(legacy).ToString("yyyyMMdd-HHmmss"); }
-            catch { stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss"); }
-            string target = Path.Combine(directory, "reconnect-legacy-" + stamp + ".log");
-            int suffix = 1;
-            while (File.Exists(target)) target = Path.Combine(directory, "reconnect-legacy-" + stamp + "-" + (++suffix) + ".log");
-            try { File.Move(legacy, target); } catch { }
+            try
+            {
+                VanillaLogRotation.StartNewSession(legacy, "reconnect-legacy",
+                    maxFileBytes, maxDirectoryBytes, 20);
+            }
+            catch { }
         }
 
         private void Prune()
