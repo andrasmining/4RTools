@@ -727,8 +727,9 @@ namespace _4RTools.Model.Vanilla
     {
         internal Rectangle[] Tabs;
         internal Rectangle RailBounds;
-        internal Rectangle SelectedFillBounds;
+        internal int RightBorderX;
         internal int SelectedIndex;
+        // Higher means the tab is structurally more "open" into the inventory body.
         internal double[] SelectionScores;
     }
 
@@ -904,27 +905,34 @@ namespace _4RTools.Model.Vanilla
                 if (boundaries[k] - boundaries[k - 1] < Math.Max(12, (int)Math.Round(lattice * 0.75)))
                     throw new InvalidOperationException("Detected category-tab boundaries are incoherent.");
 
-            // Use only separator runs that agree with the recovered four-tab lattice to refine the
-            // rail width, then prefer the actual selected blue-fill bounds when present. The latter
-            // is the strongest live evidence of the clickable horizontal band because every tab uses
-            // the same rail width even when separators are shorter than the interactive tab surface.
-            CategoryRuleLine[] matched = rules.Where(rule =>
-                boundaries.Any(boundary => Math.Abs(rule.Y - boundary) <= bestTolerance)).ToArray();
-            int clickLeft = matched.Length == 0 ? railSearch.Left : Math.Max(railSearch.Left, matched.Min(rule => rule.Left));
-            int clickRight = matched.Length == 0 ? railSearch.Right - 1 : Math.Min(railSearch.Right - 1, matched.Max(rule => rule.Right));
-            if (clickRight - clickLeft < 8) { clickLeft = railSearch.Left; clickRight = railSearch.Right - 1; }
-
-            Rectangle categoryBand = Rectangle.FromLTRB(railSearch.Left,
-                Math.Max(railSearch.Top, boundaries[0]), railSearch.Right,
-                Math.Min(railSearch.Bottom, boundaries[4] + 1));
-            Rectangle selectedFill = FindCategorySelectedFillBounds(pixels, categoryBand);
-            if (!selectedFill.IsEmpty && selectedFill.Width >= 8
-                && selectedFill.Height >= Math.Max(8, (int)Math.Round(bestStep * 0.45)))
+            // Vanilla's Fav tab is blue even while another category is active, so color is
+            // not a selected-tab signal. The actual active tab is the one whose right edge is
+            // open/merged into the inventory body; inactive tabs keep a vertical right border.
+            // Recover both vertical rail borders from repeated grayscale rule pixels.
+            var vertical = new List<Tuple<int, double>>();
+            for (int x = railSearch.Left; x < railSearch.Right; x++)
             {
-                int inset = Math.Max(1, selectedFill.Width / 12);
-                clickLeft = Math.Max(railSearch.Left, selectedFill.Left + inset);
-                clickRight = Math.Min(railSearch.Right - 1, selectedFill.Right - inset - 1);
+                double coverage = CategoryVerticalRuleCoverage(pixels, x, boundaries);
+                if (coverage >= 0.38) vertical.Add(Tuple.Create(x, coverage));
             }
+            if (vertical.Count < 2)
+                throw new InvalidOperationException("Inventory category rail vertical borders were not positively detected.");
+
+            int leftBorder = vertical.Min(item => item.Item1);
+            int rightBorder = vertical.Max(item => item.Item1);
+            if (rightBorder - leftBorder < 8)
+                throw new InvalidOperationException("Detected inventory category rail is too narrow.");
+
+            // Pick the strongest pixel column inside the rightmost border cluster. This stabilizes
+            // anti-aliasing/DPI differences while preserving the structural open-edge signal.
+            int clusterStart = rightBorder;
+            while (clusterStart > leftBorder && vertical.Any(item => item.Item1 == clusterStart - 1))
+                clusterStart--;
+            int rightRuleX = vertical.Where(item => item.Item1 >= clusterStart)
+                .OrderByDescending(item => item.Item2).ThenByDescending(item => item.Item1).First().Item1;
+
+            int clickLeft = leftBorder + 1;
+            int clickRight = rightRuleX - 1;
             if (clickRight - clickLeft < 6)
                 throw new InvalidOperationException("Detected category rail has no safe interior click band.");
 
@@ -936,20 +944,22 @@ namespace _4RTools.Model.Vanilla
                 int bottom = Math.Min(grid.Panel.Bottom, boundaries[k + 1] - 1);
                 if (bottom <= top) throw new InvalidOperationException("Detected category tab has no usable area.");
                 tabs[k] = Rectangle.FromLTRB(clickLeft, top, clickRight + 1, bottom);
-                scores[k] = CategorySelectionFraction(pixels, tabs[k]);
+                double closedFraction = CategoryRightBorderFraction(pixels, rightRuleX, top, bottom);
+                scores[k] = Math.Max(0, Math.Min(1, 1.0 - closedFraction));
             }
 
             int selected = -1;
             int maxIndex = 0;
             for (int k = 1; k < scores.Length; k++) if (scores[k] > scores[maxIndex]) maxIndex = k;
             double second = scores.Where((value, index) => index != maxIndex).DefaultIfEmpty(0).Max();
-            if (scores[maxIndex] >= 0.12 && scores[maxIndex] - second >= 0.06) selected = maxIndex;
+            if (scores[maxIndex] >= 0.52 && scores[maxIndex] - second >= 0.16)
+                selected = maxIndex;
 
             return new VanillaInventoryCategoryTabs
             {
                 Tabs = tabs,
-                RailBounds = Rectangle.FromLTRB(clickLeft, boundaries[0], clickRight + 1, boundaries[4]),
-                SelectedFillBounds = selectedFill,
+                RailBounds = Rectangle.FromLTRB(leftBorder, boundaries[0], rightRuleX + 1, boundaries[4]),
+                RightBorderX = rightRuleX,
                 SelectedIndex = selected,
                 SelectionScores = scores
             };
@@ -1092,34 +1102,45 @@ namespace _4RTools.Model.Vanilla
             return Math.Max(0, bestRight - bestLeft + 1);
         }
 
-        private static Rectangle FindCategorySelectedFillBounds(PixelBuffer pixels, Rectangle area)
+        private static double CategoryVerticalRuleCoverage(PixelBuffer pixels, int x, int[] boundaries)
         {
-            Rectangle clipped = Rectangle.Intersect(new Rectangle(0, 0, pixels.Width, pixels.Height), area);
-            int minX = int.MaxValue, minY = int.MaxValue, maxX = int.MinValue, maxY = int.MinValue, count = 0;
-            for (int y = clipped.Top; y < clipped.Bottom; y++)
-            for (int x = clipped.Left; x < clipped.Right; x++)
+            int rule = 0, total = 0;
+            for (int k = 0; k < 4; k++)
             {
-                if (!pixels.At(x, y).CategorySelected) continue;
-                count++;
-                if (x < minX) minX = x; if (x > maxX) maxX = x;
-                if (y < minY) minY = y; if (y > maxY) maxY = y;
+                int top = boundaries[k] + 4;
+                int bottom = boundaries[k + 1] - 4;
+                for (int y = top; y <= bottom; y++)
+                {
+                    if (x < 0 || x >= pixels.Width || y < 0 || y >= pixels.Height) continue;
+                    total++;
+                    if (pixels.At(x, y).CategoryRule) rule++;
+                }
             }
-            if (count < 24 || maxX < minX || maxY < minY) return Rectangle.Empty;
-            return Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
+            return total == 0 ? 0 : rule / (double)total;
         }
 
-        private static double CategorySelectionFraction(PixelBuffer pixels, Rectangle tab)
+        private static double CategoryRightBorderFraction(PixelBuffer pixels, int x, int top, int bottom)
         {
-            Rectangle clipped = Rectangle.Intersect(new Rectangle(0, 0, pixels.Width, pixels.Height), tab);
-            if (clipped.Width < 4 || clipped.Height < 4) return 0;
-            int selected = 0, total = 0;
-            for (int y = clipped.Top + 1; y < clipped.Bottom - 1; y++)
-            for (int x = clipped.Left + 1; x < clipped.Right - 1; x++)
+            int rule = 0, total = 0;
+            int innerTop = top + Math.Max(2, (bottom - top) / 12);
+            int innerBottom = bottom - Math.Max(2, (bottom - top) / 12);
+            for (int y = innerTop; y <= innerBottom; y++)
             {
+                bool hit = false;
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    int sx = x + dx;
+                    if (sx >= 0 && sx < pixels.Width && y >= 0 && y < pixels.Height
+                        && pixels.At(sx, y).CategoryRule)
+                    {
+                        hit = true;
+                        break;
+                    }
+                }
                 total++;
-                if (pixels.At(x, y).CategorySelected) selected++;
+                if (hit) rule++;
             }
-            return total == 0 ? 0 : selected / (double)total;
+            return total == 0 ? 1 : rule / (double)total;
         }
 
         private static List<Component> ConnectedComponents(PixelBuffer pixels, Rectangle area, Func<PixelInfo, bool> predicate,
@@ -1177,13 +1198,6 @@ namespace _4RTools.Model.Vanilla
                     int max = Math.Max(R, Math.Max(G, B)), min = Math.Min(R, Math.Min(G, B));
                     int mean = (R + G + B) / 3;
                     return max - min <= 18 && mean >= 115 && mean <= 245;
-                }
-            }
-            internal bool CategorySelected
-            {
-                get
-                {
-                    return B >= 215 && B - R >= 20 && B - G >= 8 && R >= 150;
                 }
             }
             internal bool Pale
