@@ -528,14 +528,21 @@ namespace Vanilla.Diagnostics.Tests
                         Array.Copy(Encoding.UTF8.GetBytes(pair.Key == VanillaField.Map ? "test_map" : "Offline character"), bytes, pair.Key == VanillaField.Map ? 8 : 17);
                     memory.Put(moduleBase + VanillaMemoryMap.ParseAddress(pair.Value.Address), bytes);
                 }
-                Put(VanillaField.CurrentHP, 90); Put(VanillaField.MaxHP, 100); Put(VanillaField.CurrentSP, 20); Put(VanillaField.MaxSP, 100);
-                Put(VanillaField.CurrentWeight, 50); Put(VanillaField.MaxWeight, 100);
-                Put(VanillaField.CurrentCartWeight, 250); Put(VanillaField.MaxCartWeight, 10000);
-                Put(VanillaField.X, 10); Put(VanillaField.Y, 20); Put(VanillaField.ActionState, 7); Put(VanillaField.ClientReady, 1);
+                PutIfMapped(VanillaField.CurrentHP, 90); PutIfMapped(VanillaField.MaxHP, 100);
+                PutIfMapped(VanillaField.CurrentSP, 20); PutIfMapped(VanillaField.MaxSP, 100);
+                PutIfMapped(VanillaField.CurrentWeight, 50); PutIfMapped(VanillaField.MaxWeight, 100);
+                PutIfMapped(VanillaField.CurrentCartWeight, 250); PutIfMapped(VanillaField.MaxCartWeight, 10000);
+                PutIfMapped(VanillaField.X, 10); PutIfMapped(VanillaField.Y, 20);
+                PutIfMapped(VanillaField.ActionState, 7); PutIfMapped(VanillaField.ClientReady, 1);
                 if (this.profile.MemoryMap.Fields.ContainsKey(VanillaField.CharacterSlot)) Put(VanillaField.CharacterSlot, 1);
                 memory.Put(moduleBase + VanillaMemoryMap.ParseAddress(this.profile.MemoryMap.Fields[VanillaField.StatusEffects].Address), BitConverter.GetBytes(10u).Concat(BitConverter.GetBytes(20u)).ToArray());
                 source = new MemoryStateSource(memory, this.profile.MemoryMap); adapter = new VanillaStateAdapter(profile, IdentityValue());
             }
+            private void PutIfMapped(VanillaField field, uint value)
+            {
+                if (profile.MemoryMap.Fields.ContainsKey(field)) Put(field, value);
+            }
+
             public void Put(VanillaField field, uint value)
             {
                 var mapping = profile.MemoryMap.Fields[field];
