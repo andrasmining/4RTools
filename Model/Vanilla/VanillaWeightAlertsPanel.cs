@@ -17,9 +17,11 @@ namespace _4RTools.Model.Vanilla
         private readonly CheckBox transferUse = new CheckBox { Text = "Use", AutoSize = true, Checked = true };
         private readonly CheckBox transferEquip = new CheckBox { Text = "Equip", AutoSize = true };
         private readonly CheckBox transferEtc = new CheckBox { Text = "Etc", AutoSize = true, Checked = true };
+        private readonly TextBox autobattleStopHotkey = new TextBox { Width = 130, ReadOnly = true };
         private readonly TextBox inventoryHotkey = new TextBox { Width = 130, ReadOnly = true };
         private readonly TextBox cartHotkey = new TextBox { Width = 130, ReadOnly = true };
-        private int inventoryKey, cartKey;
+        private int autobattleStopKey, inventoryKey, cartKey;
+        private bool autobattleStopCtrl, autobattleStopAlt, autobattleStopShift;
         private bool inventoryCtrl, inventoryAlt, inventoryShift, cartCtrl, cartAlt, cartShift;
 
         private readonly CheckBox enabled = new CheckBox { Text = "Enable overweight e-mail alert", AutoSize = true };
@@ -56,8 +58,9 @@ namespace _4RTools.Model.Vanilla
             save.Click += (s, e) => Guard(SaveSettings);
             test.Click += async (s, e) => await SendTestAsync();
             clearHold.Click += (s, e) => service.ClearManualHolds();
-            inventoryHotkey.KeyDown += (s, e) => CaptureHotkey(e, true);
-            cartHotkey.KeyDown += (s, e) => CaptureHotkey(e, false);
+            autobattleStopHotkey.KeyDown += (s, e) => CaptureHotkey(e, HotkeyTarget.AutobattleStop);
+            inventoryHotkey.KeyDown += (s, e) => CaptureHotkey(e, HotkeyTarget.Inventory);
+            cartHotkey.KeyDown += (s, e) => CaptureHotkey(e, HotkeyTarget.Cart);
             timer.Tick += (s, e) => RefreshStatus();
             timer.Start(); RefreshStatus();
         }
@@ -72,7 +75,7 @@ namespace _4RTools.Model.Vanilla
             root.Controls.Add(new Label
             {
                 AutoSize = true, MaximumSize = new Size(1150, 0), ForeColor = Color.DimGray, Margin = new Padding(0, 5, 0, 10),
-                Text = "Weight decisions use only verified read-only CurrentWeight/MaxWeight. The master settings here apply only to character rows whose Weight switch is enabled in Recovery & relog. Cart maintenance uses ordinary UI hotkeys, visual slot detection and drag/drop; it never reads or writes inventory memory. It pauses the configured character Autobattle toggle, opens Inventory + Cart, moves every visible item from the selected categories, presses Enter only when a quantity dialog is positively detected, then uses the shared verified ResumeHotkey routine and minimizes. If a transfer makes no progress (for example a full cart), Autobattle stays OFF and only that character is held for manual emptying."
+                Text = "Weight decisions use only verified read-only CurrentWeight/MaxWeight. The master settings here apply only to character rows whose Weight switch is enabled in Recovery & relog. Cart maintenance uses ordinary UI hotkeys, visual slot detection and drag/drop; it never reads or writes inventory memory. It sends the dedicated Autobattle STOP hotkey, opens Inventory + Cart, moves every visible item from the selected categories, presses Enter only when a quantity dialog is positively detected, then uses the shared verified ResumeHotkey routine and minimizes. If a transfer makes no progress (for example a full cart), Autobattle stays OFF and only that character is held for manual emptying."
             }, 0, 1);
 
             root.Controls.Add(BuildCartGroup(), 0, 2);
@@ -92,7 +95,7 @@ namespace _4RTools.Model.Vanilla
         private Control BuildCartGroup()
         {
             var group = new GroupBox { Text = "Automatic Cart maintenance", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(10) };
-            var table = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, RowCount = 4 };
+            var table = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, RowCount = 5 };
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             table.Controls.Add(autoCart, 0, 0); table.SetColumnSpan(autoCart, 4);
@@ -103,7 +106,8 @@ namespace _4RTools.Model.Vanilla
             table.Controls.Add(categories, 1, 2);
             var hint = new Label { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(500, 0), Text = "Equip is optional/off by default. Favorite is not processed because it can overlap the real Use/Equip/Etc categories." };
             table.Controls.Add(hint, 2, 2); table.SetColumnSpan(hint, 2);
-            Add(table, 3, 0, "Inventory hotkey", inventoryHotkey); Add(table, 3, 2, "Cart hotkey", cartHotkey);
+            Add(table, 3, 0, "Autobattle STOP", autobattleStopHotkey); Add(table, 3, 2, "Inventory hotkey", inventoryHotkey);
+            Add(table, 4, 0, "Cart hotkey", cartHotkey);
             group.Controls.Add(table); return group;
         }
 
@@ -133,6 +137,8 @@ namespace _4RTools.Model.Vanilla
             autoCart.Checked = loaded.AutoCartEnabled;
             autoThreshold.Value = Clamp(autoThreshold, loaded.AutoCartThresholdPercent); autoRearm.Value = Clamp(autoRearm, loaded.AutoCartRearmPercent);
             transferUse.Checked = loaded.TransferUseItems; transferEquip.Checked = loaded.TransferEquipItems; transferEtc.Checked = loaded.TransferEtcItems;
+            autobattleStopKey = loaded.AutobattleStopKey; autobattleStopCtrl = loaded.AutobattleStopCtrl;
+            autobattleStopAlt = loaded.AutobattleStopAlt; autobattleStopShift = loaded.AutobattleStopShift;
             inventoryKey = loaded.InventoryKey; inventoryCtrl = loaded.InventoryCtrl; inventoryAlt = loaded.InventoryAlt; inventoryShift = loaded.InventoryShift;
             cartKey = loaded.CartKey; cartCtrl = loaded.CartCtrl; cartAlt = loaded.CartAlt; cartShift = loaded.CartShift; UpdateHotkeys();
             enabled.Checked = loaded.Enabled; threshold.Value = Clamp(threshold, loaded.ThresholdPercent); rearm.Value = Clamp(rearm, loaded.RearmPercent);
@@ -147,6 +153,8 @@ namespace _4RTools.Model.Vanilla
             var value = loaded == null ? new VanillaWeightAlertSettings() : loaded.Clone();
             value.AutoCartEnabled = autoCart.Checked; value.AutoCartThresholdPercent = autoThreshold.Value; value.AutoCartRearmPercent = autoRearm.Value;
             value.TransferUseItems = transferUse.Checked; value.TransferEquipItems = transferEquip.Checked; value.TransferEtcItems = transferEtc.Checked;
+            value.AutobattleStopKey = autobattleStopKey; value.AutobattleStopCtrl = autobattleStopCtrl;
+            value.AutobattleStopAlt = autobattleStopAlt; value.AutobattleStopShift = autobattleStopShift;
             value.InventoryKey = inventoryKey; value.InventoryCtrl = inventoryCtrl; value.InventoryAlt = inventoryAlt; value.InventoryShift = inventoryShift;
             value.CartKey = cartKey; value.CartCtrl = cartCtrl; value.CartAlt = cartAlt; value.CartShift = cartShift;
             value.Enabled = enabled.Checked; value.ThresholdPercent = threshold.Value; value.RearmPercent = rearm.Value;
@@ -166,15 +174,29 @@ namespace _4RTools.Model.Vanilla
                 : value.Enabled ? "Saved. Weight e-mail alert is enabled." : "Saved. Automatic actions and e-mail alerts are disabled.";
         }
 
-        private void CaptureHotkey(KeyEventArgs e, bool inventory)
+        private enum HotkeyTarget { AutobattleStop, Inventory, Cart }
+
+        private void CaptureHotkey(KeyEventArgs e, HotkeyTarget target)
         {
             if (e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.ShiftKey || e.KeyCode == Keys.Menu) return;
-            if (inventory) { inventoryKey = (int)e.KeyCode; inventoryCtrl = e.Control; inventoryAlt = e.Alt; inventoryShift = e.Shift; }
-            else { cartKey = (int)e.KeyCode; cartCtrl = e.Control; cartAlt = e.Alt; cartShift = e.Shift; }
+            if (target == HotkeyTarget.AutobattleStop)
+            {
+                autobattleStopKey = (int)e.KeyCode; autobattleStopCtrl = e.Control;
+                autobattleStopAlt = e.Alt; autobattleStopShift = e.Shift;
+            }
+            else if (target == HotkeyTarget.Inventory)
+            {
+                inventoryKey = (int)e.KeyCode; inventoryCtrl = e.Control; inventoryAlt = e.Alt; inventoryShift = e.Shift;
+            }
+            else
+            {
+                cartKey = (int)e.KeyCode; cartCtrl = e.Control; cartAlt = e.Alt; cartShift = e.Shift;
+            }
             UpdateHotkeys(); e.SuppressKeyPress = e.Handled = true;
         }
         private void UpdateHotkeys()
         {
+            autobattleStopHotkey.Text = HotkeyText(autobattleStopCtrl, autobattleStopAlt, autobattleStopShift, autobattleStopKey);
             inventoryHotkey.Text = HotkeyText(inventoryCtrl, inventoryAlt, inventoryShift, inventoryKey);
             cartHotkey.Text = HotkeyText(cartCtrl, cartAlt, cartShift, cartKey);
         }
