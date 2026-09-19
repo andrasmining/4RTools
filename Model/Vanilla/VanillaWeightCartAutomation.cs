@@ -154,6 +154,14 @@ namespace _4RTools.Model.Vanilla
             if (WeightMaintenanceCancelled(token)) return false;
             return MinimizeAssignedClientCore(token.AccountId, false, true);
         }
+
+        internal void LogWeightMaintenanceActivity(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            // Reuse the supervisor/session log so Weight/Cart progress is visible in the
+            // Recovery & relog Log pane as it happens, not only in COPY DEBUG LOG.
+            Log("[WEIGHT] " + text);
+        }
     }
 
     internal sealed class VanillaWeightCartAutomation
@@ -179,6 +187,7 @@ namespace _4RTools.Model.Vanilla
             {
                 report(message);
                 VanillaDebugLog.Write("WEIGHT", message);
+                supervisor.LogWeightMaintenanceActivity(message);
             };
             VanillaWeightMaintenanceToken token;
             string reason;
@@ -190,6 +199,7 @@ namespace _4RTools.Model.Vanilla
 
             VanillaDebugLog.Write("WEIGHT", "event=cart-start trigger=" + trigger + " account='" + token.Account.Label
                 + "' accountId=" + token.AccountId + " pid=" + pid + ".");
+            activity(token.Account.Label + ": weight maintenance started (" + trigger + "); serialized input lease acquired.");
             bool paused = false, manualHold = false, completed = false;
             Rectangle inventory = Rectangle.Empty, cart = Rectangle.Empty;
             int moved = 0;
