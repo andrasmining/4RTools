@@ -1,32 +1,36 @@
-# 4RTools Vanilla 0.6.56
+# 4RTools Vanilla 0.6.57
 
-## First-slot Weight / Cart traversal
+## Autoattack + Smart Teleport recovery
 
-The v0.6.55 live run selected **Use** correctly and moved the first two Use stacks, but after the category was empty it falsely detected another item and attempted one more drag.
+This release hardens the stationary-character recovery path seen during the v0.6.56 live startup test.
 
-The Cart walker is now intentionally simpler:
+The shared Autobattle resume verifier now performs at most three bounded recovery cycles:
 
-- Vanilla compacts items to the front of each category, so **only the first Inventory slot is authoritative**.
-- The first slot is compared against the freshest visually detected empty-slot reference from the same detected grid.
-- Classification uses both pale-slot coverage and local template difference rather than the old single threshold.
-- **Two consecutive Occupied captures** are required before any drag.
-- **Two consecutive Empty captures** mean the category is complete and 4RTools advances to the next enabled tab.
-- If first-slot evidence remains ambiguous through the bounded verification window, no drag is sent and the character fails closed to manual hold.
+1. Send the configured per-character Autobattle/Resume hotkey.
+2. Observe fresh verified X/Y for up to 10 seconds.
+3. **Only if the character is still stationary**, run the saved Smart Teleport hotkey through the existing verified background-teleport path.
+4. Observe fresh verified X/Y for up to another 10 seconds.
+5. Repeat only while the character is still stationary, for at most three cycles.
 
-Cart destination handling is also simplified. Vanilla accepts a transfer anywhere inside the Cart item body, so 4RTools no longer searches for a destination that appears empty. It rotates deterministically through safe centers of the **detected Cart grid**. This stays resolution/DPI independent and removes a second unnecessary source of visual classification failure.
+Any verified X or Y movement stops the current wait immediately and suppresses the teleport and every later recovery input. A teleport is therefore never sent simply because a timer elapsed after the character already started moving.
 
-The existing safeguards remain: selected-category verification, quantity-dialog-only Enter, transfer-progress verification, serialized ownership, visible Weight/Cart logging, manual hold on uncertainty, and verified Autobattle resume.
+Recovery teleport keeps the existing safety gates: it targets the verified owned Vanilla window, sends Enter only after the expected warp popup is positively recognized, and verifies that the modal clears. An unconfigured teleport hotkey, missing popup, ambiguous capture or failed background input does not authorize blind Enter/input.
 
-## Draggable Characters / Log divider
+After the three action cycles are exhausted, 4RTools sends no more recovery input and passively watches fresh X/Y until the **180-second recovery deadline**. If there is still no verified movement at that point, the existing restart/relogin path takes over unchanged and starts the client again. Brief Loading state after a verified warp authorizes no new input until fresh gameplay state returns.
 
-Recovery & relog now uses a real draggable splitter between **Characters** and **Log**. The initial desktop layout remains approximately 2:1, but the divider can be dragged to widen the Log for diagnostics or give more room back to the character table. On narrow layouts the splitter becomes horizontal.
+The same shared verifier is used after relog/restart and when Weight/Cart maintenance resumes Autobattle.
 
-Default layout validation still requires the character table to fit without an unnecessary horizontal scrollbar. If the user deliberately shrinks the character pane far below its default width, a horizontal table scrollbar is allowed.
+## Validation
 
-## Validation scope and limits
+Regression coverage now verifies that:
 
-Automated coverage includes empty-versus-occupied first-slot classification, detected-reference comparison, rotating safe Cart destinations, active-tab semantics, draggable splitter behavior, Full-HD/narrow/enlarged-text layouts, Debug/Release builds, portable launch and native recovery checks.
+- movement during the Autobattle 10-second window suppresses teleport immediately;
+- movement produced by teleport stops recovery without another wait/action;
+- stationary clients receive exactly three Autobattle attempts and three teleport attempts;
+- the action timing is Autobattle -> 10s -> teleport -> 10s for each cycle;
+- after those cycles, recovery remains passive until exactly the 180-second deadline;
+- cancellation, stale/unverified state, identity replacement and existing input-safety gates still fail closed.
 
-No stochastic input behavior is added for anti-detection. Cart destination variation is deterministic and derived only from detected Cart geometry.
+The Windows validation pipeline passed Debug tests before versioning this release, including the complete offline diagnostics suite, Release packaging/smoke checks, native recovery checks and mock-data UI validation.
 
-The engineering environment still cannot execute the full workflow against the user's live Vanilla/Gepard client, so the exact first-slot transition after moving the final live item remains the next VPS validation boundary.
+The engineering environment still cannot reproduce the user's live Vanilla/Gepard session, so the new recovery cadence is the next VPS live-validation boundary.
