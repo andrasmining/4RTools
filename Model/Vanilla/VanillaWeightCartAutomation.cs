@@ -171,6 +171,7 @@ namespace _4RTools.Model.Vanilla
         private const int CategoryVerifyTimeoutMs = 1800;
         private const int CategoryClickAttempts = 3;
         private const int EmptyCategoryConfirmMs = 180;
+        private const int FirstSlotVerifySamples = 4;
         private const int TransferSettleMs = 300;
         private const int MaxTransfers = 120;
         private readonly VanillaFleetMonitor fleet;
@@ -658,39 +659,54 @@ namespace _4RTools.Model.Vanilla
         {
             sourcePoint = Point.Empty;
             weightBefore = null;
-            for (int sample = 1; sample <= 2; sample++)
+            int emptyStable = 0, occupiedStable = 0;
+
+            for (int sample = 1; sample <= FirstSlotVerifySamples; sample++)
             {
                 ThrowIfCancelled(cancelled);
                 using (Bitmap frame = input.CaptureClientBitmap())
                 {
                     VanillaUiSlotGrid inventoryGrid = VanillaInventoryVision.DetectSlotGrid(frame, inventory);
-                    Point? source = VanillaInventoryVision.FirstOccupiedSlot(frame, inventoryGrid);
-                    if (!source.HasValue)
+                    VanillaInventoryFirstSlotObservation first = VanillaInventoryVision.ObserveFirstSlot(frame, inventoryGrid);
+                    report(categoryName + " first-slot scan " + sample + "/" + FirstSlotVerifySamples
+                        + ": " + first.State + " paleRatio=" + first.PaleRatio.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)
+                        + " diff=" + first.TemplateDifference.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + ".");
+
+                    if (first.State == VanillaInventorySlotState.Empty)
                     {
-                        if (sample == 1)
+                        emptyStable++;
+                        occupiedStable = 0;
+                        if (emptyStable >= 2)
+                            return false;
+                    }
+                    else if (first.State == VanillaInventorySlotState.Occupied)
+                    {
+                        occupiedStable++;
+                        emptyStable = 0;
+                        if (occupiedStable >= 2)
                         {
-                            report(categoryName + " scan 1/2 found no occupied slot; confirming before advancing.");
+                            VanillaUiSlotGrid cartGrid = VanillaInventoryVision.DetectSlotGrid(frame, cart);
+                            Point destination = VanillaInventoryVision.CartDropPoint(cartGrid, first.Center, sample);
+                            sourcePoint = first.Center;
+                            weightBefore = CurrentWeight(token.ProcessId);
+                            report(categoryName + " first slot confirmed occupied on two fresh captures; dragging it to a safe detected Cart interior point.");
+                            input.DragNormalized(NormalizeX(sourcePoint.X, frame.Width), NormalizeY(sourcePoint.Y, frame.Height),
+                                NormalizeX(destination.X, frame.Width), NormalizeY(destination.Y, frame.Height));
+                            return true;
                         }
-                        else return false;
                     }
                     else
                     {
-                        VanillaUiSlotGrid cartGrid = VanillaInventoryVision.DetectSlotGrid(frame, cart);
-                        Point? destination = VanillaInventoryVision.FirstEmptySlot(frame, cartGrid);
-                        if (!destination.HasValue)
-                            throw new VanillaCartManualException("No positively detected empty Cart slot remains. No fallback coordinate was used; Autobattle stays OFF for manual Cart inspection.");
-
-                        sourcePoint = source.Value;
-                        weightBefore = CurrentWeight(token.ProcessId);
-                        report(categoryName + " item detected and an empty Cart slot detected; dragging between detected slot centers.");
-                        input.DragNormalized(NormalizeX(sourcePoint.X, frame.Width), NormalizeY(sourcePoint.Y, frame.Height),
-                            NormalizeX(destination.Value.X, frame.Width), NormalizeY(destination.Value.Y, frame.Height));
-                        return true;
+                        emptyStable = 0;
+                        occupiedStable = 0;
                     }
                 }
                 Thread.Sleep(EmptyCategoryConfirmMs);
             }
-            return false;
+
+            throw new VanillaCartManualException(categoryName
+                + " first-slot occupancy stayed ambiguous across " + FirstSlotVerifySamples
+                + " fresh captures. No drag was sent; Autobattle stays OFF for manual inspection.");
         }
 
         private static string CategoryName(int category)
@@ -721,6 +737,22 @@ namespace _4RTools.Model.Vanilla
         internal int[] Columns;
         internal int[] Rows;
         internal int EmptyPaleThreshold;
+    }
+
+    internal enum VanillaInventorySlotState
+    {
+        Unknown,
+        Empty,
+        Occupied
+    }
+
+    internal sealed class VanillaInventoryFirstSlotObservation
+    {
+        internal VanillaInventorySlotState State;
+        internal Point Center;
+        internal Point ReferenceEmptyCenter;
+        internal double PaleRatio;
+        internal double TemplateDifference;
     }
 
     internal sealed class VanillaInventoryCategoryTabs
@@ -963,6 +995,73 @@ namespace _4RTools.Model.Vanilla
                 SelectedIndex = selected,
                 SelectionScores = scores
             };
+        }
+
+        internal static VanillaInventoryFirstSlotObservation ObserveFirstSlot(Bitmap frame, VanillaUiSlotGrid grid)
+        {
+            if (frame == null) throw new ArgumentNullException(nameof(frame));
+            if (grid == null || grid.Columns == null || grid.Columns.Length == 0 || grid.Rows == null || grid.Rows.Length == 0)
+                throw new InvalidOperationException("Detected inventory slot grid is empty.");
+
+            PixelBuffer pixels = PixelBuffer.Read(frame);
+            int columnSpacing = grid.Columns.Length > 1 ? MedianSpacing(grid.Columns) : 41;
+            int rowSpacing = grid.Rows.Length > 1 ? MedianSpacing(grid.Rows) : columnSpacing;
+            int rx = Math.Max(10, Math.Min(28, (int)Math.Round(columnSpacing * 0.42)));
+            int ry = Math.Max(6, Math.Min(18, (int)Math.Round(rowSpacing * 0.24)));
+
+            Point first = new Point(grid.Columns[0], grid.Rows[0]);
+            var candidates = new List<Tuple<Point, int>>();
+            foreach (int y in grid.Rows)
+            foreach (int x in grid.Columns)
+            {
+                if (x == first.X && y == first.Y) continue;
+                if (!grid.Panel.Contains(x, y)) continue;
+                int pale = pixels.PaleCount(x, y, rx, ry);
+                candidates.Add(Tuple.Create(new Point(x, y), pale));
+            }
+            if (candidates.Count == 0)
+                throw new InvalidOperationException("No reference slot is available for first-slot classification.");
+
+            Tuple<Point, int> reference = candidates.OrderByDescending(item => item.Item2).First();
+            int firstPale = pixels.PaleCount(first.X, first.Y, rx, ry);
+            double paleRatio = firstPale / (double)Math.Max(1, reference.Item2);
+            double difference = pixels.MeanPatchColorDistance(first, reference.Item1, rx, ry);
+
+            VanillaInventorySlotState state = VanillaInventorySlotState.Unknown;
+            if (paleRatio >= 0.80 && difference <= 24.0)
+                state = VanillaInventorySlotState.Empty;
+            else if (paleRatio <= 0.68 || difference >= 34.0)
+                state = VanillaInventorySlotState.Occupied;
+
+            return new VanillaInventoryFirstSlotObservation
+            {
+                State = state,
+                Center = first,
+                ReferenceEmptyCenter = reference.Item1,
+                PaleRatio = paleRatio,
+                TemplateDifference = difference
+            };
+        }
+
+        internal static Point CartDropPoint(VanillaUiSlotGrid grid, Point source, int sequence)
+        {
+            if (grid == null || grid.Columns == null || grid.Columns.Length == 0 || grid.Rows == null || grid.Rows.Length == 0)
+                throw new InvalidOperationException("Detected Cart grid is empty.");
+
+            // Any point inside the Cart item body accepts a transfer. Vary the destination
+            // deterministically across detected grid centers for UI robustness; do not depend on
+            // an empty Cart slot and do not use stochastic anti-detection behavior.
+            int[] columnOrder = { grid.Columns.Length / 2, Math.Max(0, grid.Columns.Length / 3),
+                Math.Max(0, grid.Columns.Length * 2 / 3), 0, grid.Columns.Length - 1 };
+            int[] rowOrder = { grid.Rows.Length / 2, Math.Max(0, grid.Rows.Length / 3),
+                Math.Max(0, grid.Rows.Length * 2 / 3), 0, grid.Rows.Length - 1 };
+            int index = Math.Abs(sequence) % Math.Min(columnOrder.Length, rowOrder.Length);
+            int ci = Math.Max(0, Math.Min(grid.Columns.Length - 1, columnOrder[index]));
+            int ri = Math.Max(0, Math.Min(grid.Rows.Length - 1, rowOrder[index]));
+            Point point = new Point(grid.Columns[ci], grid.Rows[ri]);
+            if (!grid.Panel.Contains(point))
+                throw new InvalidOperationException("Detected Cart drop point escaped the detected Cart panel.");
+            return point;
         }
 
         internal static Point? FirstOccupiedSlot(Bitmap frame, VanillaUiSlotGrid grid)
@@ -1252,6 +1351,23 @@ namespace _4RTools.Model.Vanilla
                 for (int y = Math.Max(0, cy - ry); y <= Math.Min(Height - 1, cy + ry); y++)
                     for (int x = Math.Max(0, cx - rx); x <= Math.Min(Width - 1, cx + rx); x++) if (At(x, y).Pale) count++;
                 return count;
+            }
+
+            internal double MeanPatchColorDistance(Point a, Point b, int rx, int ry)
+            {
+                long total = 0;
+                int count = 0;
+                for (int dy = -ry; dy <= ry; dy++)
+                for (int dx = -rx; dx <= rx; dx++)
+                {
+                    int ax = a.X + dx, ay = a.Y + dy, bx = b.X + dx, by = b.Y + dy;
+                    if (ax < 0 || ax >= Width || ay < 0 || ay >= Height
+                        || bx < 0 || bx >= Width || by < 0 || by >= Height) continue;
+                    PixelInfo pa = At(ax, ay), pb = At(bx, by);
+                    total += Math.Abs(pa.R - pb.R) + Math.Abs(pa.G - pb.G) + Math.Abs(pa.B - pb.B);
+                    count++;
+                }
+                return count == 0 ? double.MaxValue : total / (double)(count * 3);
             }
             internal int BlueSelectionCount(Rectangle box)
             {
