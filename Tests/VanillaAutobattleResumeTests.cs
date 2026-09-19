@@ -28,8 +28,10 @@ namespace Vanilla.Diagnostics.Tests
             Test("Y-only movement verifies the first attempt", () => Success(1, true));
             Test("Second attempt succeeds without a third key", () => Success(2, false));
             Test("Third attempt succeeds without a fourth key", () => Success(3, true));
-            Test("No movement fails after exactly three 10-second windows", BoundedFailure);
-            Test("Restart-only post-login settle is 10 seconds and hotkey attempts stay bounded", RecoveryConstants);
+            Test("No movement runs three autoattack/teleport cycles then waits to 180 seconds", BoundedFailure);
+            Test("Movement after autoattack suppresses teleport", TeleportSuppressedByMovement);
+            Test("Movement caused by teleport stops the recovery cycle immediately", MovementAfterTeleport);
+            Test("Restart-only settle, recovery cycles and 180-second deadline stay bounded", RecoveryConstants);
             Test("Unknown visual state does not block verified post-login memory input", VisualGate);
             Test("A completed verifier cannot reset its retry budget", NoRestart);
             Test("Intermediate movement is seen even if the character returns", MovementAndReturn);
@@ -255,14 +257,16 @@ namespace Vanilla.Diagnostics.Tests
 
         private sealed class Harness
         {
-            internal int Pid = 42, Sends, Focuses;
+            internal int Pid = 42, Sends, Teleports, Focuses;
             internal long Ms;
             internal bool Cancelled;
             internal readonly Guid Session = Guid.NewGuid();
             internal readonly VanillaAutobattleResumeVerifier Verifier = new VanillaAutobattleResumeVerifier();
             internal readonly List<long> SentAt = new List<long>();
+            internal readonly List<long> TeleportAt = new List<long>();
             internal readonly List<string> Progress = new List<string>();
             internal Func<VanillaClientState> ReadOverride;
+            internal Func<int, bool> TeleportOverride;
             internal Action OnFocus, OnDelay;
             internal long UtcOffset;
             internal DateTimeOffset Now { get { return Epoch.AddMilliseconds(Ms + UtcOffset); } }
@@ -281,8 +285,14 @@ namespace Vanilla.Diagnostics.Tests
             {
                 return Verifier.VerifyAsync(Pid, () => ReadOverride == null ? Sample() : ReadOverride(),
                     () => { Focuses++; OnFocus?.Invoke(); },
-                    () => { Sends++; SentAt.Add(Ms); }, () => Cancelled,
-                    () => TimeSpan.FromMilliseconds(Ms), () => Now,
+                    () => { Sends++; SentAt.Add(Ms); },
+                    attempt =>
+                    {
+                        Teleports++;
+                        TeleportAt.Add(Ms);
+                        return TeleportOverride == null || TeleportOverride(attempt);
+                    },
+                    () => Cancelled, () => TimeSpan.FromMilliseconds(Ms), () => Now,
                     milliseconds => { Ms += milliseconds; OnDelay?.Invoke(); return Task.FromResult(0); }, Progress.Add);
             }
             internal void Run() { RunAsync().GetAwaiter().GetResult(); }
@@ -293,25 +303,48 @@ namespace Vanilla.Diagnostics.Tests
             var h = new Harness();
             h.ReadOverride = () => h.Sample(h.Sends >= attempt && !y ? 11 : 10, h.Sends >= attempt && y ? 21 : 20);
             h.Run();
-            Assert(h.Verifier.MovementVerified && h.Sends == attempt, "Incorrect success or attempt count.");
-            Assert(h.Ms == (attempt - 1) * 10000, "Retry observation window was not ten seconds.");
+            Assert(h.Verifier.MovementVerified && h.Sends == attempt, "Incorrect success or recovery-cycle count.");
+            Assert(h.Teleports == attempt - 1, "Teleport ran even though movement had already been verified.");
+            Assert(h.Ms == (attempt - 1) * 20000, "Each failed autoattack/teleport cycle must consume two 10-second observation windows.");
         }
         private static void BoundedFailure()
         {
             var h = new Harness();
-            Expect<InvalidOperationException>(h.Run, "no verified X/Y movement after 3 autobattle hotkey attempts");
-            Assert(h.Sends == 3 && h.Ms == 30000 && !h.Verifier.MovementVerified, "Unbounded or shortened attempts.");
-            Assert(h.SentAt.SequenceEqual(new long[] { 0, 10000, 20000 }), "Unexpected hotkey timing.");
-            Assert(h.Progress.Contains("Retrying autobattle 2/3") && h.Progress.Contains("Retrying autobattle 3/3"), "Retry progress missing.");
+            Expect<InvalidOperationException>(h.Run, "3 autobattle + teleport recovery cycles within 180 seconds");
+            Assert(h.Sends == 3 && h.Teleports == 3 && h.Ms == 180000 && !h.Verifier.MovementVerified,
+                "Recovery did not preserve the three-cycle input budget and 180-second restart deadline.");
+            Assert(h.SentAt.SequenceEqual(new long[] { 0, 20000, 40000 }), "Unexpected autobattle timing.");
+            Assert(h.TeleportAt.SequenceEqual(new long[] { 10000, 30000, 50000 }), "Teleport did not follow each stationary 10-second autobattle window.");
+            Assert(h.Progress.Contains("Retrying autobattle recovery cycle 2/3")
+                && h.Progress.Contains("Retrying autobattle recovery cycle 3/3"), "Recovery-cycle progress missing.");
             Assert(h.Progress.Contains("Sending autobattle hotkey attempt 1/3")
                 && h.Progress.Contains("Sending autobattle hotkey attempt 2/3")
                 && h.Progress.Contains("Sending autobattle hotkey attempt 3/3"), "Hotkey sends were not explicitly logged.");
+            Assert(h.Progress.Contains("Three recovery cycles exhausted; monitoring X/Y until the 180s restart deadline"),
+                "Passive watch to the restart deadline was not reported.");
+        }
+        private static void TeleportSuppressedByMovement()
+        {
+            var h = new Harness();
+            h.ReadOverride = () => h.Sample(h.Ms >= 500 ? 11 : 10);
+            h.Run();
+            Assert(h.Sends == 1 && h.Teleports == 0 && h.Ms == 500,
+                "Teleport was sent or the 10-second wait continued after verified movement.");
+        }
+        private static void MovementAfterTeleport()
+        {
+            var h = new Harness();
+            h.ReadOverride = () => h.Sample(h.Teleports > 0 ? 11 : 10);
+            h.Run();
+            Assert(h.Sends == 1 && h.Teleports == 1 && h.Ms == 10000,
+                "Recovery did not stop immediately when teleport produced verified X/Y movement.");
         }
         private static void RecoveryConstants()
         {
             Assert(VanillaAutobattleResumeVerifier.PostLoginSettleMs == 10000, "Restart-only post-login settle must be ten seconds.");
-            Assert(VanillaAutobattleResumeVerifier.MaximumAttempts == 3, "Hotkey attempt budget changed unexpectedly.");
+            Assert(VanillaAutobattleResumeVerifier.MaximumAttempts == 3, "Recovery-cycle input budget changed unexpectedly.");
             Assert(VanillaAutobattleResumeVerifier.ObservationWindowMs == 10000, "Movement verification window changed unexpectedly.");
+            Assert(VanillaAutobattleResumeVerifier.RecoveryDeadlineMs == 180000, "Stationary recovery must escalate to restart at 180 seconds.");
             Assert(VanillaRecoveryPolicy.RetryDelayMs(1, 30000, 3600000) == 30000
                 && VanillaRecoveryPolicy.RetryDelayMs(8, 30000, 3600000) == 3600000
                 && VanillaRecoveryPolicy.RetryDelayMs(20, 30000, 3600000) == 3600000,
@@ -322,7 +355,7 @@ namespace Vanilla.Diagnostics.Tests
             var h = new Harness();
             Expect<InvalidOperationException>(h.Run, "no verified X/Y movement");
             Expect<InvalidOperationException>(h.Run, "cannot be restarted");
-            Assert(h.Sends == 3, "Retry budget was reset.");
+            Assert(h.Sends == 3 && h.Teleports == 3, "Recovery input budget was reset.");
         }
         private static void MovementAndReturn()
         {
@@ -334,12 +367,12 @@ namespace Vanilla.Diagnostics.Tests
         private static void DeadlineMovement()
         {
             var h = new Harness(); h.ReadOverride = () => h.Sample(h.Ms >= 10000 ? 11 : 10);
-            h.Run(); Assert(h.Sends == 1 && h.Ms == 10000, "Deadline movement caused another toggle.");
+            h.Run(); Assert(h.Sends == 1 && h.Teleports == 0 && h.Ms == 10000, "Deadline movement caused a teleport or another toggle.");
         }
         private static void RefocusMovement()
         {
             var h = new Harness(); h.ReadOverride = () => h.Sample(h.Focuses >= 2 ? 11 : 10);
-            h.Run(); Assert(h.Focuses == 2 && h.Sends == 1, "Movement after refocus did not prevent a toggle.");
+            h.Run(); Assert(h.Focuses == 2 && h.Sends == 1 && h.Teleports == 1 && h.Ms == 20000, "Movement after refocus did not prevent a second toggle.");
         }
         private static void CancelBeforeStart()
         {
@@ -420,7 +453,7 @@ namespace Vanilla.Diagnostics.Tests
         private static void WallClockChange()
         {
             var h = new Harness(); h.OnDelay = () => h.UtcOffset = h.Ms < 15000 ? -3600000 : 3600000;
-            Expect<InvalidOperationException>(h.Run, "no verified X/Y movement"); Assert(h.Ms == 30000 && h.Sends == 3, "Wall clock changed deadlines.");
+            Expect<InvalidOperationException>(h.Run, "no verified X/Y movement"); Assert(h.Ms == 180000 && h.Sends == 3 && h.Teleports == 3, "Wall clock changed recovery deadlines.");
         }
         private static void IndependentClients()
         {
