@@ -273,10 +273,31 @@ namespace _4RTools.Model.Vanilla
                 return new VanillaWeightCartResult { Deferred = true, Message = "Cart maintenance deferred: " + reason + "." };
             }
 
+            VanillaCartWeightSample initialCart = CurrentCartWeight(pid);
+            if (initialCart == null)
+            {
+                string detail = "Verified Cart current/max weight is unavailable; no Cart UI input was sent.";
+                supervisor.CompleteWeightMaintenance(token, false, detail);
+                VanillaDebugLog.Write("WEIGHT", "event=cart-deferred trigger=" + trigger + " account='" + token.Account.Label
+                    + "' pid=" + pid + " stage=cart-weight reason='verified cart weight unavailable'.");
+                return new VanillaWeightCartResult { Deferred = true, Message = token.Account.Label + ": " + detail };
+            }
+            if (initialCart.Percent >= CartFullPercent)
+            {
+                string detail = token.Account.Label + ": Cart is already full at " + initialCart.Current + "/" + initialCart.Maximum
+                    + "; no transfer was attempted.";
+                supervisor.CompleteWeightMaintenance(token, false, detail);
+                VanillaDebugLog.Write("WEIGHT", "event=cart-already-full trigger=" + trigger + " account='" + token.Account.Label
+                    + "' accountId=" + token.AccountId + " pid=" + pid + " cart=" + initialCart.Current + "/" + initialCart.Maximum + ".");
+                return new VanillaWeightCartResult { CartFull = true, Message = detail };
+            }
+
             VanillaDebugLog.Write("WEIGHT", "event=cart-start trigger=" + trigger + " account='" + token.Account.Label
-                + "' accountId=" + token.AccountId + " pid=" + pid + ".");
-            activity(token.Account.Label + ": weight maintenance started (" + trigger + "); serialized input lease acquired.");
+                + "' accountId=" + token.AccountId + " pid=" + pid + " cart=" + initialCart.Current + "/" + initialCart.Maximum + ".");
+            activity(token.Account.Label + ": weight maintenance started (" + trigger + "); serialized input lease acquired; Cart "
+                + initialCart.Current + "/" + initialCart.Maximum + " (" + initialCart.Percent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%).");
             bool paused = false, manualHold = false, completed = false;
+            bool cartFull = false, cartSafetyStop = false;
             Rectangle inventory = Rectangle.Empty, cart = Rectangle.Empty;
             int moved = 0;
             Func<bool> cancelled = () => supervisor.WeightMaintenanceCancelled(token);
@@ -317,15 +338,51 @@ namespace _4RTools.Model.Vanilla
                     if (settings.TransferEtcItems) categories.Add(2);
                     foreach (int category in categories)
                     {
+                        if (cartFull || cartSafetyStop) break;
                         ThrowIfCancelled(cancelled);
                         string categoryName = CategoryName(category);
-                        activity(token.Account.Label + ": weight maintenance: detecting and selecting " + categoryName + " tab.");
+                        VanillaCartItemRule itemRule = KnownItemRule(category);
+                        activity(token.Account.Label + ": weight maintenance: detecting and selecting " + categoryName + " tab"
+                            + (itemRule == null ? "." : "; known farming item=" + itemRule.ItemName + " unitWeight=" + itemRule.UnitWeight + "."));
                         SelectCategory(input, inventory, category, categoryName, cancelled, activity);
                         int noProgress = 0;
                         int categoryMoved = 0;
                         while (moved < MaxTransfers)
                         {
                             ThrowIfCancelled(cancelled);
+                            VanillaCartWeightSample cartBefore = CurrentCartWeight(token.ProcessId);
+                            if (cartBefore == null)
+                            {
+                                manualHold = true;
+                                throw new VanillaCartManualException("Verified Cart weight disappeared while Autobattle was OFF. No further transfer is safe.");
+                            }
+                            if (cartBefore.Percent >= CartFullPercent)
+                            {
+                                cartFull = true;
+                                activity(token.Account.Label + ": weight maintenance: Cart confirmed full at " + cartBefore.Current + "/"
+                                    + cartBefore.Maximum + "; no further drag will be sent.");
+                                break;
+                            }
+
+                            bool precision = cartBefore.Percent > PrecisionThresholdPercent;
+                            if (precision && itemRule == null)
+                            {
+                                cartSafetyStop = true;
+                                activity(token.Account.Label + ": weight maintenance: Cart is "
+                                    + cartBefore.Percent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
+                                    + "% full (>95%). " + categoryName
+                                    + " has no verified unit-weight rule, so blind full-stack transfer stops here.");
+                                break;
+                            }
+                            if (precision && cartBefore.Remaining < itemRule.UnitWeight)
+                            {
+                                cartSafetyStop = true;
+                                activity(token.Account.Label + ": weight maintenance: only " + cartBefore.Remaining
+                                    + " Cart weight remains, less than one " + itemRule.ItemName + " (" + itemRule.UnitWeight
+                                    + "); no unsafe transfer sent.");
+                                break;
+                            }
+
                             uint? pendingWeightBefore;
                             Point sourcePoint;
                             if (!TryDragNextDetectedItem(token, input, inventory, cart, categoryName, moved, cancelled, activity,
@@ -333,7 +390,7 @@ namespace _4RTools.Model.Vanilla
                             {
                                 activity(token.Account.Label + ": weight maintenance: " + categoryName
                                     + " confirmed empty because the first inventory slot was empty on two fresh classified captures; moved "
-                                    + categoryMoved + " item(s) from this tab; advancing.");
+                                    + categoryMoved + " transfer(s) from this tab; advancing.");
                                 VanillaDebugLog.Write("WEIGHT", "event=cart-category-empty account='" + token.Account.Label
                                     + "' accountId=" + token.AccountId + " pid=" + pid + " category=" + categoryName
                                     + " moved=" + categoryMoved + " samples=2.");
@@ -342,11 +399,35 @@ namespace _4RTools.Model.Vanilla
 
                             Thread.Sleep(TransferSettleMs);
                             bool quantity = WaitForQuantityPrompt(input, cancelled, 1200);
+                            uint? requestedQuantity = null;
                             if (quantity)
                             {
-                                activity(token.Account.Label + ": weight maintenance: quantity dialog positively detected; pressing Enter for the full stack.");
-                                input.Press(Keys.Enter);
-                                Thread.Sleep(TransferSettleMs);
+                                if (precision)
+                                {
+                                    uint fit = cartBefore.Remaining / itemRule.UnitWeight;
+                                    if (fit == 0)
+                                    {
+                                        activity(token.Account.Label + ": weight maintenance: quantity dialog detected but no "
+                                            + itemRule.ItemName + " can fit; cancelling transfer.");
+                                        input.Press(Keys.Escape);
+                                        cartSafetyStop = true;
+                                        break;
+                                    }
+                                    requestedQuantity = fit;
+                                    activity(token.Account.Label + ": weight maintenance: Cart "
+                                        + cartBefore.Current + "/" + cartBefore.Maximum + " is above 95%; precision fill for "
+                                        + itemRule.ItemName + " (" + itemRule.UnitWeight + " weight each) requests at most " + fit
+                                        + " item(s) to fit the remaining " + cartBefore.Remaining + " weight.");
+                                    input.ReplaceFocusedText(fit.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                                    input.Press(Keys.Enter);
+                                    Thread.Sleep(TransferSettleMs);
+                                }
+                                else
+                                {
+                                    activity(token.Account.Label + ": weight maintenance: quantity dialog positively detected; pressing Enter for the full stack.");
+                                    input.Press(Keys.Enter);
+                                    Thread.Sleep(TransferSettleMs);
+                                }
                             }
                             else
                             {
@@ -354,6 +435,8 @@ namespace _4RTools.Model.Vanilla
                             }
 
                             bool cleared, weightReduced = WaitForWeightReduction(token.ProcessId, pendingWeightBefore, cancelled);
+                            VanillaCartWeightSample cartAfter;
+                            bool cartIncreased = WaitForCartWeightIncrease(token.ProcessId, cartBefore.Current, cancelled, out cartAfter);
                             using (Bitmap verify = input.CaptureClientBitmap())
                             {
                                 VanillaUiSlotGrid grid = VanillaInventoryVision.DetectSlotGrid(verify, inventory);
@@ -365,22 +448,53 @@ namespace _4RTools.Model.Vanilla
                                     throw new VanillaCartManualException("A quantity dialog remained or appeared late. No further key was sent; Autobattle stays OFF for manual inspection.");
                                 }
                             }
-                            if (!weightReduced && !cleared)
+
+                            if (!cartIncreased || (!weightReduced && !cleared))
                             {
                                 noProgress++;
                                 if (noProgress >= 1)
                                 {
                                     manualHold = true;
-                                    throw new VanillaCartManualException("Cart did not accept the dragged item. The cart may be full; autobattle is left OFF and this character is held for manual emptying.");
+                                    throw new VanillaCartManualException("Cart did not show a verified weight increase after the drag. The Cart may be full or the transfer was rejected; Autobattle stays OFF for manual inspection.");
                                 }
                             }
-                            else
+
+                            if (precision)
                             {
-                                noProgress = 0;
-                                moved++;
-                                categoryMoved++;
-                                activity(token.Account.Label + ": weight maintenance: moved " + categoryName + " item "
-                                    + categoryMoved + " (total " + moved + ") to a safe detected Cart interior point.");
+                                uint delta = cartAfter.Current - cartBefore.Current;
+                                if (delta == 0 || delta % itemRule.UnitWeight != 0)
+                                {
+                                    manualHold = true;
+                                    throw new VanillaCartManualException("Precision Cart transfer changed weight by " + delta
+                                        + ", which does not match the known " + itemRule.ItemName + " unit weight " + itemRule.UnitWeight
+                                        + ". Item identity is uncertain; no further transfer is safe.");
+                                }
+                                if (!quantity && delta != itemRule.UnitWeight)
+                                {
+                                    manualHold = true;
+                                    throw new VanillaCartManualException("Single-item Cart transfer changed weight by " + delta
+                                        + " instead of the expected " + itemRule.UnitWeight + " for " + itemRule.ItemName + ".");
+                                }
+                                if (requestedQuantity.HasValue
+                                    && (ulong)delta > (ulong)requestedQuantity.Value * (ulong)itemRule.UnitWeight)
+                                {
+                                    manualHold = true;
+                                    throw new VanillaCartManualException("Precision Cart transfer exceeded the requested capacity-safe quantity.");
+                                }
+                            }
+
+                            noProgress = 0;
+                            moved++;
+                            categoryMoved++;
+                            activity(token.Account.Label + ": weight maintenance: moved " + categoryName + " transfer "
+                                + categoryMoved + " (total " + moved + "); Cart " + cartAfter.Current + "/" + cartAfter.Maximum
+                                + " (" + cartAfter.Percent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%).");
+
+                            if (cartAfter.Percent >= CartFullPercent)
+                            {
+                                cartFull = true;
+                                activity(token.Account.Label + ": weight maintenance: Cart reached 100%; stopping Cart transfers.");
+                                break;
                             }
                         }
                         if (moved >= MaxTransfers)
@@ -389,10 +503,37 @@ namespace _4RTools.Model.Vanilla
                             throw new VanillaCartManualException("Transfer safety limit reached. Autobattle is left OFF for manual inspection.");
                         }
                     }
-                    activity(token.Account.Label + ": weight maintenance: every enabled inventory category is confirmed complete.");
+
+                    if (cartFull)
+                        activity(token.Account.Label + ": weight maintenance: Cart is full; remaining inventory stays on the character.");
+                    else if (cartSafetyStop)
+                        activity(token.Account.Label + ": weight maintenance: stopped Cart filling safely above 95%; no unverified-weight item will be transferred.");
+                    else
+                        activity(token.Account.Label + ": weight maintenance: every enabled inventory category is confirmed complete.");
 
                     ClosePanelIfOpen(input, settings.CartCtrl, settings.CartAlt, settings.CartShift, (Keys)settings.CartKey, cart, "Cart", cancelled);
                     ClosePanelIfOpen(input, settings.InventoryCtrl, settings.InventoryAlt, settings.InventoryShift, (Keys)settings.InventoryKey, inventory, "Inventory", cancelled);
+
+                    VanillaFleetClientInfo afterUi = CurrentClient(token.ProcessId);
+                    decimal? carriedPercent = afterUi == null ? null : afterUi.WeightPercent;
+                    if (cartFull && carriedPercent.HasValue && carriedPercent.Value >= FarmingDoneCarryPercent)
+                    {
+                        string done = token.Account.Label + ": farming complete immediately after Cart maintenance: Cart 100% and carried weight "
+                            + carriedPercent.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
+                            + "%; Autobattle remains OFF.";
+                        activity(done);
+                        supervisor.CompleteWeightFarmingDone(token, done);
+                        paused = false;
+                        completed = true;
+                        VanillaDebugLog.Write("WEIGHT", "event=farming-done trigger=" + trigger + " account='" + token.Account.Label
+                            + "' accountId=" + token.AccountId + " pid=" + pid + " cartPercent=100 carriedPercent="
+                            + carriedPercent.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + ".");
+                        return new VanillaWeightCartResult
+                        {
+                            ItemsMoved = moved, CartFull = true, Message = done
+                        };
+                    }
+
                     activity(token.Account.Label + ": weight maintenance: transfer complete; resuming Autobattle with the shared verified ResumeHotkey routine.");
                     VerifyResume(token, input, cancelled, activity);
                     paused = false;
@@ -400,11 +541,16 @@ namespace _4RTools.Model.Vanilla
                         throw new InvalidOperationException("Autobattle movement was verified but the client could not be minimized.");
                     completed = true;
                     string message = token.Account.Label + ": cart maintenance completed; moved " + moved
-                        + " item(s), autobattle movement verified, client minimized.";
+                        + " transfer(s), Cart " + (cartFull ? "100% full" : cartSafetyStop ? "stopped safely above 95%" : "processed")
+                        + ", autobattle movement verified, client minimized.";
                     VanillaDebugLog.Write("WEIGHT", "event=cart-complete trigger=" + trigger + " account='" + token.Account.Label
-                        + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved + ".");
+                        + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved + " cartFull=" + cartFull
+                        + " safetyStop=" + cartSafetyStop + ".");
                     supervisor.CompleteWeightMaintenance(token, false, message);
-                    return new VanillaWeightCartResult { ItemsMoved = moved, Message = message };
+                    return new VanillaWeightCartResult
+                    {
+                        ItemsMoved = moved, CartFull = cartFull, StoppedForCartSafety = cartSafetyStop, Message = message
+                    };
                 }
                 catch (OperationCanceledException ex)
                 {
@@ -419,6 +565,8 @@ namespace _4RTools.Model.Vanilla
                         ItemsMoved = moved,
                         Deferred = !paused,
                         RequiresManualIntervention = paused,
+                        CartFull = cartFull,
+                        StoppedForCartSafety = cartSafetyStop,
                         Message = paused
                             ? token.Account.Label + ": cart maintenance was cancelled after Autobattle may have been paused; manual hold retained."
                             : token.Account.Label + ": cart maintenance cancelled before Autobattle was paused; it may retry when supervision is stable."
@@ -436,14 +584,15 @@ namespace _4RTools.Model.Vanilla
                         supervisor.MarkWeightMaintenanceCancelled(token, true, ex.Message);
                     else
                         supervisor.CompleteWeightMaintenance(token, true, ex.Message);
-                    return new VanillaWeightCartResult { ItemsMoved = moved, RequiresManualIntervention = true, Message = token.Account.Label + ": " + ex.Message };
+                    return new VanillaWeightCartResult
+                    {
+                        ItemsMoved = moved, RequiresManualIntervention = true, CartFull = cartFull,
+                        StoppedForCartSafety = cartSafetyStop, Message = token.Account.Label + ": " + ex.Message
+                    };
                 }
                 catch (Exception ex)
                 {
                     activity(token.Account.Label + ": weight maintenance failed closed: " + ex.Message);
-                    // After Autobattle has been toggled OFF, any unexpected UI state is deliberately
-                    // fail-closed, including a cancellation racing with this exception. Never let a
-                    // stale generation erase the manual hold merely because another failure won first.
                     bool cancelledNow = cancelled();
                     if (paused) manualHold = true;
                     VanillaDebugLog.Write("WEIGHT", "event=cart-failed trigger=" + trigger + " account='" + token.Account.Label
@@ -458,7 +607,8 @@ namespace _4RTools.Model.Vanilla
                         supervisor.CompleteWeightMaintenance(token, manualHold, detail);
                     return new VanillaWeightCartResult
                     {
-                        ItemsMoved = moved, RequiresManualIntervention = manualHold,
+                        ItemsMoved = moved, RequiresManualIntervention = manualHold, CartFull = cartFull,
+                        StoppedForCartSafety = cartSafetyStop,
                         Message = token.Account.Label + ": automatic cart maintenance " + (manualHold ? "needs manual attention: " : "aborted safely: ") + ex.Message
                     };
                 }
