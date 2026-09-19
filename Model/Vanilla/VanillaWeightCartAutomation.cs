@@ -610,6 +610,13 @@ namespace _4RTools.Model.Vanilla
         internal int EmptyPaleThreshold;
     }
 
+    internal sealed class VanillaInventoryCategoryTabs
+    {
+        internal Rectangle[] Tabs;
+        internal int SelectedIndex;
+        internal double[] SelectionScores;
+    }
+
     internal static class VanillaInventoryVision
     {
         private sealed class Component
@@ -617,6 +624,14 @@ namespace _4RTools.Model.Vanilla
             internal Rectangle Bounds;
             internal int Area;
             internal Point Center;
+        }
+
+        private sealed class CategoryRuleLine
+        {
+            internal int Y;
+            internal int Left;
+            internal int Right;
+            internal int Length { get { return Math.Max(0, Right - Left + 1); } }
         }
 
         internal static bool TryFindToggledPanel(Bitmap before, Bitmap after, out Rectangle panel, out bool opened)
@@ -682,6 +697,126 @@ namespace _4RTools.Model.Vanilla
             return new VanillaUiSlotGrid { Panel = clipped, Columns = columns, Rows = allRows.ToArray(), EmptyPaleThreshold = threshold };
         }
 
+        internal static VanillaInventoryCategoryTabs DetectCategoryTabs(Bitmap frame, VanillaUiSlotGrid grid)
+        {
+            if (frame == null) throw new ArgumentNullException(nameof(frame));
+            if (grid == null || grid.Columns == null || grid.Columns.Length < 4)
+                throw new InvalidOperationException("A detected item-slot grid is required before category-tab detection.");
+
+            PixelBuffer pixels = PixelBuffer.Read(frame);
+            int columnSpacing = MedianSpacing(grid.Columns);
+            int rowSpacing = grid.Rows != null && grid.Rows.Length > 1 ? MedianSpacing(grid.Rows) : columnSpacing;
+            int firstColumn = grid.Columns.Min();
+
+            // The tab rail is not addressed by a percentage or screen coordinate. Its horizontal
+            // search area is derived from the detected panel edge and detected first slot column.
+            int railRight = firstColumn - Math.Max(6, (int)Math.Round(columnSpacing * 0.65));
+            Rectangle railSearch = Rectangle.Intersect(grid.Panel,
+                new Rectangle(grid.Panel.Left, grid.Panel.Top, Math.Max(0, railRight - grid.Panel.Left), grid.Panel.Height));
+            railSearch.Intersect(new Rectangle(Point.Empty, frame.Size));
+            if (railSearch.Width < 12 || railSearch.Height < 80)
+                throw new InvalidOperationException("The inventory category rail could not be separated from the detected slot grid.");
+
+            int minimumRun = Math.Max(8, (int)Math.Round(railSearch.Width * 0.45));
+            var raw = new List<CategoryRuleLine>();
+            for (int y = railSearch.Top; y < railSearch.Bottom; y++)
+            {
+                int left, right;
+                if (LongestCategoryRuleRun(pixels, railSearch.Left, railSearch.Right, y, out left, out right) >= minimumRun)
+                    raw.Add(new CategoryRuleLine { Y = y, Left = left, Right = right });
+            }
+
+            var rules = new List<CategoryRuleLine>();
+            CategoryRuleLine best = null;
+            int previousY = int.MinValue;
+            foreach (CategoryRuleLine line in raw.OrderBy(item => item.Y))
+            {
+                if (best == null || line.Y > previousY + 1)
+                {
+                    if (best != null) rules.Add(best);
+                    best = line;
+                }
+                else if (line.Length > best.Length) best = line;
+                previousY = line.Y;
+            }
+            if (best != null) rules.Add(best);
+
+            int lattice = Math.Max(1, Math.Min(columnSpacing, rowSpacing));
+            double minStep = Math.Max(20.0, lattice * 1.15);
+            double maxStep = Math.Max(minStep + 4.0, Math.Max(columnSpacing, rowSpacing) * 2.40);
+            int bestHits = 0;
+            double bestError = double.MaxValue;
+            double bestOrigin = 0, bestStep = 0;
+            int bestTolerance = 0;
+
+            for (int i = 0; i < rules.Count; i++)
+            for (int j = i + 1; j < rules.Count; j++)
+            for (int divisor = 1; divisor <= 4; divisor++)
+            {
+                double step = (rules[j].Y - rules[i].Y) / (double)divisor;
+                if (step < minStep || step > maxStep) continue;
+                int tolerance = Math.Max(3, (int)Math.Round(step * 0.13));
+                for (int indexAtFirst = 0; indexAtFirst + divisor <= 4; indexAtFirst++)
+                {
+                    double origin = rules[i].Y - indexAtFirst * step;
+                    double end = origin + 4 * step;
+                    if (origin < grid.Panel.Top - tolerance || end > grid.Panel.Bottom + tolerance) continue;
+
+                    int hits = 0;
+                    double error = 0;
+                    for (int k = 0; k <= 4; k++)
+                    {
+                        double predicted = origin + k * step;
+                        double nearest = rules.Count == 0 ? double.MaxValue : rules.Min(rule => Math.Abs(rule.Y - predicted));
+                        if (nearest <= tolerance) { hits++; error += nearest; }
+                    }
+                    if (hits > bestHits || (hits == bestHits && error < bestError))
+                    {
+                        bestHits = hits;
+                        bestError = error;
+                        bestOrigin = origin;
+                        bestStep = step;
+                        bestTolerance = tolerance;
+                    }
+                }
+            }
+
+            if (bestHits < 3 || bestStep <= 0)
+                throw new InvalidOperationException("The four-tab inventory rail was not positively detected from repeated separator structure.");
+
+            int[] boundaries = Enumerable.Range(0, 5).Select(k => (int)Math.Round(bestOrigin + k * bestStep)).ToArray();
+            for (int k = 1; k < boundaries.Length; k++)
+                if (boundaries[k] - boundaries[k - 1] < Math.Max(12, (int)Math.Round(lattice * 0.75)))
+                    throw new InvalidOperationException("Detected category-tab boundaries are incoherent.");
+
+            // Use only separator runs that agree with the recovered four-tab lattice to refine the
+            // clickable rail width. This remains derived from observed UI pixels at the current DPI.
+            CategoryRuleLine[] matched = rules.Where(rule =>
+                boundaries.Any(boundary => Math.Abs(rule.Y - boundary) <= bestTolerance)).ToArray();
+            int clickLeft = matched.Length == 0 ? railSearch.Left : Math.Max(railSearch.Left, matched.Min(rule => rule.Left));
+            int clickRight = matched.Length == 0 ? railSearch.Right - 1 : Math.Min(railSearch.Right - 1, matched.Max(rule => rule.Right));
+            if (clickRight - clickLeft < 8) { clickLeft = railSearch.Left; clickRight = railSearch.Right - 1; }
+
+            var tabs = new Rectangle[4];
+            var scores = new double[4];
+            for (int k = 0; k < 4; k++)
+            {
+                int top = Math.Max(grid.Panel.Top, boundaries[k] + 1);
+                int bottom = Math.Min(grid.Panel.Bottom, boundaries[k + 1] - 1);
+                if (bottom <= top) throw new InvalidOperationException("Detected category tab has no usable area.");
+                tabs[k] = Rectangle.FromLTRB(clickLeft, top, clickRight + 1, bottom);
+                scores[k] = CategorySelectionFraction(pixels, tabs[k]);
+            }
+
+            int selected = -1;
+            int maxIndex = 0;
+            for (int k = 1; k < scores.Length; k++) if (scores[k] > scores[maxIndex]) maxIndex = k;
+            double second = scores.Where((value, index) => index != maxIndex).DefaultIfEmpty(0).Max();
+            if (scores[maxIndex] >= 0.12 && scores[maxIndex] - second >= 0.06) selected = maxIndex;
+
+            return new VanillaInventoryCategoryTabs { Tabs = tabs, SelectedIndex = selected, SelectionScores = scores };
+        }
+
         internal static Point? FirstOccupiedSlot(Bitmap frame, VanillaUiSlotGrid grid)
         {
             PixelBuffer pixels = PixelBuffer.Read(frame);
@@ -712,13 +847,6 @@ namespace _4RTools.Model.Vanilla
                 foreach (int x in grid.Columns)
                     if (grid.Panel.Contains(x, y) && pixels.PaleCount(x, y, 18, 10) >= grid.EmptyPaleThreshold) return new Point(x, y);
             return null;
-        }
-
-        internal static Point SafeDropPoint(Rectangle cart, Size size)
-        {
-            int x = Math.Max(cart.Left + 10, Math.Min(cart.Right - 10, cart.Left + (int)Math.Round(cart.Width * 0.72)));
-            int y = Math.Max(cart.Top + 20, Math.Min(cart.Bottom - 20, cart.Top + (int)Math.Round(cart.Height * 0.48)));
-            return new Point(Math.Max(0, Math.Min(size.Width - 1, x)), Math.Max(0, Math.Min(size.Height - 1, y)));
         }
 
         internal static bool HasQuantityPrompt(Bitmap frame)
@@ -804,6 +932,42 @@ namespace _4RTools.Model.Vanilla
             return d.Length == 0 ? 41 : d[d.Length / 2];
         }
 
+        private static int LongestCategoryRuleRun(PixelBuffer pixels, int left, int right, int y, out int bestLeft, out int bestRight)
+        {
+            bestLeft = left; bestRight = left - 1;
+            int currentLeft = left;
+            bool inRun = false;
+            for (int x = left; x < right; x++)
+            {
+                bool rule = pixels.At(x, y).CategoryRule;
+                if (rule && !inRun) { currentLeft = x; inRun = true; }
+                bool end = inRun && (!rule || x == right - 1);
+                if (!end) continue;
+                int currentRight = rule && x == right - 1 ? x : x - 1;
+                if (currentRight - currentLeft > bestRight - bestLeft)
+                {
+                    bestLeft = currentLeft;
+                    bestRight = currentRight;
+                }
+                inRun = false;
+            }
+            return Math.Max(0, bestRight - bestLeft + 1);
+        }
+
+        private static double CategorySelectionFraction(PixelBuffer pixels, Rectangle tab)
+        {
+            Rectangle clipped = Rectangle.Intersect(new Rectangle(0, 0, pixels.Width, pixels.Height), tab);
+            if (clipped.Width < 4 || clipped.Height < 4) return 0;
+            int selected = 0, total = 0;
+            for (int y = clipped.Top + 1; y < clipped.Bottom - 1; y++)
+            for (int x = clipped.Left + 1; x < clipped.Right - 1; x++)
+            {
+                total++;
+                if (pixels.At(x, y).CategorySelected) selected++;
+            }
+            return total == 0 ? 0 : selected / (double)total;
+        }
+
         private static List<Component> ConnectedComponents(PixelBuffer pixels, Rectangle area, Func<PixelInfo, bool> predicate,
             int minWidth, int maxWidth, int minHeight, int maxHeight, int minArea, int maxArea)
         {
@@ -852,6 +1016,22 @@ namespace _4RTools.Model.Vanilla
         {
             internal byte R, G, B;
             internal bool Light { get { return R >= 235 && G >= 235 && B >= 235; } }
+            internal bool CategoryRule
+            {
+                get
+                {
+                    int max = Math.Max(R, Math.Max(G, B)), min = Math.Min(R, Math.Min(G, B));
+                    int mean = (R + G + B) / 3;
+                    return max - min <= 18 && mean >= 115 && mean <= 245;
+                }
+            }
+            internal bool CategorySelected
+            {
+                get
+                {
+                    return B >= 215 && B - R >= 20 && B - G >= 8 && R >= 150;
+                }
+            }
             internal bool Pale
             {
                 get
