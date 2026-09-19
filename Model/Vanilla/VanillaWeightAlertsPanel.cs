@@ -202,7 +202,13 @@ namespace _4RTools.Model.Vanilla
         }
         private static string HotkeyText(bool ctrl, bool alt, bool shift, int key)
         {
-            var parts = new List<string>(); if (ctrl) parts.Add("Ctrl"); if (alt) parts.Add("Alt"); if (shift) parts.Add("Shift"); parts.Add(((Keys)key).ToString()); return string.Join("+", parts);
+            var parts = new List<string>();
+            if (ctrl) parts.Add("Ctrl"); if (alt) parts.Add("Alt"); if (shift) parts.Add("Shift");
+            Keys parsed = (Keys)key;
+            parts.Add(parsed >= Keys.D0 && parsed <= Keys.D9
+                ? ((int)parsed - (int)Keys.D0).ToString(CultureInfo.InvariantCulture)
+                : parsed.ToString());
+            return string.Join("+", parts);
         }
 
         private async Task SendTestAsync()
