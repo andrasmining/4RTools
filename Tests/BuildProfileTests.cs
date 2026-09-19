@@ -25,6 +25,7 @@ namespace Vanilla.Diagnostics.Tests
                 { "Resource and coordinate sanity failures invalidate fields", Sanity },
                 { "Raw weight diagnostics reject invalid pairs without inferring trust", WeightReaderValidation },
                 { "Verified weight pairs share bounded percentage calculation", WeightPercentages },
+                { "Cart weight requires the fixed 10000 maximum and computes percentage", CartWeightValidation },
                 { "Weight sanity failures cannot reach alerts or be promoted by the adapter", WeightSanity },
                 { "Missing or unverified weight fields never produce alert percentages", WeightUnknown },
                 { "Readiness never follows from valid HP alone", Readiness },
@@ -43,7 +44,8 @@ namespace Vanilla.Diagnostics.Tests
                 { "Unverified username mirror cannot promote the primary copy", UsernameUnverified },
                 { "Missing username mirror invalidates the primary without choosing a fallback", UsernameMissing },
                 { "Two clients retain independent usernames and relative addresses", UsernameIsolation },
-                { "Shipped profile includes both supplied username offsets and diagnostic provenance", ShippedUsernameProfile }
+                { "Shipped profile includes both supplied username offsets and diagnostic provenance", ShippedUsernameProfile },
+                { "Shipped profile includes supplied cart-weight offsets and fixed-capacity validation", ShippedCartWeightProfile }
             };
             foreach (var test in tests)
             {
@@ -174,6 +176,38 @@ namespace Vanilla.Diagnostics.Tests
                 }
             }
         }
+        private static void CartWeightValidation()
+        {
+            using (var fixture = new Fixture(Profile()))
+            {
+                fixture.Put(VanillaField.CurrentCartWeight, 263);
+                fixture.Put(VanillaField.MaxCartWeight, 10000);
+                fixture.Observe();
+                decimal percent; string error;
+                Assert(fixture.Snapshot.CurrentCartWeight.Validation == StateValidation.Valid
+                    && fixture.Snapshot.MaxCartWeight.Validation == StateValidation.Valid,
+                    "Verified cart weight pair did not become valid.");
+                Assert(VanillaWeightValidation.TryGetCartPercent(fixture.Snapshot, out percent, out error)
+                    && error == null && percent == 2.63m,
+                    "Cart weight percentage did not use the fixed 10000 capacity.");
+
+                fixture.Put(VanillaField.MaxCartWeight, 9999);
+                fixture.Observe();
+                Assert(fixture.Snapshot.CurrentCartWeight.Validation == StateValidation.Invalid
+                    && fixture.Snapshot.MaxCartWeight.Validation == StateValidation.Invalid,
+                    "A plausible but wrong cart maximum must be rejected.");
+                Assert(!VanillaWeightValidation.TryGetCartPercent(fixture.Snapshot, out percent, out error)
+                    && error != null && error.Contains("10000"),
+                    "Wrong cart maximum reached the automation percentage gate.");
+
+                fixture.Put(VanillaField.CurrentCartWeight, 10001);
+                fixture.Put(VanillaField.MaxCartWeight, 10000);
+                fixture.Observe();
+                Assert(!VanillaWeightValidation.TryGetCartPercent(fixture.Snapshot, out percent, out error),
+                    "Cart current weight above capacity was accepted.");
+            }
+        }
+
         private static void WeightSanity()
         {
             var profile = Profile(); profile.MaximumVital = uint.MaxValue;
@@ -434,6 +468,27 @@ namespace Vanilla.Diagnostics.Tests
             }
         }
 
+        private static void ShippedCartWeightProfile()
+        {
+            var directory = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+            while (directory != null && !File.Exists(Path.Combine(directory.FullName, "VanillaBuilds", "vanilla-7eb420579690.json"))) directory = directory.Parent;
+            Assert(directory != null, "Shipped mapping missing from validation checkout.");
+            var p = VanillaBuildProfile.Parse(File.ReadAllText(Path.Combine(directory.FullName, "VanillaBuilds", "vanilla-7eb420579690.json")));
+            Assert(VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.MaxCartWeight].Address) == 0x93C9C4,
+                "Wrong Cart maximum module offset.");
+            Assert(VanillaMemoryMap.ParseAddress(p.MemoryMap.Fields[VanillaField.CurrentCartWeight].Address) == 0x93C9C8,
+                "Wrong Cart current-weight module offset.");
+            foreach (var field in new[] { VanillaField.MaxCartWeight, VanillaField.CurrentCartWeight })
+            {
+                var mapping = p.MemoryMap.Fields[field];
+                Assert(p.VerifiedFields.Contains(field) && mapping.Encoding == VanillaValueEncoding.UInt32
+                    && mapping.Module == p.MemoryMap.ProcessName && !string.IsNullOrWhiteSpace(mapping.Evidence),
+                    "Cart weight mapping is not verified with provenance.");
+            }
+            Assert(VanillaWeightValidation.ExpectedCartMaximum == 10000U,
+                "Cart capacity safety constant changed unexpectedly.");
+        }
+
         private static VanillaBuildProfile Profile()
         {
             var profile = new VanillaBuildProfile { Label = "Offline fixture", Sha256 = new string('a', 64), Machine = 0x14c, ImageSize = 0x10000,
@@ -474,6 +529,8 @@ namespace Vanilla.Diagnostics.Tests
                     memory.Put(moduleBase + VanillaMemoryMap.ParseAddress(pair.Value.Address), bytes);
                 }
                 Put(VanillaField.CurrentHP, 90); Put(VanillaField.MaxHP, 100); Put(VanillaField.CurrentSP, 20); Put(VanillaField.MaxSP, 100);
+                Put(VanillaField.CurrentWeight, 50); Put(VanillaField.MaxWeight, 100);
+                Put(VanillaField.CurrentCartWeight, 250); Put(VanillaField.MaxCartWeight, 10000);
                 Put(VanillaField.X, 10); Put(VanillaField.Y, 20); Put(VanillaField.ActionState, 7); Put(VanillaField.ClientReady, 1);
                 if (this.profile.MemoryMap.Fields.ContainsKey(VanillaField.CharacterSlot)) Put(VanillaField.CharacterSlot, 1);
                 memory.Put(moduleBase + VanillaMemoryMap.ParseAddress(this.profile.MemoryMap.Fields[VanillaField.StatusEffects].Address), BitConverter.GetBytes(10u).Concat(BitConverter.GetBytes(20u)).ToArray());
