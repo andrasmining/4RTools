@@ -59,9 +59,14 @@ new Vanilla process appears first.
 Post-login Autobattle/slave activation is memory-state-first. Fresh verified login
 username + character identity + X/Y/map/living HP may establish readiness even when
 the visual classifier returns Unknown. Known login/modal/logout/disconnect states
-still block input. Every readiness transition, 10-second settle, hotkey attempt and
-10-second movement window must also be written to the global debug log, not only
-the reconnect session log.
+still block input. After the 10-second settle, recovery is at most three cycles of
+Autobattle hotkey -> up to 10 seconds fresh X/Y observation -> verified Smart Teleport
+only if still stationary -> up to 10 seconds fresh X/Y observation. Any verified
+movement stops the current wait and suppresses all later input immediately. After
+three stationary cycles, observe passively until the 180-second recovery deadline
+before restart escalation. Every readiness transition, settle, hotkey, teleport
+decision/result and movement window must also be written to the global debug log,
+not only the reconnect session log.
 
 ## Existing-client startup evidence
 
