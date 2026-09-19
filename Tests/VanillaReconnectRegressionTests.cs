@@ -324,6 +324,10 @@ namespace Vanilla.Diagnostics.Tests
                 "Constrained layouts should still reserve a useful minimum account area.");
             Assert(VanillaReconnectForm.PreferredAccountsPanelHeight(900) == 210,
                 "Normal Full-HD layouts should reserve a larger minimum account area.");
+            Assert(VanillaReconnectForm.MinimumRecoveryLogHeight(15) == 84,
+                "Compact Recovery layouts should keep four readable log lines without forcing outer scrolling.");
+            Assert(VanillaReconnectForm.MinimumRecoveryLogHeight(24) == 96,
+                "Enlarged text should grow the compact log minimum by font metrics rather than a six-line hard floor.");
         }
 
         private static void SavedAccountCatalog()
