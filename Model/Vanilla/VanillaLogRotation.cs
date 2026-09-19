@@ -85,7 +85,7 @@ namespace _4RTools.Model.Vanilla
                     }
 
                     long available = maxFileBytes - length;
-                    int chars = LargestPrefixThatFits(remaining, available);
+                    int chars = PrefixLengthWithinBytes(remaining, available);
                     if (chars <= 0)
                     {
                         ArchiveCurrent(currentPath, archiveStem, maxFileBytes);
@@ -103,7 +103,7 @@ namespace _4RTools.Model.Vanilla
             }
         }
 
-        private static int LargestPrefixThatFits(string text, long byteBudget)
+        internal static int PrefixLengthWithinBytes(string text, long byteBudget)
         {
             if (string.IsNullOrEmpty(text) || byteBudget <= 0) return 0;
             if (Utf8.GetByteCount(text) <= byteBudget) return text.Length;
