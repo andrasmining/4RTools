@@ -230,8 +230,8 @@ namespace Vanilla.Diagnostics.Tests
                     using (var empty = new SolidBrush(Color.FromArgb(205, 216, 232)))
                         foreach (int y in rows)
                             foreach (int x in columns)
-                                g.FillEllipse(empty, x - slotSpacing / 3, y - Math.Max(5, slotSpacing / 6),
-                                    Math.Max(18, slotSpacing * 2 / 3), Math.Max(10, slotSpacing / 3));
+                                g.FillEllipse(empty, x - Math.Max(12, slotSpacing * 3 / 8), y - Math.Max(7, slotSpacing / 5),
+                                    Math.Max(24, slotSpacing * 3 / 4), Math.Max(14, slotSpacing * 2 / 5));
 
                     using (var rule = new Pen(Color.FromArgb(205, 205, 205), 2))
                         foreach (int y in boundaries)
