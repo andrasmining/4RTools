@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Drawing;
+using Newtonsoft.Json;
 using _4RTools.Model.Vanilla;
 using _4RTools.Utils;
 
@@ -20,6 +21,7 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Weight alert thresholds enforce re-arm hysteresis", WeightThresholds);
             failed += Test("Enabled weight e-mail alerts require SMTP transport", WeightMailValidation);
             failed += Test("Weight cart settings validate independent UI automation", WeightCartSettings);
+            failed += Test("Legacy Weight settings inherit dedicated Alt+3 Autobattle STOP", WeightCartStopHotkeyMigration);
             failed += Test("Weight policy is independently switchable per character", WeightPolicyPerCharacter);
             failed += Test("Inventory vision finds toggled slot panel and occupied slot", InventoryVision);
             failed += Test("Quantity Enter is armed only by positive quantity dialog structure", QuantityPromptGuard);
@@ -112,12 +114,46 @@ namespace Vanilla.Diagnostics.Tests
                 TransferUseItems = true, TransferEtcItems = true, TransferEquipItems = false
             };
             settings.Validate(false);
-            if (settings.InventoryHotkeyText != "Alt+E" || settings.CartHotkeyText != "Alt+W")
-                throw new Exception("Default Inventory/Cart hotkeys changed unexpectedly.");
+            if (settings.AutobattleStopHotkeyText != "Alt+3"
+                || settings.InventoryHotkeyText != "Alt+E" || settings.CartHotkeyText != "Alt+W")
+                throw new Exception("Default Autobattle STOP / Inventory / Cart hotkeys changed unexpectedly.");
+            var account = new VanillaReconnectAccount
+            {
+                ResumeKey = (int)System.Windows.Forms.Keys.D2,
+                ResumeCtrl = true,
+                ResumeAlt = false,
+                ResumeShift = false
+            };
+            if (settings.AutobattleStopHotkeyText == account.HotkeyText)
+                throw new Exception("Weight Autobattle STOP must be independent from the character ResumeHotkey.");
+            settings.AutobattleStopKey = 0;
+            Throws(() => settings.Validate(false));
+            settings.AutobattleStopKey = (int)System.Windows.Forms.Keys.D3;
             settings.AutoCartRearmPercent = 50m;
             Throws(() => settings.Validate(false));
             settings.AutoCartRearmPercent = 40m; settings.TransferUseItems = settings.TransferEtcItems = settings.TransferEquipItems = false;
             Throws(() => settings.Validate(false));
+        }
+
+        private static void WeightCartStopHotkeyMigration()
+        {
+            const string legacyJson = "{"Version":1,"AutoCartEnabled":true,"AutoCartThresholdPercent":50,"AutoCartRearmPercent":40,"
+                + ""TransferUseItems":true,"TransferEquipItems":false,"TransferEtcItems":true,"
+                + ""InventoryKey":69,"InventoryAlt":true,"CartKey":87,"CartAlt":true}";
+            VanillaWeightAlertSettings legacy = JsonConvert.DeserializeObject<VanillaWeightAlertSettings>(legacyJson);
+            if (legacy == null) throw new Exception("Legacy Weight JSON could not be deserialized.");
+            legacy.Validate(false);
+            if (legacy.AutobattleStopKey != (int)System.Windows.Forms.Keys.D3
+                || !legacy.AutobattleStopAlt || legacy.AutobattleStopCtrl || legacy.AutobattleStopShift
+                || legacy.AutobattleStopHotkeyText != "Alt+3")
+                throw new Exception("Legacy Weight settings did not inherit the dedicated Alt+3 Autobattle STOP default.");
+
+            legacy.AutobattleStopKey = (int)System.Windows.Forms.Keys.F8;
+            legacy.AutobattleStopAlt = false;
+            legacy.AutobattleStopCtrl = true;
+            VanillaWeightAlertSettings roundTrip = legacy.Clone();
+            if (roundTrip.AutobattleStopHotkeyText != "Ctrl+F8")
+                throw new Exception("Configured Weight Autobattle STOP hotkey was not preserved by clone/serialization.");
         }
 
         private static void WeightPolicyPerCharacter()
