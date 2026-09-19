@@ -260,8 +260,8 @@ namespace _4RTools.Model.Vanilla
                                 out sourcePoint, out pendingWeightBefore))
                             {
                                 activity(token.Account.Label + ": weight maintenance: " + categoryName
-                                    + " confirmed empty on two fresh detected-grid scans; moved " + categoryMoved
-                                    + " item(s) from this tab; advancing.");
+                                    + " confirmed empty because the first inventory slot was empty on two fresh classified captures; moved "
+                                    + categoryMoved + " item(s) from this tab; advancing.");
                                 VanillaDebugLog.Write("WEIGHT", "event=cart-category-empty account='" + token.Account.Label
                                     + "' accountId=" + token.AccountId + " pid=" + pid + " category=" + categoryName
                                     + " moved=" + categoryMoved + " samples=2.");
@@ -308,7 +308,7 @@ namespace _4RTools.Model.Vanilla
                                 moved++;
                                 categoryMoved++;
                                 activity(token.Account.Label + ": weight maintenance: moved " + categoryName + " item "
-                                    + categoryMoved + " (total " + moved + ") to a detected empty Cart slot.");
+                                    + categoryMoved + " (total " + moved + ") to a safe detected Cart interior point.");
                             }
                         }
                         if (moved >= MaxTransfers)
