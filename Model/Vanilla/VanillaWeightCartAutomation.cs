@@ -1087,15 +1087,6 @@ namespace _4RTools.Model.Vanilla
             return best <= 14 ? nearest : null;
         }
 
-        internal static Point? FirstEmptySlot(Bitmap frame, VanillaUiSlotGrid grid)
-        {
-            PixelBuffer pixels = PixelBuffer.Read(frame);
-            foreach (int y in grid.Rows)
-                foreach (int x in grid.Columns)
-                    if (grid.Panel.Contains(x, y) && pixels.PaleCount(x, y, 18, 10) >= grid.EmptyPaleThreshold) return new Point(x, y);
-            return null;
-        }
-
         internal static bool HasQuantityPrompt(Bitmap frame)
         {
             if (frame == null) return false;
