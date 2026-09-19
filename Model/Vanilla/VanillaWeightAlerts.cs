@@ -578,9 +578,16 @@ namespace _4RTools.Model.Vanilla
         private static string ObservationSummary(IReadOnlyList<VanillaWeightObservation> observations)
         {
             if (observations == null || observations.Count == 0) return "No Vanilla clients running.";
-            return string.Join(" | ", observations.Select(item => item.Verified && item.Percent.HasValue
-                ? item.CharacterName + " " + item.Percent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%"
-                : item.CharacterName + " weight unavailable"));
+            return string.Join(" | ", observations.Select(item =>
+            {
+                string carried = item.Verified && item.Percent.HasValue
+                    ? item.Percent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%"
+                    : "weight unavailable";
+                string cart = item.CartVerified && item.CartPercent.HasValue
+                    ? "Cart " + item.CartPercent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%"
+                    : "Cart unavailable";
+                return item.CharacterName + " " + carried + ", " + cart;
+            }));
         }
 
         private void SetStatus(string value)
@@ -608,8 +615,13 @@ namespace _4RTools.Model.Vanilla
             public bool CartArmed = true;
             public bool CartRunning;
             public bool ManualHold;
+            public bool CartFullNotified;
+            public bool DoneNotified;
+            public bool FarmingDone;
+            public bool CompletionStopping;
             public DateTimeOffset? LastSentAt;
             public DateTimeOffset NextAttemptAt = DateTimeOffset.MinValue;
+            public DateTimeOffset NextMilestoneMailAt = DateTimeOffset.MinValue;
         }
     }
 }
