@@ -187,7 +187,13 @@ namespace _4RTools.Model.Vanilla
                 "Label", "User", "Slot", "CharacterName", "Hotkey", "Secret", "AccountProxy", "RuntimePid", "RuntimeStatus"
             };
             for (int i = 0; i < order.Length; i++)
-                if (accounts.Columns.Contains(order[i])) accounts.Columns[order[i]].DisplayIndex = i;
+                if (accounts.Columns.Contains(order[i]))
+                {
+                    DataGridViewColumn column = accounts.Columns[order[i]];
+                    column.DisplayIndex = i;
+                    column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                    column.MinimumWidth = 24;
+                }
 
             help.SetToolTip(accounts,
                 "One row per character. The first columns show whether supervision, Weight/Cart and Smart Teleport are enabled; Smart Teleport seconds/hotkey are visible directly in the list. Detailed Weight settings remain on the Weight tab. Double-click a row to edit character-specific settings.");
