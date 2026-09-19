@@ -255,6 +255,12 @@ namespace _4RTools.Model.Vanilla
             return rule == null ? (uint?)null : rule.UnitWeight;
         }
 
+        internal static uint CapacitySafeQuantity(uint currentCartWeight, uint maximumCartWeight, uint unitWeight)
+        {
+            if (unitWeight == 0 || maximumCartWeight <= currentCartWeight) return 0;
+            return (maximumCartWeight - currentCartWeight) / unitWeight;
+        }
+
         internal VanillaWeightCartResult Run(int pid, VanillaWeightAlertSettings settings, System.Action<string> report,
             string trigger = "automatic-threshold")
         {
@@ -404,7 +410,7 @@ namespace _4RTools.Model.Vanilla
                             {
                                 if (precision)
                                 {
-                                    uint fit = cartBefore.Remaining / itemRule.UnitWeight;
+                                    uint fit = CapacitySafeQuantity(cartBefore.Current, cartBefore.Maximum, itemRule.UnitWeight);
                                     if (fit == 0)
                                     {
                                         activity(token.Account.Label + ": weight maintenance: quantity dialog detected but no "
