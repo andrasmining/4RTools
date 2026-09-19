@@ -442,6 +442,15 @@ namespace _4RTools.Model.Vanilla
             };
             verifier.VerifyAsync(token.ProcessId, read, input.Activate,
                 () => input.ChordInVerifiedForeground(token.Account.ResumeCtrl, token.Account.ResumeAlt, token.Account.ResumeShift, (Keys)token.Account.ResumeKey),
+                attempt =>
+                {
+                    string detail;
+                    bool confirmed = VanillaVerifiedTeleportAction.TryExecute(token.ProcessId, token.Account, cancelled,
+                        "weight-resume-" + attempt, out detail);
+                    report(token.Account.Label + ": weight maintenance: teleport recovery " + attempt + "/"
+                        + VanillaAutobattleResumeVerifier.MaximumAttempts + ": " + detail);
+                    return confirmed;
+                },
                 cancelled, () => clock.Elapsed, () => DateTimeOffset.UtcNow,
                 milliseconds => Task.Delay(milliseconds), text => report(token.Account.Label + ": weight maintenance: " + text))
                 .GetAwaiter().GetResult();
