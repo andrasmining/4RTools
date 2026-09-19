@@ -98,7 +98,10 @@ namespace _4RTools.Model.Vanilla
             if (ctrl) parts.Add("Ctrl");
             if (alt) parts.Add("Alt");
             if (shift) parts.Add("Shift");
-            parts.Add(((Keys)key).ToString());
+            Keys parsed = (Keys)key;
+            parts.Add(parsed >= Keys.D0 && parsed <= Keys.D9
+                ? ((int)parsed - (int)Keys.D0).ToString(CultureInfo.InvariantCulture)
+                : parsed.ToString());
             return string.Join("+", parts);
         }
 
