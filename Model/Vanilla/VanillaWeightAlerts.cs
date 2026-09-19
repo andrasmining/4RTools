@@ -268,14 +268,19 @@ namespace _4RTools.Model.Vanilla
 
         private static VanillaWeightObservation FromFleet(VanillaFleetClientInfo item)
         {
-            decimal? percent = null;
+            decimal? percent = null, cartPercent = null;
             if (item != null && item.WeightVerified && item.CurrentWeight.HasValue && item.MaxWeight.HasValue && item.MaxWeight.Value > 0)
                 percent = item.CurrentWeight.Value * 100m / item.MaxWeight.Value;
+            if (item != null && item.CartWeightVerified && item.CurrentCartWeight.HasValue && item.MaxCartWeight.HasValue && item.MaxCartWeight.Value > 0)
+                cartPercent = item.CurrentCartWeight.Value * 100m / item.MaxCartWeight.Value;
             return new VanillaWeightObservation
             {
                 ProcessId = item?.ProcessId ?? 0, CharacterName = item?.CharacterName ?? "Vanilla MMO",
                 CurrentWeight = item?.CurrentWeight, MaxWeight = item?.MaxWeight, Percent = percent,
-                Verified = item != null && item.WeightVerified && percent.HasValue, Build = item?.Build, Error = item?.Error
+                Verified = item != null && item.WeightVerified && percent.HasValue,
+                CurrentCartWeight = item?.CurrentCartWeight, MaxCartWeight = item?.MaxCartWeight,
+                CartPercent = cartPercent, CartVerified = item != null && item.CartWeightVerified && cartPercent.HasValue,
+                Build = item?.Build, Error = item?.Error
             };
         }
 
