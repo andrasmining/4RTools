@@ -370,13 +370,13 @@ namespace _4RTools.Model.Vanilla
                                 break;
                             }
 
-                            bool precision = cartBefore.Percent > PrecisionThresholdPercent;
+                            bool precision = cartBefore.Percent >= PrecisionThresholdPercent;
                             if (precision && itemRule == null)
                             {
                                 cartSafetyStop = true;
                                 activity(token.Account.Label + ": weight maintenance: Cart is "
                                     + cartBefore.Percent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
-                                    + "% full (>95%). " + categoryName
+                                    + "% full (>=95%). " + categoryName
                                     + " has no verified unit-weight rule, so this category is skipped and no blind full-stack transfer is sent.");
                                 break;
                             }
@@ -423,7 +423,7 @@ namespace _4RTools.Model.Vanilla
                                         && cartBefore.Remaining >= pendingWeightBefore.Value;
                                     if (fullStackDefinitelyFits)
                                     {
-                                        activity(token.Account.Label + ": weight maintenance: Cart is above 95%, but the remaining "
+                                        activity(token.Account.Label + ": weight maintenance: Cart is at/above 95%, but the remaining "
                                             + cartBefore.Remaining + " capacity is at least the character's entire current carried weight "
                                             + pendingWeightBefore.Value + "; the full stack is provably safe.");
                                         input.Press(Keys.Enter);
@@ -433,7 +433,7 @@ namespace _4RTools.Model.Vanilla
                                     {
                                         requestedQuantity = fit;
                                         activity(token.Account.Label + ": weight maintenance: Cart "
-                                            + cartBefore.Current + "/" + cartBefore.Maximum + " is above 95%; precision fill for "
+                                            + cartBefore.Current + "/" + cartBefore.Maximum + " is at/above 95%; precision fill for "
                                             + itemRule.ItemName + " (" + itemRule.UnitWeight + " weight each) requests at most " + fit
                                             + " item(s) to fit the remaining " + cartBefore.Remaining + " weight.");
                                         input.ReplaceFocusedText(fit.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -554,7 +554,7 @@ namespace _4RTools.Model.Vanilla
                     if (cartFull)
                         activity(token.Account.Label + ": weight maintenance: Cart is full; remaining inventory stays on the character.");
                     else if (cartSafetyStop)
-                        activity(token.Account.Label + ": weight maintenance: stopped Cart filling safely above 95%; no unverified-weight item will be transferred.");
+                        activity(token.Account.Label + ": weight maintenance: stopped Cart filling safely at/above 95%; no unverified-weight item will be transferred.");
                     else
                         activity(token.Account.Label + ": weight maintenance: every enabled inventory category is confirmed complete.");
 
@@ -588,7 +588,7 @@ namespace _4RTools.Model.Vanilla
                         throw new InvalidOperationException("Autobattle movement was verified but the client could not be minimized.");
                     completed = true;
                     string message = token.Account.Label + ": cart maintenance completed; moved " + moved
-                        + " transfer(s), Cart " + (cartFull ? "100% full" : cartSafetyStop ? "stopped safely above 95%" : "processed")
+                        + " transfer(s), Cart " + (cartFull ? "100% full" : cartSafetyStop ? "stopped safely at/above 95%" : "processed")
                         + ", autobattle movement verified, client minimized.";
                     VanillaDebugLog.Write("WEIGHT", "event=cart-complete trigger=" + trigger + " account='" + token.Account.Label
                         + "' accountId=" + token.AccountId + " pid=" + pid + " items=" + moved + " cartFull=" + cartFull
