@@ -308,11 +308,28 @@ internal static class UiLayoutHarness
             Pump();
             Call(main, "AssertSmokeBackgroundServicesInactive");
             DataGridView grid = (DataGridView)Field(recovery, "accounts");
-            string[] expectedColumns = { "Enabled", "Label", "User", "Slot", "CharacterName", "Hotkey", "Secret", "AccountProxy", "WeightEnabled", "RuntimePid", "RuntimeStatus" };
+            string[] expectedColumns =
+            {
+                "Enabled", "WeightEnabled", "SmartTeleportEnabled", "SmartTeleportSeconds", "SmartTeleportHotkey",
+                "Label", "User", "Slot", "CharacterName", "Hotkey", "Secret", "AccountProxy", "RuntimePid", "RuntimeStatus"
+            };
             Check(grid.Columns.Cast<DataGridViewColumn>().OrderBy(c => c.DisplayIndex).Select(c => c.Name).SequenceEqual(expectedColumns), name + ": character column order is wrong.");
+            Check(grid.Columns["Enabled"].HeaderText == "Enabled" && grid.Columns["WeightEnabled"].HeaderText == "Weight"
+                && grid.Columns["SmartTeleportEnabled"].HeaderText == "Smart TP",
+                name + ": first three character columns must be Enabled, Weight, Smart TP.");
+            Check(grid.Columns["SmartTeleportSeconds"].HeaderText == "TP sec"
+                && grid.Columns["SmartTeleportHotkey"].HeaderText == "TP hotkey",
+                name + ": Smart Teleport seconds/hotkey columns are missing.");
             Check(grid.Columns["Label"].HeaderText == "Description" && grid.Columns["CharacterName"].HeaderText == "Character name", name + ": character headers missing.");
-            Check(grid.Columns["WeightEnabled"].HeaderText == "Weight", name + ": per-character Weight column missing.");
             Check(grid.Rows.Cast<DataGridViewRow>().All(r => Convert.ToString(r.Cells["WeightEnabled"].Value) == "Yes"), name + ": default per-character Weight policy was not rendered.");
+            Check(Convert.ToString(grid.Rows[0].Cells["SmartTeleportEnabled"].Value) == "Yes"
+                && Convert.ToString(grid.Rows[0].Cells["SmartTeleportSeconds"].Value) == "75"
+                && Convert.ToString(grid.Rows[0].Cells["SmartTeleportHotkey"].Value) == "Ctrl+F5",
+                name + ": enabled Smart Teleport details were not rendered in the character list.");
+            if (grid.Rows.Count > 1)
+                Check(Convert.ToString(grid.Rows[1].Cells["SmartTeleportEnabled"].Value) == "No"
+                    && Convert.ToString(grid.Rows[1].Cells["SmartTeleportSeconds"].Value) == "60",
+                    name + ": disabled Smart Teleport state/default seconds were not rendered.");
             Check(grid.Rows.Cast<DataGridViewRow>().All(r => !string.IsNullOrWhiteSpace(Convert.ToString(r.Cells["CharacterName"].Value))), name + ": saved character names missing from table.");
             Check(Field(recovery, "characterDiscoveryTimer") == null, name + ": smoke mode started character discovery.");
             Control launcher = (Control)Field(recovery, "launchPath");
@@ -439,6 +456,14 @@ internal static class UiLayoutHarness
             Property(account, "UserName", i == 1 ? "long_username_for_layout_test" : "mock-user-" + (i + 1));
             Property(account, "CharacterSlot", i % 15 + 1);
             Property(account, "ResumeCtrl", false); Property(account, "ResumeAlt", true);
+            Property(account, "WeightEnabled", true);
+            Property(account, "SmartTeleportEnabled", i == 0);
+            Property(account, "SmartTeleportIdleSeconds", i == 0 ? 75 : 60);
+            if (i == 0)
+            {
+                Property(account, "SmartTeleportKey", (int)Keys.F5);
+                Property(account, "SmartTeleportCtrl", true);
+            }
             catalog.Add(account);
         }
         Call(recovery, "SynchronizeSupervisorAccountsFromCatalog");
