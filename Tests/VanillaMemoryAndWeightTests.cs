@@ -102,9 +102,9 @@ namespace Vanilla.Diagnostics.Tests
 
         private static void CartWeightMappings()
         {
-            string json = "{"SchemaVersion":1,"ProcessName":"Vanilla MMO.exe","Fields":{"
-                + ""CurrentCartWeight":{"Module":"Vanilla MMO.exe","Address":"0x200","Encoding":"UInt32"},"
-                + ""MaxCartWeight":{"Module":"Vanilla MMO.exe","Address":"0x204","Encoding":"UInt32"}}}";
+            string json = "{\"SchemaVersion\":1,\"ProcessName\":\"Vanilla MMO.exe\",\"Fields\":{"
+                + "\"CurrentCartWeight\":{\"Module\":\"Vanilla MMO.exe\",\"Address\":\"0x200\",\"Encoding\":\"UInt32\"},"
+                + "\"MaxCartWeight\":{\"Module\":\"Vanilla MMO.exe\",\"Address\":\"0x204\",\"Encoding\":\"UInt32\"}}}";
             VanillaMemoryMap map = VanillaMemoryMap.Parse(json);
             if (!map.Fields.ContainsKey(VanillaField.CurrentCartWeight) || !map.Fields.ContainsKey(VanillaField.MaxCartWeight))
                 throw new Exception("Cart weight fields were not retained by the memory map.");
