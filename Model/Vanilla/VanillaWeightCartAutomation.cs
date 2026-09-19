@@ -256,7 +256,7 @@ namespace _4RTools.Model.Vanilla
                             ThrowIfCancelled(cancelled);
                             uint? pendingWeightBefore;
                             Point sourcePoint;
-                            if (!TryDragNextDetectedItem(token, input, inventory, cart, categoryName, cancelled, activity,
+                            if (!TryDragNextDetectedItem(token, input, inventory, cart, categoryName, moved, cancelled, activity,
                                 out sourcePoint, out pendingWeightBefore))
                             {
                                 activity(token.Account.Label + ": weight maintenance: " + categoryName
@@ -654,7 +654,7 @@ namespace _4RTools.Model.Vanilla
         }
 
         private bool TryDragNextDetectedItem(VanillaWeightMaintenanceToken token, VanillaForegroundInput input,
-            Rectangle inventory, Rectangle cart, string categoryName, Func<bool> cancelled, System.Action<string> report,
+            Rectangle inventory, Rectangle cart, string categoryName, int transferSequence, Func<bool> cancelled, System.Action<string> report,
             out Point sourcePoint, out uint? weightBefore)
         {
             sourcePoint = Point.Empty;
@@ -686,7 +686,7 @@ namespace _4RTools.Model.Vanilla
                         if (occupiedStable >= 2)
                         {
                             VanillaUiSlotGrid cartGrid = VanillaInventoryVision.DetectSlotGrid(frame, cart);
-                            Point destination = VanillaInventoryVision.CartDropPoint(cartGrid, first.Center, sample);
+                            Point destination = VanillaInventoryVision.CartDropPoint(cartGrid, transferSequence);
                             sourcePoint = first.Center;
                             weightBefore = CurrentWeight(token.ProcessId);
                             report(categoryName + " first slot confirmed occupied on two fresh captures; dragging it to a safe detected Cart interior point.");
@@ -1043,7 +1043,7 @@ namespace _4RTools.Model.Vanilla
             };
         }
 
-        internal static Point CartDropPoint(VanillaUiSlotGrid grid, Point source, int sequence)
+        internal static Point CartDropPoint(VanillaUiSlotGrid grid, int sequence)
         {
             if (grid == null || grid.Columns == null || grid.Columns.Length == 0 || grid.Rows == null || grid.Rows.Length == 0)
                 throw new InvalidOperationException("Detected Cart grid is empty.");
