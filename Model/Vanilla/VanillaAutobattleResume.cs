@@ -428,7 +428,17 @@ namespace _4RTools.Model.Vanilla
                     };
                     await verifier.VerifyAsync(pid, read, input.Activate,
                         () => input.ChordInVerifiedForeground(account.ResumeCtrl, account.ResumeAlt, account.ResumeShift,
-                            (Keys)account.ResumeKey), cancelled, () => clock.Elapsed, () => DateTimeOffset.UtcNow,
+                            (Keys)account.ResumeKey),
+                        attempt =>
+                        {
+                            string detail;
+                            bool confirmed = VanillaVerifiedTeleportAction.TryExecute(pid, account, cancelled,
+                                "autobattle-recovery-" + attempt, out detail);
+                            progress("Teleport recovery " + attempt + "/" + VanillaAutobattleResumeVerifier.MaximumAttempts
+                                + ": " + detail);
+                            return confirmed;
+                        },
+                        cancelled, () => clock.Elapsed, () => DateTimeOffset.UtcNow,
                         milliseconds => Task.Delay(milliseconds), progress).ConfigureAwait(false);
                     lock (gate)
                     {
