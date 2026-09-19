@@ -54,6 +54,7 @@ internal static class UiLayoutHarness
                 object recovery = Field(main, "integratedReconnectView");
                 Check(recovery != null, "Production Recovery form was not embedded by Container startup.");
                 CheckWorkspacePolicy(main, recovery);
+                CheckWeightCartHotkeys(main);
                 SeedFleet(main);
                 RunCase(main, recovery, 1920, 1020, 2, 1F, false);
                 RunCase(main, recovery, 1920, 1020, 4, 1F, false);
@@ -108,6 +109,29 @@ internal static class UiLayoutHarness
         Check(items.Contains("Smart Teleport now (selected)"), "TESTS menu is missing manual Smart Teleport.");
         Check(items.Contains("Weight/Cart clean now (selected)"), "TESTS menu is missing manual Weight/Cart cleaning.");
         report.AppendLine("CASE workspace policy: Automation tab removed; 180s restart default; manual Smart Teleport and Weight/Cart TESTS actions present.");
+    }
+
+    private static void CheckWeightCartHotkeys(Form main)
+    {
+        caseNumber++;
+        object service = Field(main, "integratedWeightAlertService");
+        Type panelType = app.GetType("_4RTools.Model.Vanilla.VanillaWeightAlertsPanel", true);
+        using (var host = new Form { ClientSize = new Size(1180, 720), StartPosition = FormStartPosition.Manual, Location = Point.Empty })
+        using (var panel = (Control)Activator.CreateInstance(panelType, new[] { service }))
+        {
+            panel.Dock = DockStyle.Fill;
+            host.Controls.Add(panel);
+            host.Show(); Pump();
+            TextBox stop = (TextBox)Field(panel, "autobattleStopHotkey");
+            TextBox inventory = (TextBox)Field(panel, "inventoryHotkey");
+            TextBox cart = (TextBox)Field(panel, "cartHotkey");
+            Check(stop.Text == "Alt+3", "Weight Autobattle STOP hotkey must default to Alt+3.");
+            Check(inventory.Text == "Alt+E" && cart.Text == "Alt+W", "Weight Inventory/Cart defaults changed.");
+            Check(FullyVisible(stop, host), "Weight Autobattle STOP hotkey field is clipped.");
+            SaveScreenshot(host, Path.Combine(output, "23-weight-cart-hotkeys.png"));
+            host.Close();
+        }
+        report.AppendLine("CASE 23 Weight/Cart hotkeys: dedicated Autobattle STOP visible as Alt+3; Inventory Alt+E; Cart Alt+W.");
     }
 
     private static void CheckCharacterDiscovery(Form main, object recovery)
