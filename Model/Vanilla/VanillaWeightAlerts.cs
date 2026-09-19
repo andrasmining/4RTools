@@ -346,6 +346,9 @@ namespace _4RTools.Model.Vanilla
                 }
             }
 
+            // Notification can still be useful with Cart automation disabled, but changing
+            // Autobattle state remains governed by the global Auto Cart switch.
+            if (!current.AutoCartEnabled) return;
             if (!observation.Percent.HasValue
                 || observation.Percent.Value < VanillaWeightCartAutomation.FarmingDoneCarryPercent)
                 return;
