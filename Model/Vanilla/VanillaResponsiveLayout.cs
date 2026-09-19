@@ -291,7 +291,10 @@ namespace _4RTools.Model.Vanilla
                 default: standard = 60; break;
             }
             int textWidth = TextRenderer.MeasureText(column.HeaderText, accounts.Font, Size.Empty, TextFormatFlags.NoPadding).Width + 14;
-            return Math.Max(textWidth, (int)Math.Ceiling(standard * Font.SizeInPoints / 9F));
+            // Header measurement already reflects the current enlarged-text font. Scaling the
+            // baseline minimum a second time over-expands every compact column and creates an
+            // unnecessary horizontal scrollbar at 150% text. Cell tooltips preserve long values.
+            return Math.Max(textWidth, standard);
         }
 
         private void ResizeAccountColumns()
