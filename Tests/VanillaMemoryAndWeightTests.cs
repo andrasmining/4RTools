@@ -124,6 +124,12 @@ namespace Vanilla.Diagnostics.Tests
             if (VanillaWeightCartAutomation.PrecisionThresholdPercent != 95m
                 || VanillaWeightCartAutomation.FarmingDoneCarryPercent != 50m)
                 throw new Exception("Cart precision or farming completion threshold changed unexpectedly.");
+            if (VanillaWeightCartAutomation.RequiresPrecisionFill(94.999m)
+                || !VanillaWeightCartAutomation.RequiresPrecisionFill(95m)
+                || !VanillaWeightCartAutomation.RequiresPrecisionFill(100m))
+                throw new Exception("Cart precision filling must start exactly at 95%.");
+            if (VanillaWeightAlertService.PrecisionCartRetrySeconds != 60)
+                throw new Exception("Near-full Cart retry cadence changed unexpectedly.");
         }
 
         private static void WeightThresholds()
