@@ -193,10 +193,19 @@ automatic resume hotkey. Manual TESTS -> Resume hotkey remains an explicit diagn
 
 After a restarted/relogged client reaches the expected username + character with
 fresh verified X/Y/map/living HP, wait the configured post-login settle (currently
-10 seconds), then call the exact same shared ResumeHotkey verifier used by diagnostics.
-It may send at most three configured hotkeys, each followed by its own 10-second fresh
-X/Y observation window; stop immediately when X or Y movement is verified.
-Missing/unverified/stale state is not zero and is not movement.
+10 seconds), then run the shared bounded movement-recovery verifier. Each of at most
+three cycles sends the configured Autobattle/Resume hotkey, observes fresh X/Y for
+up to 10 seconds, and only if the character is still stationary attempts the saved
+verified Smart Teleport flow; after that teleport attempt, observe X/Y for up to
+another 10 seconds. Stop immediately on any verified X or Y movement: once movement
+is seen, do not teleport, do not continue the current 10-second wait, and do not send
+another recovery input. Smart Teleport still authorizes Enter only after its expected
+warp popup is positively detected and cleared. A missing/unconfigured teleport hotkey
+means that phase is skipped safely, never replaced by blind input. After all three
+input cycles, continue passive X/Y observation until a hard 180-second recovery
+deadline; only then may ordinary restart/relogin escalation begin for continued
+stationarity. Missing/unverified/stale state is not zero and is not movement; transient
+Loading after a verified warp authorizes no new input until fresh gameplay state returns.
 
 During normal Online supervision, Smart Teleport is the first stationary self-heal.
 Do not send steady-state Autobattle wakeup hotkeys. Track fresh verified X/Y only.
@@ -217,7 +226,7 @@ Failed close/launch/login/restart cycles retry indefinitely with exponential bac
 using the configured base delay, doubling to a maximum one-hour interval. Do not impose
 a finite client-restart terminal budget. Retries continue until verified recovery or
 explicit STOP/configuration/client replacement. Every replacement again uses the
-post-login settle and shared three-hotkey movement verifier.
+post-login settle and shared three-cycle Autobattle/teleport movement verifier with the 180-second recovery deadline.
 
 ## Terminal dialogs and sequential replacement
 
