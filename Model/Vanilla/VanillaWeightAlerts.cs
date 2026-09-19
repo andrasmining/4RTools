@@ -305,6 +305,7 @@ namespace _4RTools.Model.Vanilla
                     state.DoneNotified = false;
                     state.FarmingDone = false;
                     state.CompletionStopping = false;
+                    state.NextMilestoneMailAt = DateTimeOffset.MinValue;
                     return;
                 }
             }
@@ -346,17 +347,28 @@ namespace _4RTools.Model.Vanilla
                 }
             }
 
-            // Notification can still be useful with Cart automation disabled, but changing
-            // Autobattle state remains governed by the global Auto Cart switch.
-            if (!current.AutoCartEnabled) return;
             if (!observation.Percent.HasValue
                 || observation.Percent.Value < VanillaWeightCartAutomation.FarmingDoneCarryPercent)
                 return;
 
+            bool alreadyDone;
+            lock (gate) alreadyDone = state.FarmingDone;
+            alreadyDone = alreadyDone || supervisor.IsWeightCompletedHold(accountId);
+            if (alreadyDone)
+            {
+                lock (gate) state.FarmingDone = true;
+                if (current.Enabled) TrySendDoneMail(current, observation, accountId, state);
+                return;
+            }
+
+            // Notification can still be useful with Cart automation disabled, but changing
+            // Autobattle state remains governed by the global Auto Cart switch.
+            if (!current.AutoCartEnabled) return;
+
             bool startStop;
             lock (gate)
             {
-                startStop = !state.FarmingDone && !state.CompletionStopping;
+                startStop = !state.CompletionStopping;
                 if (startStop) state.CompletionStopping = true;
             }
             if (!startStop) return;
@@ -369,46 +381,46 @@ namespace _4RTools.Model.Vanilla
                         text => SetStatus(text));
                     if (!stopped) return;
                     lock (gate) state.FarmingDone = true;
-
-                    if (current.Enabled)
-                    {
-                        bool sendDone;
-                        lock (gate) sendDone = !state.DoneNotified && DateTimeOffset.UtcNow >= state.NextMilestoneMailAt;
-                        if (sendDone)
-                        {
-                            try
-                            {
-                                SendMail(current, "DONE: " + observation.CharacterName,
-                                    "DONE" + Environment.NewLine
-                                    + "Character: " + observation.CharacterName + Environment.NewLine
-                                    + "Cart: " + observation.CurrentCartWeight + " / " + observation.MaxCartWeight + " (100%)" + Environment.NewLine
-                                    + "Carried weight: " + observation.CurrentWeight + " / " + observation.MaxWeight + " ("
-                                    + observation.Percent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%)" + Environment.NewLine
-                                    + "Autobattle: OFF" + Environment.NewLine
-                                    + "Observed: " + DateTimeOffset.Now.ToString("u", CultureInfo.InvariantCulture));
-                                lock (gate)
-                                {
-                                    state.DoneNotified = true;
-                                    state.NextMilestoneMailAt = DateTimeOffset.MinValue;
-                                }
-                                VanillaDebugLog.Write("WEIGHT", "event=farming-done-email-sent accountId=" + accountId
-                                    + " pid=" + observation.ProcessId + " character='" + observation.CharacterName + "'.");
-                                SetStatus("DONE notification sent for " + observation.CharacterName + ".");
-                            }
-                            catch (Exception ex)
-                            {
-                                lock (gate) state.NextMilestoneMailAt = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
-                                VanillaDebugLog.Write("WEIGHT", "event=farming-done-email-failed accountId=" + accountId
-                                    + " pid=" + observation.ProcessId + " reason='" + ex.Message + "'.");
-                            }
-                        }
-                    }
+                    if (current.Enabled) TrySendDoneMail(current, observation, accountId, state);
                 }
                 finally
                 {
                     lock (gate) state.CompletionStopping = false;
                 }
             });
+        }
+
+        private void TrySendDoneMail(VanillaWeightAlertSettings current, VanillaWeightObservation observation,
+            string accountId, AlertState state)
+        {
+            bool sendDone;
+            lock (gate) sendDone = !state.DoneNotified && DateTimeOffset.UtcNow >= state.NextMilestoneMailAt;
+            if (!sendDone) return;
+            try
+            {
+                SendMail(current, "DONE: " + observation.CharacterName,
+                    "DONE" + Environment.NewLine
+                    + "Character: " + observation.CharacterName + Environment.NewLine
+                    + "Cart: " + observation.CurrentCartWeight + " / " + observation.MaxCartWeight + " (100%)" + Environment.NewLine
+                    + "Carried weight: " + observation.CurrentWeight + " / " + observation.MaxWeight + " ("
+                    + observation.Percent.Value.ToString("0.0", CultureInfo.InvariantCulture) + "%)" + Environment.NewLine
+                    + "Autobattle: OFF" + Environment.NewLine
+                    + "Observed: " + DateTimeOffset.Now.ToString("u", CultureInfo.InvariantCulture));
+                lock (gate)
+                {
+                    state.DoneNotified = true;
+                    state.NextMilestoneMailAt = DateTimeOffset.MinValue;
+                }
+                VanillaDebugLog.Write("WEIGHT", "event=farming-done-email-sent accountId=" + accountId
+                    + " pid=" + observation.ProcessId + " character='" + observation.CharacterName + "'.");
+                SetStatus("DONE notification sent for " + observation.CharacterName + ".");
+            }
+            catch (Exception ex)
+            {
+                lock (gate) state.NextMilestoneMailAt = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
+                VanillaDebugLog.Write("WEIGHT", "event=farming-done-email-failed accountId=" + accountId
+                    + " pid=" + observation.ProcessId + " reason='" + ex.Message + "'.");
+            }
         }
 
         private void ProcessAutoCart(VanillaWeightAlertSettings current, VanillaWeightObservation observation)
