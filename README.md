@@ -33,8 +33,9 @@ Smart Teleport is configured directly per character in Recovery & relog. Debug c
 update controls and version status stay on the right.
 
 Any number of account profiles can be saved, with at most **two enabled clients**
-at once. The character table starts with **Enabled, Weight, Smart TP, TP sec,
-TP hotkey**, so each row's automation state is visible immediately. Weight is
+at once. The **Characters / Log divider is draggable** in Recovery & relog, so the Log can be widened
+temporarily without changing the default responsive layout. The character table starts with
+**Enabled, Weight, Smart TP, TP sec, TP hotkey**, so each row's automation state is visible immediately. Weight is
 only an on/off indicator there; detailed Weight/Cart settings stay on the Weight
 tab. Recovery settings auto-save. Proxy selection belongs to each account,
 including cold startup, recovery and diagnostic input. Startup and recovery are
@@ -132,13 +133,16 @@ not treated as selection: the active category is identified structurally because
 the right and merges into the Inventory body, while inactive tabs keep a closed vertical right
 border. Category clicks target only detected tab bounds; if the first click is not positively
 confirmed, 4RTools re-detects the rail and retries through a small deterministic set of safe interior
-points while polling fresh UI state. A category
-is advanced only after **two fresh slot-grid captures** both show it empty. Cart destinations are
-positively detected empty slots—there is no calculated/fallback drop position. Stack `Enter` is
-sent only after a quantity dialog is positively recognized; single-quantity transfers do not receive
-Enter. Every major Cart step and each bounded category-click attempt is written live to the Recovery
-log and global debug log. If a
-drag makes no verifiable progress, no empty Cart slot is detected, or UI ownership becomes uncertain,
+points while polling fresh UI state. Inside each category, only the **first inventory slot** is
+authoritative because Vanilla compacts items to the front. 4RTools compares that first slot with a
+freshly detected empty-slot reference and requires two consecutive **Occupied** captures before a
+drag or two consecutive **Empty** captures before advancing. Cart drops do not need an empty
+destination slot; they rotate deterministically through safe points inside the **detected Cart item
+body**. There is no arbitrary screen-coordinate fallback. Stack `Enter` is sent only after a quantity
+dialog is positively recognized; single-quantity transfers do not receive Enter. Every major Cart
+step and each bounded category-click attempt is written live to the Recovery log and global debug
+log. If a drag makes no verifiable progress, first-slot evidence stays ambiguous, or UI ownership
+becomes uncertain,
 4RTools stops input and holds only that character with Autobattle OFF for manual Cart emptying. The
 hold survives unrelated settings and supervisor STOP/START changes and is removed only by the
 explicit manual-hold clear action. Healthy siblings continue normally.
