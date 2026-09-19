@@ -1,0 +1,86 @@
+name: Weight stop hotkey validation
+
+on:
+  push:
+    branches: [fix/weight-autobattle-stop-hotkey]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: weight-stop-hotkey-validation
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Restore NuGet packages
+        shell: powershell
+        run: |
+          nuget restore 4RTools.sln -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+
+      - name: Validate Weight stop/resume source policy
+        shell: powershell
+        run: |
+          $version = Get-Content 'Properties/AssemblyInfo.cs' -Raw
+          if ($version -notmatch 'AssemblyFileVersion\("0\.6\.51\.0"\)') { throw 'Expected 0.6.51 release version.' }
+          $settings = Get-Content 'Model/Vanilla/VanillaWeightAlerts.cs' -Raw
+          if ($settings -notmatch 'AutobattleStopKey.*Keys\.D3' -or
+              $settings -notmatch 'AutobattleStopAlt.*true') {
+            throw 'Weight Autobattle STOP does not default to Alt+3.'
+          }
+          $cart = Get-Content 'Model/Vanilla/VanillaWeightCartAutomation.cs' -Raw
+          if ($cart -notmatch 'input\.Chord\(settings\.AutobattleStopCtrl, settings\.AutobattleStopAlt') {
+            throw 'Cart maintenance does not send the dedicated Weight STOP hotkey.'
+          }
+          if ($cart -notmatch 'ChordInVerifiedForeground\(token\.Account\.ResumeCtrl, token\.Account\.ResumeAlt') {
+            throw 'Cart maintenance no longer resumes through the character Recovery hotkey.'
+          }
+          $panel = Get-Content 'Model/Vanilla/VanillaWeightAlertsPanel.cs' -Raw
+          if ($panel -notmatch 'Autobattle STOP' -or $panel -notmatch 'autobattleStopHotkey') {
+            throw 'Weight UI does not expose the Autobattle STOP hotkey.'
+          }
+
+      - name: Validate shipped Vanilla build profiles
+        shell: powershell
+        run: '& .\scripts\validate-vanilla-build-profiles.ps1'
+
+      - name: Build and test Debug
+        shell: powershell
+        run: '& .\scripts\build.ps1 -Configuration Debug -VanillaRelease'
+
+      - name: Build, test, package and smoke-test Release
+        shell: powershell
+        run: '& .\scripts\build-release.ps1 -Version 0.6.51'
+
+      - name: Native test-owned process recovery checks
+        shell: powershell
+        run: '& .\scripts\test-recovery-native.ps1'
+
+      - name: Render and validate mock-data UI
+        shell: powershell
+        run: '& .\scripts\test-ui-layout.ps1'
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weight-stop-validation-${{ github.sha }}
+          path: |
+            dist/ui-layout/*.png
+            dist/ui-layout/*.txt
+            dist/native-recovery.log
+            dist/4RTools-Vanilla-v0.6.51-portable.zip
+            dist/4RTools-Vanilla-v0.6.51-portable.zip.sha256
+          if-no-files-found: warn
+          retention-days: 7
