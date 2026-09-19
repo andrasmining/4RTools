@@ -117,11 +117,11 @@ When the timeout expires, Smart Teleport acquires the same serialized per-client
 
 The **Weight** tab uses the verified read-only carried/max-weight fields. Each character row has its own **Weight** switch in Recovery & relog; the shared Weight-tab policy applies only to rows whose Weight switch is enabled. It can keep the existing
 optional e-mail warning and can also trigger UI-only Cart maintenance at a configurable weight
-percentage (50% by default). Use, Equip and Etc categories are independently selectable; Inventory
-and Cart hotkeys are configurable. The automation pauses the configured character Autobattle
-toggle, detects the Inventory/Cart panels and slot geometry from the current client image, performs
-ordinary drag-and-drop, then resumes through the same verified ResumeHotkey/X-Y movement routine
-and minimizes.
+percentage (50% by default). Use, Equip and Etc categories are independently selectable. The Weight
+tab has a dedicated configurable **Autobattle STOP** hotkey (**Alt+3 by default**) plus Inventory
+and Cart hotkeys. Cart maintenance sends that STOP command before any Inventory/Cart UI work; it
+does **not** reuse the character ResumeHotkey. After cleanup, Autobattle is started again through
+the character's existing verified Recovery ResumeHotkey/X-Y movement routine and then minimized.
 
 Inventory contents are never read or modified through game memory. Stack `Enter` is sent only after
 a quantity dialog is positively recognized; single-quantity transfers do not receive Enter. If a
