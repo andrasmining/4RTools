@@ -246,6 +246,18 @@ namespace Vanilla.Diagnostics.Tests
                 if (occupiedObservation.State != VanillaInventorySlotState.Occupied)
                     throw new Exception("Occupied first inventory slot was not positively recognized.");
 
+                // Repaint the exact first slot as empty to reproduce the live transition after
+                // the final item was moved out of a category.
+                using (Graphics g = Graphics.FromImage(frame))
+                {
+                    g.FillRectangle(Brushes.White, columns[0] - 22, rows[0] - 15, 44, 30);
+                    using (var empty = new SolidBrush(Color.FromArgb(205, 216, 232)))
+                        g.FillEllipse(empty, columns[0] - 18, rows[0] - 10, 36, 20);
+                }
+                VanillaInventoryFirstSlotObservation emptiedAgain = VanillaInventoryVision.ObserveFirstSlot(frame, grid);
+                if (emptiedAgain.State != VanillaInventorySlotState.Empty)
+                    throw new Exception("First slot did not return to Empty after the final item disappeared.");
+
                 Point[] destinations = Enumerable.Range(0, 4)
                     .Select(i => VanillaInventoryVision.CartDropPoint(grid, i)).ToArray();
                 if (destinations.Distinct().Count() < 3)
