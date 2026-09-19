@@ -19,6 +19,8 @@ namespace Vanilla.Diagnostics.Tests
             failed += Test("Memory finder copies all candidates with module offsets", CandidateClipboard);
             failed += Test("Configured launcher resolves adjacent Vanilla executable", ConfiguredExecutableResolution);
             failed += Test("Weight fields accept UInt32 memory mappings", WeightMappings);
+            failed += Test("Cart weight fields accept UInt32 memory mappings", CartWeightMappings);
+            failed += Test("Known farming loot weights support capacity-safe Cart fill", CartCapacityRules);
             failed += Test("Weight alert thresholds enforce re-arm hysteresis", WeightThresholds);
             failed += Test("Enabled weight e-mail alerts require SMTP transport", WeightMailValidation);
             failed += Test("Weight cart settings validate independent UI automation", WeightCartSettings);
@@ -96,6 +98,30 @@ namespace Vanilla.Diagnostics.Tests
             VanillaMemoryMap map = VanillaMemoryMap.Parse(json);
             if (!map.Fields.ContainsKey(VanillaField.CurrentWeight) || !map.Fields.ContainsKey(VanillaField.MaxWeight))
                 throw new Exception("Weight fields were not retained by the memory map.");
+        }
+
+        private static void CartWeightMappings()
+        {
+            string json = "{"SchemaVersion":1,"ProcessName":"Vanilla MMO.exe","Fields":{"
+                + ""CurrentCartWeight":{"Module":"Vanilla MMO.exe","Address":"0x200","Encoding":"UInt32"},"
+                + ""MaxCartWeight":{"Module":"Vanilla MMO.exe","Address":"0x204","Encoding":"UInt32"}}}";
+            VanillaMemoryMap map = VanillaMemoryMap.Parse(json);
+            if (!map.Fields.ContainsKey(VanillaField.CurrentCartWeight) || !map.Fields.ContainsKey(VanillaField.MaxCartWeight))
+                throw new Exception("Cart weight fields were not retained by the memory map.");
+        }
+
+        private static void CartCapacityRules()
+        {
+            Equal(3L, VanillaWeightCartAutomation.KnownItemUnitWeightForCategory(0).Value, "Mastela Fruit unit weight");
+            Equal(1L, VanillaWeightCartAutomation.KnownItemUnitWeightForCategory(2).Value, "Peco Feather unit weight");
+            if (VanillaWeightCartAutomation.KnownItemUnitWeightForCategory(1).HasValue)
+                throw new Exception("Equip must remain unknown until an item weight is explicitly verified.");
+            Equal(16L, VanillaWeightCartAutomation.CapacitySafeQuantity(9950, 10000, 3), "Mastela capacity quantity");
+            Equal(50L, VanillaWeightCartAutomation.CapacitySafeQuantity(9950, 10000, 1), "Peco Feather capacity quantity");
+            Equal(0L, VanillaWeightCartAutomation.CapacitySafeQuantity(10000, 10000, 1), "full Cart quantity");
+            if (VanillaWeightCartAutomation.PrecisionThresholdPercent != 95m
+                || VanillaWeightCartAutomation.FarmingDoneCarryPercent != 50m)
+                throw new Exception("Cart precision or farming completion threshold changed unexpectedly.");
         }
 
         private static void WeightThresholds()
