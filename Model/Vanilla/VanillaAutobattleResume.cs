@@ -501,7 +501,7 @@ namespace _4RTools.Model.Vanilla
                 SetStage(runtime, VanillaReconnectStage.WaitingForClient,
                     "Restart queued behind " + owner.Account.Label + "; no steady-state hotkey will be sent");
                 Log(runtime.Account.Label + ": restart is queued behind " + owner.Account.Label
-                    + "; the failed restart-only hotkey sequence will not be repeated on the existing client.");
+                    + "; the failed 3-cycle autoattack/teleport recovery will not be repeated on the existing client.");
                 return;
             }
             int pid = runtime.ProcessId.GetValueOrDefault();
@@ -539,7 +539,7 @@ namespace _4RTools.Model.Vanilla
             runtime.RecoveryOwned = true;
             runtime.ResumeSent = false;
             string preparation = (string.IsNullOrWhiteSpace(trigger) ? "" : trigger + " ")
-                + "Preparing autobattle hotkey verification 1/3";
+                + "Preparing autoattack + teleport recovery cycle 1/3";
             SetStage(runtime, VanillaReconnectStage.VerifyingAutobattle, preparation);
             Log(account.Label + ": " + preparation);
             // The continuation is owned by this Task, never an async-void ThreadPool callback.
