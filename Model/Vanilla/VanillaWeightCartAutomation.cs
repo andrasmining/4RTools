@@ -344,7 +344,7 @@ namespace _4RTools.Model.Vanilla
                     if (settings.TransferEtcItems) categories.Add(2);
                     foreach (int category in categories)
                     {
-                        if (cartFull || cartSafetyStop) break;
+                        if (cartFull) break;
                         ThrowIfCancelled(cancelled);
                         string categoryName = CategoryName(category);
                         VanillaCartItemRule itemRule = KnownItemRule(category);
@@ -377,7 +377,7 @@ namespace _4RTools.Model.Vanilla
                                 activity(token.Account.Label + ": weight maintenance: Cart is "
                                     + cartBefore.Percent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
                                     + "% full (>95%). " + categoryName
-                                    + " has no verified unit-weight rule, so blind full-stack transfer stops here.");
+                                    + " has no verified unit-weight rule, so this category is skipped and no blind full-stack transfer is sent.");
                                 break;
                             }
                             if (precision && cartBefore.Remaining < itemRule.UnitWeight)
@@ -385,7 +385,7 @@ namespace _4RTools.Model.Vanilla
                                 cartSafetyStop = true;
                                 activity(token.Account.Label + ": weight maintenance: only " + cartBefore.Remaining
                                     + " Cart weight remains, less than one " + itemRule.ItemName + " (" + itemRule.UnitWeight
-                                    + "); no unsafe transfer sent.");
+                                    + "); this category is skipped so a lighter known category can still fill the remainder.");
                                 break;
                             }
 
