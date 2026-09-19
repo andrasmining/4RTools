@@ -79,10 +79,12 @@ After cleanup it starts Autobattle again through the existing verified per-chara
 ResumeHotkey/X-Y path and minimizes.
 
 Use/Equip/Etc category tabs are detected from the live Inventory panel, slot grid and
-separator structure; no fixed or percentage category coordinates are used. A selected
-tab is positively re-detected after the click. 4RTools advances only after two fresh
-grid captures both show that category empty. Cart drops require a detected empty Cart
-slot; there is no arbitrary fallback drop point. For stack transfers Enter is pressed
+separator structure; no fixed or percentage category coordinates are used. The detected
+blue selected-tab fill refines the clickable rail band when available. If a click is not
+positively confirmed, 4RTools re-detects the rail and retries through a bounded
+deterministic set of safe interior points while polling fresh visual state. It advances
+only after two fresh grid captures both show that category empty. Cart drops require a
+detected empty Cart slot; there is no arbitrary fallback drop point. For stack transfers Enter is pressed
 only after a quantity dialog is positively detected. A quantity-one item has no dialog
 and receives no Enter. Major Cart steps are visible in the Recovery log and global
 debug log. If the UI cannot be identified safely, no empty Cart slot exists, the Cart
