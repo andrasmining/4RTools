@@ -127,12 +127,15 @@ does **not** reuse the character ResumeHotkey. After cleanup, Autobattle is star
 the character's existing verified Recovery ResumeHotkey/X-Y movement routine and then minimized.
 
 Inventory contents are never read or modified through game memory. The Inventory **Use / Equip / Etc**
-tab rail is detected from the live panel/slot/separator structure; category clicks target those
-detected tab bounds and the selected tab is positively re-detected before any drag. A category is
-advanced only after **two fresh slot-grid captures** both show it empty. Cart destinations are
+tab rail is detected from the live panel/slot/separator structure. The detected blue selected-tab
+fill is used to refine the clickable rail band when available. Category clicks target only detected
+tab bounds; if the first click is not positively confirmed, 4RTools re-detects the rail and retries
+through a small deterministic set of safe interior points while polling fresh UI state. A category
+is advanced only after **two fresh slot-grid captures** both show it empty. Cart destinations are
 positively detected empty slots—there is no calculated/fallback drop position. Stack `Enter` is
 sent only after a quantity dialog is positively recognized; single-quantity transfers do not receive
-Enter. Every major Cart step is also written live to the Recovery log and global debug log. If a
+Enter. Every major Cart step and each bounded category-click attempt is written live to the Recovery
+log and global debug log. If a
 drag makes no verifiable progress, no empty Cart slot is detected, or UI ownership becomes uncertain,
 4RTools stops input and holds only that character with Autobattle OFF for manual Cart emptying. The
 hold survives unrelated settings and supervisor STOP/START changes and is removed only by the
