@@ -879,12 +879,28 @@ namespace _4RTools.Model.Vanilla
                     throw new InvalidOperationException("Detected category-tab boundaries are incoherent.");
 
             // Use only separator runs that agree with the recovered four-tab lattice to refine the
-            // clickable rail width. This remains derived from observed UI pixels at the current DPI.
+            // rail width, then prefer the actual selected blue-fill bounds when present. The latter
+            // is the strongest live evidence of the clickable horizontal band because every tab uses
+            // the same rail width even when separators are shorter than the interactive tab surface.
             CategoryRuleLine[] matched = rules.Where(rule =>
                 boundaries.Any(boundary => Math.Abs(rule.Y - boundary) <= bestTolerance)).ToArray();
             int clickLeft = matched.Length == 0 ? railSearch.Left : Math.Max(railSearch.Left, matched.Min(rule => rule.Left));
             int clickRight = matched.Length == 0 ? railSearch.Right - 1 : Math.Min(railSearch.Right - 1, matched.Max(rule => rule.Right));
             if (clickRight - clickLeft < 8) { clickLeft = railSearch.Left; clickRight = railSearch.Right - 1; }
+
+            Rectangle categoryBand = Rectangle.FromLTRB(railSearch.Left,
+                Math.Max(railSearch.Top, boundaries[0]), railSearch.Right,
+                Math.Min(railSearch.Bottom, boundaries[4] + 1));
+            Rectangle selectedFill = FindCategorySelectedFillBounds(pixels, categoryBand);
+            if (!selectedFill.IsEmpty && selectedFill.Width >= 8
+                && selectedFill.Height >= Math.Max(8, (int)Math.Round(bestStep * 0.45)))
+            {
+                int inset = Math.Max(1, selectedFill.Width / 12);
+                clickLeft = Math.Max(railSearch.Left, selectedFill.Left + inset);
+                clickRight = Math.Min(railSearch.Right - 1, selectedFill.Right - inset - 1);
+            }
+            if (clickRight - clickLeft < 6)
+                throw new InvalidOperationException("Detected category rail has no safe interior click band.");
 
             var tabs = new Rectangle[4];
             var scores = new double[4];
@@ -903,7 +919,14 @@ namespace _4RTools.Model.Vanilla
             double second = scores.Where((value, index) => index != maxIndex).DefaultIfEmpty(0).Max();
             if (scores[maxIndex] >= 0.12 && scores[maxIndex] - second >= 0.06) selected = maxIndex;
 
-            return new VanillaInventoryCategoryTabs { Tabs = tabs, SelectedIndex = selected, SelectionScores = scores };
+            return new VanillaInventoryCategoryTabs
+            {
+                Tabs = tabs,
+                RailBounds = Rectangle.FromLTRB(clickLeft, boundaries[0], clickRight + 1, boundaries[4]),
+                SelectedFillBounds = selectedFill,
+                SelectedIndex = selected,
+                SelectionScores = scores
+            };
         }
 
         internal static Point? FirstOccupiedSlot(Bitmap frame, VanillaUiSlotGrid grid)
@@ -1041,6 +1064,22 @@ namespace _4RTools.Model.Vanilla
                 inRun = false;
             }
             return Math.Max(0, bestRight - bestLeft + 1);
+        }
+
+        private static Rectangle FindCategorySelectedFillBounds(PixelBuffer pixels, Rectangle area)
+        {
+            Rectangle clipped = Rectangle.Intersect(new Rectangle(0, 0, pixels.Width, pixels.Height), area);
+            int minX = int.MaxValue, minY = int.MaxValue, maxX = int.MinValue, maxY = int.MinValue, count = 0;
+            for (int y = clipped.Top; y < clipped.Bottom; y++)
+            for (int x = clipped.Left; x < clipped.Right; x++)
+            {
+                if (!pixels.At(x, y).CategorySelected) continue;
+                count++;
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+            if (count < 24 || maxX < minX || maxY < minY) return Rectangle.Empty;
+            return Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
         }
 
         private static double CategorySelectionFraction(PixelBuffer pixels, Rectangle tab)
