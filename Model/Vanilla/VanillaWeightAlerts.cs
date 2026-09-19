@@ -505,7 +505,15 @@ namespace _4RTools.Model.Vanilla
 
         public void ClearManualHolds()
         {
-            lock (gate) foreach (AlertState state in states.Values) { state.ManualHold = false; state.CartArmed = true; }
+            lock (gate) foreach (AlertState state in states.Values)
+            {
+                state.ManualHold = false;
+                state.CartArmed = true;
+                state.FarmingDone = false;
+                state.CompletionStopping = false;
+                state.CartFullNotified = false;
+                state.DoneNotified = false;
+            }
             supervisor.ClearWeightManualHolds();
             SetStatus("Weight manual holds cleared. Automatic cart maintenance can run again after the threshold is reached.");
         }
