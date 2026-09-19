@@ -162,6 +162,10 @@ namespace _4RTools.Model.Vanilla
         public uint? MaxWeight { get; internal set; }
         public decimal? Percent { get; internal set; }
         public bool Verified { get; internal set; }
+        public uint? CurrentCartWeight { get; internal set; }
+        public uint? MaxCartWeight { get; internal set; }
+        public decimal? CartPercent { get; internal set; }
+        public bool CartVerified { get; internal set; }
         public string Build { get; internal set; }
         public string Error { get; internal set; }
     }
