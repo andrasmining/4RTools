@@ -247,8 +247,12 @@ namespace _4RTools.Model.Vanilla
                     int usable = Math.Max(1, axis - responsiveSplit.SplitterWidth);
                     double ratio = wide ? responsiveWideSplitRatio : responsiveNarrowSplitRatio;
                     int desired = (int)Math.Round(usable * ratio);
-                    int minimumPrimary = wide ? Math.Min(320, Math.Max(80, usable / 3)) : Math.Min(minimumLeft, Math.Max(80, usable / 2));
-                    int minimumSecondary = wide ? Math.Min(220, Math.Max(100, usable / 4)) : Math.Min(minimumLog, Math.Max(80, usable / 4));
+                    int minimumPrimary = wide
+                        ? Math.Min(320, Math.Max(80, usable / 3))
+                        : Math.Min(minimumLeft, Math.Max(1, usable - minimumLog));
+                    int minimumSecondary = wide
+                        ? Math.Min(220, Math.Max(100, usable / 4))
+                        : Math.Min(minimumLog, Math.Max(1, usable - minimumPrimary));
                     desired = Math.Max(minimumPrimary, Math.Min(usable - minimumSecondary, desired));
                     responsiveSplit.SplitterDistance = Math.Max(1, desired);
                     responsiveSplit.Panel1MinSize = Math.Max(0, Math.Min(minimumPrimary, responsiveSplit.SplitterDistance));
