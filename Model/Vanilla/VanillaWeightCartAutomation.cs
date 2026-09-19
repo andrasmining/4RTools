@@ -15,8 +15,26 @@ namespace _4RTools.Model.Vanilla
     {
         internal bool RequiresManualIntervention;
         internal bool Deferred;
+        internal bool CartFull;
+        internal bool StoppedForCartSafety;
         internal int ItemsMoved;
         internal string Message;
+    }
+
+    internal sealed class VanillaCartWeightSample
+    {
+        internal uint Current;
+        internal uint Maximum;
+        internal decimal Percent;
+        internal uint Remaining { get { return Maximum >= Current ? Maximum - Current : 0; } }
+    }
+
+    internal sealed class VanillaCartItemRule
+    {
+        internal int Category;
+        internal string CategoryName;
+        internal string ItemName;
+        internal uint UnitWeight;
     }
 
     internal sealed class VanillaWeightMaintenanceToken
@@ -203,6 +221,9 @@ namespace _4RTools.Model.Vanilla
         private const int FirstSlotVerifySamples = 4;
         private const int TransferSettleMs = 300;
         private const int MaxTransfers = 120;
+        internal const decimal PrecisionThresholdPercent = 95m;
+        internal const decimal CartFullPercent = 100m;
+        internal const decimal FarmingDoneCarryPercent = 50m;
         private readonly VanillaFleetMonitor fleet;
         private readonly VanillaReconnectSupervisor supervisor;
 
@@ -210,6 +231,28 @@ namespace _4RTools.Model.Vanilla
         {
             this.fleet = fleet ?? throw new ArgumentNullException(nameof(fleet));
             this.supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
+        }
+
+        internal static VanillaCartItemRule KnownItemRule(int category)
+        {
+            // Current farming profile has exactly two known loot families:
+            // Use -> Mastela Fruit (3 weight), Etc -> Peco Feather (1 weight).
+            // Equip remains unknown and therefore cannot use precision filling above 95%.
+            if (category == 0) return new VanillaCartItemRule
+            {
+                Category = 0, CategoryName = "Use", ItemName = "Mastela Fruit", UnitWeight = 3
+            };
+            if (category == 2) return new VanillaCartItemRule
+            {
+                Category = 2, CategoryName = "Etc", ItemName = "Peco Feather", UnitWeight = 1
+            };
+            return null;
+        }
+
+        internal static uint? KnownItemUnitWeightForCategory(int category)
+        {
+            VanillaCartItemRule rule = KnownItemRule(category);
+            return rule == null ? (uint?)null : rule.UnitWeight;
         }
 
         internal VanillaWeightCartResult Run(int pid, VanillaWeightAlertSettings settings, System.Action<string> report,
