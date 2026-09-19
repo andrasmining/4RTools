@@ -1,28 +1,32 @@
-# 4RTools Vanilla 0.6.55
+# 4RTools Vanilla 0.6.56
 
-## Correct active Inventory tab detection
+## First-slot Weight / Cart traversal
 
-The v0.6.54 live test showed that the **Use** tab had actually been selected correctly, but 4RTools still reported **Favorite** and rejected the action.
+The v0.6.55 live run selected **Use** correctly and moved the first two Use stacks, but after the category was empty it falsely detected another item and attempted one more drag.
 
-The cause was visual semantics: Vanilla renders **Fav with a blue background even when Fav is not the active category**. Blue Fav is styling, not the selection indicator.
+The Cart walker is now intentionally simpler:
 
-The active Inventory category is now detected from the tab structure itself:
+- Vanilla compacts items to the front of each category, so **only the first Inventory slot is authoritative**.
+- The first slot is compared against the freshest visually detected empty-slot reference from the same detected grid.
+- Classification uses both pale-slot coverage and local template difference rather than the old single threshold.
+- **Two consecutive Occupied captures** are required before any drag.
+- **Two consecutive Empty captures** mean the category is complete and 4RTools advances to the next enabled tab.
+- If first-slot evidence remains ambiguous through the bounded verification window, no drag is sent and the character fails closed to manual hold.
 
-- Recover the four category tab boundaries from the detected Inventory panel and slot lattice.
-- Recover the category rail's vertical borders from repeated grayscale UI-rule pixels.
-- The **active tab is the one whose right edge is open/merged into the Inventory body**.
-- Inactive tabs retain a closed vertical right border.
-- Fav may remain blue without being classified as active.
-- The active/open-edge state must be stable enough to beat the other three tabs before it is accepted.
-- If the requested tab is already active, two fresh captures confirm it and no redundant click is sent.
-- Otherwise the existing bounded detected-tab retry path remains: up to three deterministic safe interior click points, fresh rail detection between attempts, and two positive captures before item dragging.
+Cart destination handling is also simplified. Vanilla accepts a transfer anywhere inside the Cart item body, so 4RTools no longer searches for a destination that appears empty. It rotates deterministically through safe centers of the **detected Cart grid**. This stays resolution/DPI independent and removes a second unnecessary source of visual classification failure.
 
-This exactly matches the supplied live screenshot, where **Use items are visible and Use is active while Fav remains blue**.
+The existing safeguards remain: selected-category verification, quantity-dialog-only Enter, transfer-progress verification, serialized ownership, visible Weight/Cart logging, manual hold on uncertainty, and verified Autobattle resume.
 
-All previous Cart safeguards remain: two fresh empty-grid scans before advancing categories, only positively detected empty Cart destinations, no fallback drop coordinates, visible Recovery-log progress, and fail-closed manual hold when UI state is uncertain.
+## Draggable Characters / Log divider
+
+Recovery & relog now uses a real draggable splitter between **Characters** and **Log**. The initial desktop layout remains approximately 2:1, but the divider can be dragged to widen the Log for diagnostics or give more room back to the character table. On narrow layouts the splitter becomes horizontal.
+
+Default layout validation still requires the character table to fit without an unnecessary horizontal scrollbar. If the user deliberately shrinks the character pane far below its default width, a horizontal table scrollbar is allowed.
 
 ## Validation scope and limits
 
-The regression fixture now explicitly reproduces the live appearance: **Use active + Fav blue**. It also tests other active tabs, multiple panel positions/scales, open-edge transition verification, bounded click points, Debug/Release builds, portable launch, native recovery and responsive UI validation.
+Automated coverage includes empty-versus-occupied first-slot classification, detected-reference comparison, rotating safe Cart destinations, active-tab semantics, draggable splitter behavior, Full-HD/narrow/enlarged-text layouts, Debug/Release builds, portable launch and native recovery checks.
 
-The engineering environment cannot drive the user's live Vanilla/Gepard window, so the final end-to-end confirmation remains the next VPS test. No randomized anti-detection input behavior, game-memory writes, injection, packet manipulation or Gepard bypass is used.
+No stochastic input behavior is added for anti-detection. Cart destination variation is deterministic and derived only from detected Cart geometry.
+
+The engineering environment still cannot execute the full workflow against the user's live Vanilla/Gepard client, so the exact first-slot transition after moving the final live item remains the next VPS validation boundary.
